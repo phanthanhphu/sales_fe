@@ -1,0 +1,641 @@
+// src/pages/LoginPage.jsx
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
+import {
+  Box,
+  Button,
+  IconButton,
+  InputAdornment,
+  Stack,
+  TextField,
+  Typography
+} from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import {
+  EmailOutlined,
+  LockOutlined,
+  LoginRounded,
+  Visibility,
+  VisibilityOff
+} from '@mui/icons-material';
+
+// Keep this file at: src/assets/images/background/background_login.png
+import backgroundLogin from '../assets/images/background/background_login.png';
+import { apiRawClient } from './globalApi';
+
+const LOGIN_DRAFT_EMAIL_KEY = 'loginDraftEmail';
+const LOGIN_DRAFT_PASSWORD_KEY = 'loginDraftPassword';
+
+const getSavedLoginDraft = (key) => {
+  try {
+    return sessionStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+};
+
+const saveLoginDraft = (key, value) => {
+  try {
+    sessionStorage.setItem(key, value || '');
+  } catch {
+    // Ignore storage errors. The React state will still keep the value.
+  }
+};
+
+const clearLoginDraft = () => {
+  try {
+    sessionStorage.removeItem(LOGIN_DRAFT_EMAIL_KEY);
+    sessionStorage.removeItem(LOGIN_DRAFT_PASSWORD_KEY);
+  } catch {
+    // Ignore storage errors.
+  }
+};
+
+const decodeJwtPayload = (token) => {
+  try {
+    if (!token) return null;
+
+    const base64Url = token.split('.')[1];
+    if (!base64Url) return null;
+
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      window
+        .atob(base64)
+        .split('')
+        .map((char) => `%${`00${char.charCodeAt(0).toString(16)}`.slice(-2)}`)
+        .join('')
+    );
+
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+};
+
+const isTokenExpired = (token) => {
+  const payload = decodeJwtPayload(token);
+
+  if (!payload?.exp) {
+    return false;
+  }
+
+  return payload.exp * 1000 <= Date.now();
+};
+
+const getUserIdFromUser = (user = {}) => {
+  return user?.id || user?.userId || user?._id || user?.email || user?.sub || '';
+};
+
+const getUserRole = (user = {}, fallbackRole = '') => {
+  return user?.role || user?.roles?.[0] || fallbackRole || '';
+};
+
+const normalizeRole = (value) => String(value || '').trim().toUpperCase();
+
+const normalizePermission = (value) => String(value || '').trim().toUpperCase();
+
+const isAdminRole = (role) => {
+  const normalized = normalizeRole(role);
+  return normalized === 'ADMIN' || normalized === 'ROLE_ADMIN';
+};
+
+const canManageBookingUser = (user = {}, fallbackRole = '') => {
+  const role = getUserRole(user, fallbackRole);
+
+  // Giữ dữ liệu quyền booking trong phiên đăng nhập để không làm thay đổi cấu trúc token cũ.
+  if (isAdminRole(role)) {
+    return false;
+  }
+
+  return Boolean(user?.canManageBooking)
+    || Boolean(user?.can_manage_booking)
+    || normalizePermission(user?.bookingPermission || user?.booking_permission) === 'BOOKING';
+};
+
+const getPostLoginPath = (user = {}, fallbackRole = '') => {
+  return isAdminRole(getUserRole(user, fallbackRole)) ? '/users' : '/departments';
+};
+
+const getStoredUserForRedirect = () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+    return {
+      ...user,
+      role: user?.role || localStorage.getItem('role') || '',
+      bookingPermission: user?.bookingPermission || localStorage.getItem('bookingPermission') || 'NONE',
+      canManageBooking:
+        user?.canManageBooking ??
+        user?.can_manage_booking ??
+        (localStorage.getItem('canManageBooking') === 'true')
+    };
+  } catch {
+    return {
+      role: localStorage.getItem('role') || '',
+      bookingPermission: localStorage.getItem('bookingPermission') || 'NONE',
+      canManageBooking: localStorage.getItem('canManageBooking') === 'true'
+    };
+  }
+};
+
+const clearAuthSession = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('user');
+  localStorage.removeItem('userId');
+  localStorage.removeItem('isAuthenticated');
+  localStorage.removeItem('role');
+  localStorage.removeItem('approvePermission');
+  localStorage.removeItem('canApproveNotice');
+  localStorage.removeItem('canApproveDocument');
+  localStorage.removeItem('bookingPermission');
+  localStorage.removeItem('canManageBooking');
+  localStorage.removeItem('departmentId');
+  localStorage.removeItem('departmentName');
+  localStorage.removeItem('division');
+  localStorage.removeItem('loginAt');
+};
+
+const persistAuthSession = ({ token, user, role }) => {
+  const tokenPayload = decodeJwtPayload(token) || {};
+  const safeUser = user && typeof user === 'object' ? user : {};
+
+  const mergedUser = {
+    email: tokenPayload.sub || safeUser.email || '',
+    sub: tokenPayload.sub || safeUser.sub || '',
+    role: safeUser.role || tokenPayload.role || role || '',
+    ...safeUser,
+  };
+
+  const userId = getUserIdFromUser(mergedUser) || tokenPayload.sub || '';
+  const safeRole = getUserRole(mergedUser, role || tokenPayload.role || '');
+
+  const safeDepartmentId =
+    mergedUser.departmentId ||
+    mergedUser.department?.id ||
+    mergedUser.idDepartment ||
+    '';
+
+  const safeDepartmentName =
+    mergedUser.departmentName ||
+    mergedUser.department_name ||
+    mergedUser.department?.departmentName ||
+    mergedUser.department?.name ||
+    '';
+
+  const safeDivision =
+    mergedUser.division ||
+    mergedUser.department?.division ||
+    '';
+
+  const safeApprovePermission = normalizePermission(mergedUser.approvePermission || 'NONE') || 'NONE';
+  const safeBookingPermission = normalizePermission(mergedUser.bookingPermission || 'NONE') || 'NONE';
+  const safeCanApproveNotice = Boolean(mergedUser.canApproveNotice || mergedUser.can_approve_notice);
+  const safeCanApproveDocument = Boolean(mergedUser.canApproveDocument || mergedUser.can_approve_document);
+  const safeCanManageBooking = Boolean(
+    mergedUser.canManageBooking
+      || mergedUser.can_manage_booking
+      || safeBookingPermission === 'BOOKING'
+  );
+
+  localStorage.setItem('token', token);
+  localStorage.setItem('accessToken', token);
+  localStorage.setItem('user', JSON.stringify({
+    ...mergedUser,
+    departmentId: safeDepartmentId,
+    departmentName: safeDepartmentName,
+    division: safeDivision,
+    department: {
+      ...(mergedUser.department || {}),
+      id: safeDepartmentId,
+      departmentName: safeDepartmentName,
+      name: safeDepartmentName,
+      division: safeDivision
+    },
+    approvePermission: safeApprovePermission,
+    bookingPermission: safeBookingPermission,
+    canApproveNotice: safeCanApproveNotice,
+    canApproveDocument: safeCanApproveDocument,
+    canManageBooking: safeCanManageBooking
+  }));
+  localStorage.setItem('userId', userId);
+  localStorage.setItem('isAuthenticated', 'true');
+  localStorage.setItem('role', safeRole);
+  localStorage.setItem('approvePermission', safeApprovePermission);
+  localStorage.setItem('canApproveNotice', String(safeCanApproveNotice));
+  localStorage.setItem('canApproveDocument', String(safeCanApproveDocument));
+  localStorage.setItem('bookingPermission', safeBookingPermission);
+  localStorage.setItem('canManageBooking', String(safeCanManageBooking));
+  localStorage.setItem('departmentId', safeDepartmentId);
+  localStorage.setItem('departmentName', safeDepartmentName);
+  localStorage.setItem('division', safeDivision);
+  localStorage.setItem('loginAt', new Date().toISOString());
+};
+
+export default function LoginPage() {
+  const navigate = useNavigate();
+
+  const DEFAULT_PATH = useMemo(() => '/departments', []);
+
+  const [email, setEmail] = useState(() => getSavedLoginDraft(LOGIN_DRAFT_EMAIL_KEY));
+  const [password, setPassword] = useState(() => getSavedLoginDraft(LOGIN_DRAFT_PASSWORD_KEY));
+  const [showPw, setShowPw] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState('');
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+
+    if (!token) return;
+
+    if (isTokenExpired(token)) {
+      clearAuthSession();
+      return;
+    }
+
+    const storedUser = getStoredUserForRedirect();
+    const redirectPath = getPostLoginPath(storedUser, storedUser.role);
+
+    navigate(redirectPath, { replace: true });
+  }, [navigate]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail || !password) {
+      const message = 'Please enter both email and password.';
+      setLoginError(message);
+      toast.error(message);
+      return;
+    }
+
+    setSubmitting(true);
+    setLoginError('');
+
+    try {
+      const res = await apiRawClient.post(
+        '/api/users/login',
+        { email: cleanEmail, password },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          validateStatus: () => true,
+        }
+      );
+
+      const data = res?.data || null;
+      const token = data?.token || data?.accessToken || data?.jwt || data?.data?.token || data?.data?.accessToken || '';
+      const tokenPayload = decodeJwtPayload(token) || {};
+      const loggedInUser = data?.user || data?.data?.user || data?.currentUser || {};
+      const loggedInRole = getUserRole(loggedInUser, data?.role || data?.data?.role || tokenPayload?.role || '');
+
+      if (res.status >= 200 && res.status < 300 && token) {
+        persistAuthSession({
+          token,
+          user: loggedInUser,
+          role: loggedInRole
+        });
+        clearLoginDraft();
+
+        const redirectPath = getPostLoginPath(loggedInUser, loggedInRole) || DEFAULT_PATH;
+
+        toast.success('Login successful! Redirecting...');
+
+        /*
+         * IMPORTANT:
+         * The sidebar menu is created from localStorage role/permission when the app loads.
+         * If we use react-router navigate() only, the menu module may not rebuild immediately.
+         * A full reload after storing role/user/permissions fixes that.
+         */
+        setTimeout(() => {
+          window.location.replace(redirectPath);
+        }, 300);
+
+        return;
+      }
+
+      let message = data?.message || 'The email or password is incorrect. Please try again.';
+
+      if (res.status >= 200 && res.status < 300 && !token) {
+        message = 'Login response does not include an authentication token. Please contact the system administrator.';
+      }
+
+      if (res.status === 401 || res.status === 404) {
+        message = 'The email or password is incorrect. Please try again.';
+      }
+
+      if (res.status === 403) {
+        message = data?.message || 'Your account has been disabled. Please contact the system administrator.';
+      }
+
+      clearAuthSession();
+
+      // Keep both email and password so the user can correct only the wrong field.
+      setEmail(cleanEmail);
+      setPassword(password);
+      saveLoginDraft(LOGIN_DRAFT_EMAIL_KEY, cleanEmail);
+      saveLoginDraft(LOGIN_DRAFT_PASSWORD_KEY, password);
+      setLoginError(message);
+      toast.error(message);
+    } catch (err) {
+      console.error(err);
+      const message = 'Unable to connect to the Sales & BOM server.';
+      setLoginError(message);
+      toast.error(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        minHeight: '100vh',
+        position: 'relative',
+        display: 'grid',
+        placeItems: 'center',
+        /* Desktop only: preserve the PC layout at every zoom level. */
+        overflow: 'auto',
+        p: 3,
+        backgroundColor: '#EAF2F4',
+        backgroundImage: `
+          linear-gradient(
+            100deg,
+            rgba(234, 242, 244, 0.68) 0%,
+            rgba(234, 242, 244, 0.52) 56%,
+            rgba(234, 242, 244, 0.64) 100%
+          ),
+          url(${backgroundLogin})
+        `,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundAttachment: 'fixed'
+      }}
+    >
+
+      <Box
+        sx={{
+          width: 'min(1120px, calc(100vw - 48px))',
+          minWidth: 980,
+          overflow: 'hidden',
+          borderRadius: 4,
+          display: 'flex',
+          flexDirection: 'row',
+          boxShadow: '0 28px 85px rgba(3, 22, 35, 0.28)',
+          border: `1px solid ${alpha('#FFFFFF', 0.38)}`,
+          backgroundColor: alpha('#FFFFFF', 0.14),
+          backdropFilter: 'blur(4px)'
+        }}
+      >
+        {/* Simple product message */}
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            minHeight: 'min(590px, 78vh)',
+            p: 5.5,
+            color: '#FFFFFF',
+            position: 'relative',
+            overflow: 'hidden',
+            /*
+             * Put the image directly on this panel instead of relying only on the
+             * page background. This keeps the garment / bag / BOM illustration
+             * visible even when the card is above a light page background.
+             */
+            backgroundImage: `
+              linear-gradient(
+                145deg,
+                rgba(4, 27, 45, 0.62) 0%,
+                rgba(8, 73, 91, 0.54) 100%
+              ),
+              url(${backgroundLogin})
+            `,
+            backgroundSize: 'cover',
+            backgroundPosition: 'left center',
+            backgroundRepeat: 'no-repeat'
+          }}
+        >
+          <Box
+            sx={{
+              position: 'absolute',
+              width: 360,
+              height: 360,
+              top: -175,
+              right: -165,
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(72, 206, 185, 0.3), rgba(72, 206, 185, 0) 68%)'
+            }}
+          />
+          <Box
+            sx={{
+              position: 'relative',
+              zIndex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              width: '100%'
+            }}
+          >
+            <Box>
+              <Typography
+                sx={{
+                  mt: 0.4,
+                  fontSize: '3rem',
+                  lineHeight: 1.05,
+                  letterSpacing: -1.2,
+                  fontWeight: 950
+                }}
+              >
+                Sales BOM
+              </Typography>
+
+              <Typography
+                sx={{
+                  mt: 1.1,
+                  fontSize: '1.2rem',
+                  fontWeight: 800,
+                  color: '#9DEBD9'
+                }}
+              >
+                MPR Workspace
+              </Typography>
+
+              <Typography
+                sx={{
+                  mt: 2.1,
+                  maxWidth: 300,
+                  fontSize: '0.96rem',
+                  lineHeight: 1.65,
+                  color: alpha('#FFFFFF', 0.82)
+                }}
+              >
+                Manage sales requirements, BOMs, and material planning.
+              </Typography>
+            </Box>
+
+            <Typography sx={{ fontSize: '0.78rem', color: alpha('#FFFFFF', 0.62) }}>
+              Youngone Internal System
+            </Typography>
+          </Box>
+        </Box>
+
+        {/* Sign-in panel */}
+        <Box
+          sx={{
+            width: 455,
+            minWidth: 455,
+            minHeight: 'min(590px, 78vh)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            px: 5.5,
+            py: 5,
+            backgroundColor: alpha('#F9FCFD', 0.96)
+          }}
+        >
+          <Box sx={{ width: '100%', maxWidth: 350 }}>
+            <ToastContainer position="top-right" autoClose={3000} hideProgressBar />
+
+            <Typography
+              sx={{
+                fontSize: '2.1rem',
+                fontWeight: 950,
+                lineHeight: 1.1,
+                letterSpacing: -0.8,
+                color: '#092E4A'
+              }}
+            >
+              Sign in
+            </Typography>
+
+            <Typography sx={{ mt: 0.9, fontSize: '0.94rem', color: alpha('#092E4A', 0.62) }}>
+              Sales BOM &amp; MPR
+            </Typography>
+
+            <Box component="form" onSubmit={handleSubmit} noValidate sx={{ mt: 3.25 }}>
+              <Stack spacing={2}>
+                <TextField
+                  label="Company email"
+                  placeholder="name@youngonevn.com"
+                  value={email}
+                  onChange={(e) => {
+                    const nextEmail = e.target.value;
+                    setEmail(nextEmail);
+                    saveLoginDraft(LOGIN_DRAFT_EMAIL_KEY, nextEmail);
+                    if (loginError) setLoginError('');
+                  }}
+                  autoComplete="email"
+                  fullWidth
+                  InputLabelProps={{ sx: { fontWeight: 750 } }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <EmailOutlined sx={{ color: alpha('#0B5A76', 0.62), fontSize: 20 }} />
+                      </InputAdornment>
+                    )
+                  }}
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2.5,
+                      backgroundColor: '#FFFFFF',
+                      '& fieldset': { borderColor: alpha('#0B5A76', 0.2) },
+                      '&:hover fieldset': { borderColor: alpha('#0B5A76', 0.45) },
+                      '&.Mui-focused fieldset': { borderColor: '#0B6E8A' }
+                    }
+                  }}
+                />
+
+                <TextField
+                  label="Password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => {
+                    const nextPassword = e.target.value;
+                    setPassword(nextPassword);
+                    saveLoginDraft(LOGIN_DRAFT_PASSWORD_KEY, nextPassword);
+                    if (loginError) setLoginError('');
+                  }}
+                  type={showPw ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  fullWidth
+                  InputLabelProps={{ sx: { fontWeight: 750 } }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <LockOutlined sx={{ color: alpha('#0B5A76', 0.62), fontSize: 20 }} />
+                      </InputAdornment>
+                    ),
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          aria-label={showPw ? 'Hide password' : 'Show password'}
+                          onClick={() => setShowPw((previous) => !previous)}
+                          edge="end"
+                        >
+                          {showPw ? <VisibilityOff /> : <Visibility />}
+                        </IconButton>
+                      </InputAdornment>
+                    )
+                  }}
+                  error={Boolean(loginError)}
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2.5,
+                      backgroundColor: '#FFFFFF',
+                      '& fieldset': { borderColor: alpha('#0B5A76', 0.2) },
+                      '&:hover fieldset': { borderColor: alpha('#0B5A76', 0.45) },
+                      '&.Mui-focused fieldset': { borderColor: '#0B6E8A' }
+                    }
+                  }}
+                />
+
+                {loginError && (
+                  <Box
+                    sx={{
+                      p: 1.2,
+                      borderRadius: 2,
+                      border: `1px solid ${alpha('#DC2626', 0.28)}`,
+                      backgroundColor: alpha('#DC2626', 0.07)
+                    }}
+                  >
+                    <Typography sx={{ fontSize: '0.84rem', fontWeight: 750, color: '#B91C1C', lineHeight: 1.45 }}>
+                      {loginError}
+                    </Typography>
+                  </Box>
+                )}
+
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  variant="contained"
+                  startIcon={<LoginRounded />}
+                  sx={{
+                    height: 53,
+                    mt: 0.5,
+                    borderRadius: 2.5,
+                    textTransform: 'none',
+                    fontWeight: 900,
+                    fontSize: '1rem',
+                    background: 'linear-gradient(90deg, #0A5E7A 0%, #087A73 100%)',
+                    boxShadow: '0 14px 30px rgba(7, 108, 117, 0.26)',
+                    '&:hover': {
+                      background: 'linear-gradient(90deg, #084F68 0%, #06665F 100%)'
+                    }
+                  }}
+                >
+                  {submitting ? 'Signing in...' : 'Sign in'}
+                </Button>
+              </Stack>
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
