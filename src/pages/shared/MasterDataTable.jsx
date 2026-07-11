@@ -287,7 +287,7 @@ export default function MasterDataTable({
               </TableRow>
             ) : sortedRows.length > 0 ? (
               sortedRows.map((row, index) => (
-                <TableRow key={row?.id || `${config.type}-${index}`} hover>
+                <TableRow key={row?.id || `${config.type}-${index}`} hover data-master-row-id={row?.id || ''} sx={{ scrollMarginTop: 96 }}>
                   <TableCell align="center" sx={{ py: 0.6, px: 0.7, color: '#6b7280', fontSize: '0.75rem' }}>
                     {page * rowsPerPage + index + 1}
                   </TableCell>

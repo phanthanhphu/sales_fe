@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   deleteMasterData,
   getMasterDataErrorMessage,
@@ -16,6 +16,20 @@ const safeMessage = (value, fallback) => {
   if (typeof value === 'string' && value.trim()) return value.trim();
   return fallback;
 };
+const cssAttributeEscape = (value) => (
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(String(value || ''))
+    : String(value || '').replace(/["\\]/g, '\\$&')
+);
+
+const responseRecordId = (response) => {
+  const candidates = [response, response?.data, response?.item, response?.result, response?.record].filter((item) => item && typeof item === 'object');
+  for (const item of candidates) {
+    if (item?.id) return String(item.id);
+  }
+  return '';
+};
+
 
 export default function useMasterDataPage(config = {}) {
   const emptyFilters = useMemo(
@@ -41,6 +55,7 @@ export default function useMasterDataPage(config = {}) {
     severity: 'success',
     message: ''
   });
+  const scrollTargetRef = useRef('');
 
   const notify = useCallback((message, severity = 'success') => {
     setNotification({
@@ -65,12 +80,15 @@ export default function useMasterDataPage(config = {}) {
       });
 
       const normalized = normalizePageResponse(response, page, rowsPerPage);
-      setRows(Array.isArray(normalized.content) ? normalized.content : []);
+      const nextRows = Array.isArray(normalized.content) ? normalized.content : [];
+      setRows(nextRows);
       setTotalElements(Number(normalized.totalElements || 0));
 
       if (Number.isInteger(normalized.number) && normalized.number !== page && normalized.totalPages > 0) {
         setPage(normalized.number);
       }
+
+      return nextRows;
     } catch (error) {
       setRows([]);
       setTotalElements(0);
@@ -86,6 +104,27 @@ export default function useMasterDataPage(config = {}) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (loading || !scrollTargetRef.current || typeof document === 'undefined') return;
+    const selector = scrollTargetRef.current;
+    scrollTargetRef.current = '';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const element = document.querySelector(selector);
+        if (!element) return;
+        element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        const previousBoxShadow = element.style.boxShadow;
+        const previousTransition = element.style.transition;
+        element.style.transition = 'box-shadow 180ms ease';
+        element.style.boxShadow = '0 0 0 3px rgba(17, 24, 39, 0.26)';
+        window.setTimeout(() => {
+          element.style.boxShadow = previousBoxShadow;
+          element.style.transition = previousTransition;
+        }, 1600);
+      });
+    });
+  }, [loading, rows]);
 
   const changeDraftFilter = useCallback((name, value) => {
     setDraftFilters((current) => ({ ...current, [name]: value }));
@@ -115,7 +154,7 @@ export default function useMasterDataPage(config = {}) {
    * Dialogs call onSaved(response, 'message'). `response` is an object, so it
    * must never be passed directly into Snackbar/Alert as a React child.
    */
-  const handleSaved = useCallback(async (savedRecordOrMessage, customMessage = '') => {
+  const handleSaved = useCallback(async (savedRecordOrMessage, customMessage = '', meta = {}) => {
     setAddOpen(false);
     setEditRecord(null);
 
@@ -125,6 +164,11 @@ export default function useMasterDataPage(config = {}) {
         ? savedRecordOrMessage
         : `${config.singular || 'Record'} saved successfully.`
     );
+
+    const createdId = meta?.mode === 'create' ? responseRecordId(savedRecordOrMessage) : '';
+    if (createdId) {
+      scrollTargetRef.current = `[data-master-row-id="${cssAttributeEscape(createdId)}"]`;
+    }
 
     notify(message, 'success');
     await load();

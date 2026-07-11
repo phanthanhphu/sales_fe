@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -22,8 +23,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { Add, Delete, Edit, FileUpload, OpenInNew, Refresh } from '@mui/icons-material';
-import { Link as RouterLink } from 'react-router-dom';
+import { Add, Delete, Edit, FileUpload, Refresh } from '@mui/icons-material';
 import {
   createMasterData,
   deleteMasterData,
@@ -35,20 +35,19 @@ import {
 } from '../../services/masterDataService';
 import ProductColorImage from '../../components/ProductColorImage';
 import { canManageSales } from 'utils/accessControl';
+import ConfirmDeleteDialog from '../shared/ConfirmDeleteDialog';
 
 const blankChildColor = () => ({ id: '', childColor: '' });
 const blankForm = () => ({
-  buyer: '',
-  season: '',
-  patternNumber: '',
-  styleNumber: '',
-  styleName: '',
   productColor: '',
   active: 'true',
   childColors: []
 });
+
 const trim = (value) => String(value || '').trim();
 const pageContent = (response) => Array.isArray(response) ? response : (response?.content || response?.items || []);
+const text = (value, fallback = '-') => trim(value) || fallback;
+const sameId = (left, right) => String(left || '') === String(right || '');
 const hasImage = (record = {}) => Boolean(
   record?.hasImage
   || record?.imageAvailable
@@ -57,34 +56,118 @@ const hasImage = (record = {}) => Boolean(
   || record?.imageUpdatedAt
 );
 
-const sourceBomLabel = (record = {}) => (
-  record?.sourceBomName
-  || record?.sourceBomNo
-  || record?.sourceBomCode
-  || record?.sourceBomId
-  || '—'
+const childColorNames = (record = {}) => (
+  Array.isArray(record?.childColors)
+    ? record.childColors.map((item) => trim(item?.childColor || item?.value || item?.name)).filter(Boolean)
+    : []
 );
 
-const sourceBomPath = (record = {}) => {
-  const directPath = String(record?.sourceBomPath || record?.sourceBomUrl || '').trim();
-  if (directPath.startsWith('/')) return directPath;
 
-  const orderId = String(record?.sourceOrderId || record?.orderId || '').trim();
-  const bomId = String(record?.sourceBomId || record?.bomId || '').trim();
-  return orderId && bomId ? `/orders/${encodeURIComponent(orderId)}/boms/${encodeURIComponent(bomId)}` : '';
+const cssAttributeEscape = (value) => (
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(String(value || ''))
+    : String(value || '').replace(/["\\]/g, '\\$&')
+);
+
+const responseRecordId = (response) => {
+  const candidates = [response, response?.data, response?.item, response?.result, response?.record].filter((item) => item && typeof item === 'object');
+  for (const item of candidates) {
+    if (item?.id) return String(item.id);
+  }
+  return '';
 };
 
-function ProductColorDialog({ open, record, saving, onClose, onSave }) {
+const lastOf = (items = []) => items[items.length - 1];
+const sameText = (left, right) => trim(left).toUpperCase() === trim(right).toUpperCase();
+
+const resolveCreatedProductColorMasterId = (created, rows = [], payload = {}) => {
+  const directId = responseRecordId(created);
+  if (directId) return directId;
+  const matches = rows.filter((row) => sameText(row?.productColor, payload.productColor));
+  return String((lastOf(matches) || lastOf(rows) || {})?.id || '');
+};
+
+function ChildColorChips({ colors = [], maxVisible = 4 }) {
+  const visible = colors.slice(0, maxVisible);
+  const remaining = colors.length - visible.length;
+
+  if (!colors.length) {
+    return <Typography sx={{ fontSize: '.78rem', color: 'text.secondary' }}>No Child Color</Typography>;
+  }
+
+  return (
+    <Stack direction="row" flexWrap="wrap" gap={0.5} alignItems="center">
+      {visible.map((color, index) => (
+        <Chip key={`${color}-${index}`} size="small" label={color} sx={{ maxWidth: 170, fontSize: '.68rem' }} />
+      ))}
+      {remaining > 0 && <Chip size="small" variant="outlined" label={`+${remaining}`} sx={{ fontSize: '.68rem' }} />}
+    </Stack>
+  );
+}
+
+
+function ChildColorsPreviewDialog({ open, record, onClose }) {
+  const colors = childColorNames(record);
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
+        Child Colors
+        <Typography sx={{ mt: 0.25, fontSize: '.8rem', color: 'text.secondary', fontWeight: 400 }}>
+          {text(record?.productColor, 'Product / Style Color')}
+        </Typography>
+        <IconButton onClick={onClose} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        {!colors.length ? (
+          <Alert severity="info" sx={{ py: 0.5 }}>No Child Color is saved for this Product / Style Color.</Alert>
+        ) : (
+          <TableContainer sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 70, fontWeight: 900, backgroundColor: '#f8fafc' }}>No.</TableCell>
+                  <TableCell sx={{ fontWeight: 900, backgroundColor: '#f8fafc' }}>Child Color / Comment</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {colors.map((color, index) => (
+                  <TableRow key={`${color}-${index}`} hover>
+                    <TableCell sx={{ color: 'text.secondary', fontWeight: 700 }}>{index + 1}</TableCell>
+                    <TableCell>
+                      <Typography sx={{ fontSize: '.82rem', wordBreak: 'break-word' }}>{color}</Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ p: 1.5 }}>
+        <Button onClick={onClose} sx={{ textTransform: 'none' }}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function ProductColorDialog({
+  open,
+  record,
+  saving,
+  canWrite,
+  onClose,
+  onSave,
+  onUploadImage,
+  onRequestRemoveImage
+}) {
   const [form, setForm] = useState(blankForm());
+  const isEdit = Boolean(record?.id);
+  const imageExists = hasImage(record);
 
   useEffect(() => {
     if (!open) return;
     setForm({
-      buyer: record?.buyer || '',
-      season: record?.season || '',
-      patternNumber: record?.patternNumber || '',
-      styleNumber: record?.styleNumber || '',
-      styleName: record?.styleName || '',
       productColor: record?.productColor || '',
       active: record?.active === false ? 'false' : 'true',
       childColors: Array.isArray(record?.childColors)
@@ -102,14 +185,22 @@ function ProductColorDialog({ open, record, saving, onClose, onSave }) {
       ))
     }));
   };
+  const removeChildColor = (index) => {
+    const item = form.childColors[index];
+    const label = trim(item?.childColor) || 'this Child Color';
+    const confirmed = typeof window === 'undefined'
+      || !trim(item?.childColor)
+      || window.confirm(`Remove ${label} from this Product Color?`);
+    if (!confirmed) return;
 
-  const canSave = trim(form.season) && trim(form.patternNumber) && trim(form.productColor);
+    setForm((current) => ({
+      ...current,
+      childColors: current.childColors.filter((_, itemIndex) => itemIndex !== index)
+    }));
+  };
+
+  const canSave = trim(form.productColor);
   const save = () => onSave({
-    buyer: trim(form.buyer),
-    season: trim(form.season),
-    patternNumber: trim(form.patternNumber),
-    styleNumber: trim(form.styleNumber),
-    styleName: trim(form.styleName),
     productColor: trim(form.productColor),
     active: String(form.active) !== 'false',
     childColors: form.childColors
@@ -118,33 +209,83 @@ function ProductColorDialog({ open, record, saving, onClose, onSave }) {
   });
 
   return (
-    <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="md">
+    <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="lg">
       <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
         {record ? 'Edit Product Color' : 'Add Product Color'}
         <Typography sx={{ mt: 0.25, fontSize: '.8rem', color: 'text.secondary', fontWeight: 400 }}>
-          Save the Product Color first, then upload its master image here. BOM uses this saved image through the Product Color link and does not store a duplicate file.
+          Product Color Master only stores Product / Style Color, shared Child Colors and one shared image. BOM-specific header information stays in the BOM.
         </Typography>
         <IconButton onClick={onClose} disabled={saving} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
       </DialogTitle>
       <DialogContent dividers>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25 }}>
-          <TextField label="Buyer" value={form.buyer} onChange={set('buyer')} />
-          <TextField required label="Season" value={form.season} onChange={set('season')} placeholder="F26" />
-          <TextField required label="Pattern Number" value={form.patternNumber} onChange={set('patternNumber')} placeholder="LLB 352 A" />
-          <TextField label="Style Number" value={form.styleNumber} onChange={set('styleNumber')} />
-          <TextField label="Style Name" value={form.styleName} onChange={set('styleName')} />
-          <TextField required label="Product / Style Color" value={form.productColor} onChange={set('productColor')} placeholder="CMPGRN/CITRN" />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 1.25 }}>
+          <TextField required label="Product / Style Color" value={form.productColor} onChange={set('productColor')} placeholder="BLACK" />
           <TextField select label="Status" value={form.active} onChange={set('active')}>
             <MenuItem value="true">Active</MenuItem>
             <MenuItem value="false">Inactive</MenuItem>
           </TextField>
         </Box>
 
+        <Paper elevation={0} sx={{ mt: 2, p: 1.25, border: '1px solid #e5e7eb', borderRadius: 1.5, backgroundColor: '#fbfdff' }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+            <Box sx={{ width: { xs: 1, md: 240 }, flexShrink: 0 }}>
+              <ProductColorImage productColor={record || {}} height={150} emptyText={isEdit ? 'No product image' : 'Save first to upload image'} />
+            </Box>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Product Image</Typography>
+              <Typography sx={{ mt: 0.25, fontSize: '.76rem', color: 'text.secondary' }}>
+                Upload, replace or remove the shared Product Color image directly in this Edit screen. All linked BOM screens reuse this image automatically.
+              </Typography>
+
+              {isEdit ? (
+                <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 1 }}>
+                  <Tooltip title={!canWrite ? 'Sales permission is required to change Product Color master data.' : 'Upload or replace image'} arrow>
+                    <span>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        component="label"
+                        startIcon={<FileUpload />}
+                        disabled={!canWrite || saving}
+                        sx={{ textTransform: 'none' }}
+                      >
+                        Upload / Replace Image
+                        <input hidden type="file" accept="image/*" onChange={(event) => onUploadImage?.(event, record)} />
+                      </Button>
+                    </span>
+                  </Tooltip>
+                  {imageExists && (
+                    <Tooltip title={!canWrite ? 'Sales permission is required to change Product Color master data.' : 'Remove image'} arrow>
+                      <span>
+                        <Button
+                          variant="outlined"
+                          color="warning"
+                          size="small"
+                          startIcon={<Delete />}
+                          disabled={!canWrite || saving}
+                          onClick={() => onRequestRemoveImage?.(record)}
+                          sx={{ textTransform: 'none' }}
+                        >
+                          Remove Image
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  )}
+                </Stack>
+              ) : (
+                <Alert severity="info" sx={{ mt: 1, py: 0.3 }}>
+                  Save this Product Color first, then open Edit again to upload the image.
+                </Alert>
+              )}
+            </Box>
+          </Stack>
+        </Paper>
+
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1} sx={{ mt: 2.25, mb: 1 }}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Child Colors</Typography>
             <Typography sx={{ fontSize: '.76rem', color: 'text.secondary' }}>
-              Do not enter Material Type, MAT Full Description or Packing here. Those fields belong to the BOM line.
+              Recommended table layout: one row per Child Color/comment. Keep it simple so BOM import and BOM line edit can reuse the same list.
             </Typography>
           </Box>
           <Button size="small" startIcon={<Add />} variant="outlined" onClick={() => setForm((current) => ({ ...current, childColors: [...current.childColors, blankChildColor()] }))} sx={{ textTransform: 'none' }}>
@@ -153,19 +294,21 @@ function ProductColorDialog({ open, record, saving, onClose, onSave }) {
         </Stack>
 
         <TableContainer sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
-          <Table size="small" sx={{ minWidth: 520 }}>
+          <Table size="small" sx={{ minWidth: 620 }}>
             <TableHead><TableRow>
-              <TableCell sx={{ fontWeight: 900 }}>Child Color</TableCell>
-              <TableCell sx={{ width: 70 }} />
+              <TableCell sx={{ width: 64, fontWeight: 900, backgroundColor: '#f8fafc' }}>No.</TableCell>
+              <TableCell sx={{ fontWeight: 900, backgroundColor: '#f8fafc' }}>Child Color / Comment</TableCell>
+              <TableCell sx={{ width: 80, fontWeight: 900, backgroundColor: '#f8fafc' }} align="center">Action</TableCell>
             </TableRow></TableHead>
             <TableBody>
               {form.childColors.length === 0 && (
-                <TableRow><TableCell colSpan={2} sx={{ color: 'text.secondary', py: 2, textAlign: 'center' }}>No Child Color is entered yet. BOM Detail import will add missing Child Colors automatically.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={3} sx={{ color: 'text.secondary', py: 2, textAlign: 'center' }}>No Child Color is entered yet. BOM Detail import can add missing Child Colors automatically.</TableCell></TableRow>
               )}
               {form.childColors.map((item, index) => (
                 <TableRow key={item.id || `child-${index}`}>
+                  <TableCell sx={{ color: 'text.secondary', fontWeight: 700 }}>{index + 1}</TableCell>
                   <TableCell><TextField size="small" required value={item.childColor} onChange={(event) => changeChildColor(index, event.target.value)} placeholder="MINERAL GREY YKK#181" fullWidth /></TableCell>
-                  <TableCell align="center"><IconButton color="error" size="small" onClick={() => setForm((current) => ({ ...current, childColors: current.childColors.filter((_, itemIndex) => itemIndex !== index) }))}><Delete fontSize="small" /></IconButton></TableCell>
+                  <TableCell align="center"><IconButton color="error" size="small" onClick={() => removeChildColor(index)}><Delete fontSize="small" /></IconButton></TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -183,7 +326,7 @@ function ProductColorDialog({ open, record, saving, onClose, onSave }) {
 }
 
 export default function ProductColorPage() {
-  const [filters, setFilters] = useState({ productColor: '', season: '', patternNumber: '', styleName: '' });
+  const [filters, setFilters] = useState({ productColor: '' });
   const [appliedFilters, setAppliedFilters] = useState(filters);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -191,7 +334,10 @@ export default function ProductColorPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [imageDeleteTarget, setImageDeleteTarget] = useState(null);
+  const [childColorViewTarget, setChildColorViewTarget] = useState(null);
   const [notice, setNotice] = useState({ open: false, severity: 'success', message: '' });
+  const scrollTargetRef = useRef('');
   const canWrite = canManageSales();
   const writeBlockedMessage = 'Sales permission is required to change Product Color master data.';
 
@@ -200,24 +346,64 @@ export default function ProductColorPage() {
     setLoading(true);
     try {
       const response = await listMasterData('productColor', { ...appliedFilters, page: 0, size: 200 });
-      setRows(pageContent(response));
+      const nextRows = pageContent(response);
+      setRows(nextRows);
+      return nextRows;
     } catch (error) {
       setRows([]);
       notify(getMasterDataErrorMessage(error, 'Unable to load Product Color Master.'), 'error');
+      return [];
     } finally { setLoading(false); }
   }, [appliedFilters]);
 
   useEffect(() => { load(); }, [load]);
 
+  const syncOpenRecord = (nextRows = [], id = '') => {
+    if (!id) return;
+    const updated = nextRows.find((item) => sameId(item?.id, id));
+    if (updated) setFormRecord(updated);
+  };
+
+  const scrollToCreatedRow = useCallback((id) => {
+    if (id) scrollTargetRef.current = `[data-product-color-master-id="${cssAttributeEscape(id)}"]`;
+  }, []);
+
+  useEffect(() => {
+    if (loading || !scrollTargetRef.current || typeof document === 'undefined') return;
+    const selector = scrollTargetRef.current;
+    scrollTargetRef.current = '';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const element = document.querySelector(selector);
+        if (!element) return;
+        element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        const previousBoxShadow = element.style.boxShadow;
+        const previousTransition = element.style.transition;
+        element.style.transition = 'box-shadow 180ms ease';
+        element.style.boxShadow = '0 0 0 3px rgba(17, 24, 39, 0.28)';
+        window.setTimeout(() => {
+          element.style.boxShadow = previousBoxShadow;
+          element.style.transition = previousTransition;
+        }, 1600);
+      });
+    });
+  }, [loading, rows]);
+
   const save = async (payload) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    const isCreate = !formRecord?.id;
+
     setSaving(true);
     try {
-      if (formRecord?.id) await updateMasterData('productColor', formRecord.id, payload);
-      else await createMasterData('productColor', payload);
+      let savedRecord = null;
+      if (isCreate) savedRecord = await createMasterData('productColor', payload);
+      else await updateMasterData('productColor', formRecord.id, payload);
       setFormOpen(false);
-      notify('Product Color saved. Upload the image in the Product Image column; BOM will use it automatically after linking this Product Color.');
-      await load();
+      notify('Product Color saved. Image can be uploaded or removed from the Edit screen.');
+      const nextRows = await load();
+      if (isCreate) {
+        scrollToCreatedRow(resolveCreatedProductColorMasterId(savedRecord, nextRows, payload));
+      }
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to save Product Color.'), 'error');
     } finally { setSaving(false); }
@@ -251,24 +437,34 @@ export default function ProductColorPage() {
     try {
       await uploadProductColorImage(row.id, file);
       notify('Product Color image saved. Any BOM linked to this Product Color now uses the same image.');
-      await load();
+      const nextRows = await load();
+      syncOpenRecord(nextRows, row.id);
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to upload Product Color image.'), 'error');
     } finally { setSaving(false); }
   };
 
-  const removeImage = async (row) => {
+  const removeImage = async () => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
-    if (!row?.id || !window.confirm(`Remove the saved image for ${row.productColor || 'this Product Color'}?`)) return;
+    if (!imageDeleteTarget?.id) return;
 
+    const targetId = imageDeleteTarget.id;
     setSaving(true);
     try {
-      await deleteProductColorImage(row.id);
+      await deleteProductColorImage(targetId);
+      setImageDeleteTarget(null);
       notify('Product Color image removed. BOM no longer shows this image.');
-      await load();
+      const nextRows = await load();
+      syncOpenRecord(nextRows, targetId);
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to remove Product Color image.'), 'error');
     } finally { setSaving(false); }
+  };
+
+  const resetFilters = () => {
+    const cleared = { productColor: '' };
+    setFilters(cleared);
+    setAppliedFilters(cleared);
   };
 
   const summary = useMemo(() => `${rows.length} record(s) shown`, [rows.length]);
@@ -280,20 +476,54 @@ export default function ProductColorPage() {
           <Box>
             <Typography variant="subtitle1" fontWeight={700}>Product Color Master</Typography>
             <Typography sx={{ fontSize: '.76rem', color: 'text.secondary' }}>
-              Save Product Color and its image here first. BOM Detail links by Product Color Master ID, so one image is reused across all linked BOMs.
+              Save only shared Product / Style Color, Child Colors and one image here. BOM-specific header information stays in each BOM.
             </Typography>
           </Box>
-          <Tooltip title={!canWrite ? writeBlockedMessage : ''} arrow disableHoverListener={canWrite}><span><Button variant="contained" startIcon={<Add />} onClick={() => { if (canWrite) { setFormRecord(null); setFormOpen(true); } }} disabled={loading || !canWrite} sx={{ textTransform: 'none', backgroundColor: '#111827', alignSelf: { xs: 'flex-start', sm: 'center' } }}>Add Product Color</Button></span></Tooltip>
+          <Tooltip title={!canWrite ? writeBlockedMessage : ''} arrow disableHoverListener={canWrite}>
+            <span>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => { if (canWrite) { setFormRecord(null); setFormOpen(true); } }}
+                disabled={loading || !canWrite}
+                sx={{ textTransform: 'none', backgroundColor: '#111827', alignSelf: { xs: 'flex-start', sm: 'center' } }}
+              >
+                Add Product Color
+              </Button>
+            </span>
+          </Tooltip>
         </Stack>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' }, gap: 1.25 }}>
+
+        <Box sx={{ display: 'flex', flexWrap: { xs: 'wrap', lg: 'nowrap' }, alignItems: 'center', gap: 1 }}>
           {[
-            ['productColor', 'Product Color'], ['season', 'Season'], ['patternNumber', 'Pattern Number'], ['styleName', 'Style Name']
-          ].map(([key, label]) => <TextField key={key} size="small" label={label} value={filters[key]} onChange={(event) => setFilters((current) => ({ ...current, [key]: event.target.value }))} />)}
+            ['productColor', 'Product / Style Color']
+          ].map(([key, label]) => (
+            <TextField
+              key={key}
+              size="small"
+              label={label}
+              value={filters[key]}
+              onChange={(event) => setFilters((current) => ({ ...current, [key]: event.target.value }))}
+              sx={{ flex: { xs: '1 1 100%', sm: '1 1 180px', lg: '1 1 0' }, minWidth: { sm: 170 } }}
+            />
+          ))}
+          <Button
+            variant="contained"
+            onClick={() => setAppliedFilters(filters)}
+            disabled={loading}
+            sx={{ textTransform: 'none', backgroundColor: '#111827', height: 40, px: 2.2, flexShrink: 0 }}
+          >
+            Search
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={resetFilters}
+            disabled={loading}
+            sx={{ textTransform: 'none', height: 40, px: 2.2, flexShrink: 0 }}
+          >
+            Reset
+          </Button>
         </Box>
-        <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-          <Button variant="contained" onClick={() => setAppliedFilters(filters)} disabled={loading} sx={{ textTransform: 'none', backgroundColor: '#111827' }}>Search</Button>
-          <Button variant="outlined" onClick={() => { const cleared = { productColor: '', season: '', patternNumber: '', styleName: '' }; setFilters(cleared); setAppliedFilters(cleared); }} disabled={loading} sx={{ textTransform: 'none' }}>Reset</Button>
-        </Stack>
       </Paper>
 
       <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
@@ -301,44 +531,44 @@ export default function ProductColorPage() {
           <Typography sx={{ fontWeight: 700, fontSize: '.95rem' }}>{loading ? 'Loading...' : summary}</Typography>
           <Button size="small" startIcon={<Refresh />} onClick={load} disabled={loading || saving} sx={{ textTransform: 'none' }}>Refresh</Button>
         </Stack>
-        <TableContainer sx={{ maxHeight: 'calc(100vh - 330px)' }}>
-          <Table stickyHeader size="small" sx={{ minWidth: 1460 }}>
+        <TableContainer sx={{ maxHeight: 'calc(100vh - 295px)' }}>
+          <Table stickyHeader size="small" sx={{ minWidth: 920 }}>
             <TableHead><TableRow>
-              {['Season', 'Pattern Number', 'Style Number', 'Style Name', 'Product Color', 'Child Colors', 'Product Image', 'Status', 'Source BOM', 'Actions'].map((title) => <TableCell key={title} sx={{ fontWeight: 900, backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>{title}</TableCell>)}
+              <TableCell sx={{ width: 70, fontWeight: 900, backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>No.</TableCell>
+              {['Product / Style Color', 'Child Colors', 'Product Image', 'Status', 'Actions'].map((title) => <TableCell key={title} sx={{ fontWeight: 900, backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>{title}</TableCell>)}
             </TableRow></TableHead>
             <TableBody>
-              {rows.length === 0 && <TableRow><TableCell colSpan={10} align="center" sx={{ py: 4, color: 'text.secondary' }}>{loading ? 'Loading...' : 'No Product Color found.'}</TableCell></TableRow>}
-              {rows.map((row) => {
-                const bomPath = sourceBomPath(row);
+              {rows.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>{loading ? 'Loading...' : 'No Product Color found.'}</TableCell></TableRow>}
+              {rows.map((row, index) => {
+                const colors = childColorNames(row);
                 return (
-                  <TableRow key={row.id} hover>
-                    <TableCell>{row.season || '-'}</TableCell>
-                    <TableCell>{row.patternNumber || '-'}</TableCell>
-                    <TableCell>{row.styleNumber || '-'}</TableCell>
-                    <TableCell>{row.styleName || '-'}</TableCell>
-                    <TableCell sx={{ fontWeight: 800 }}>{row.productColor || '-'}</TableCell>
-                    <TableCell>{Array.isArray(row.childColors) ? row.childColors.length : 0}</TableCell>
-                    <TableCell sx={{ minWidth: 142 }}>
-                      <ProductColorImage productColor={row} height={70} />
+                  <TableRow key={row.id} hover data-product-color-master-id={row.id} sx={{ scrollMarginTop: 96 }}>
+                    <TableCell sx={{ color: 'text.secondary', fontWeight: 800 }}>{index + 1}</TableCell>
+                    <TableCell sx={{ minWidth: 230 }}>
+                      <Typography sx={{ fontWeight: 900, fontSize: '.82rem' }}>{text(row.productColor)}</Typography>
+
+                    </TableCell>
+                    <TableCell sx={{ minWidth: 330 }}>
+                      <ChildColorChips colors={colors} />
+                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 0.35 }}>
+                        <Typography sx={{ fontSize: '.68rem', color: 'text.secondary' }}>{colors.length} child color(s)</Typography>
+                        <Button size="small" variant="text" disabled={!colors.length} onClick={() => setChildColorViewTarget(row)} sx={{ minWidth: 0, p: 0, textTransform: 'none', fontSize: '.68rem', fontWeight: 800 }}>
+                          Open
+                        </Button>
+                      </Stack>
+                    </TableCell>
+                    <TableCell sx={{ minWidth: 132 }}>
+                      <ProductColorImage productColor={row} height={62} />
                     </TableCell>
                     <TableCell>{row.active === false ? 'Inactive' : 'Active'}</TableCell>
-                    <TableCell sx={{ minWidth: 180 }}>
-                      {bomPath ? (
-                        <Tooltip title="Open source BOM" arrow>
-                          <Button component={RouterLink} to={bomPath} size="small" endIcon={<OpenInNew fontSize="small" />} sx={{ maxWidth: 180, textTransform: 'none', justifyContent: 'flex-start', textAlign: 'left' }}>
-                            <Typography noWrap sx={{ maxWidth: 125, fontSize: '.78rem', fontWeight: 700 }}>{sourceBomLabel(row)}</Typography>
-                          </Button>
-                        </Tooltip>
-                      ) : (
-                        <Tooltip title={row.sourceBomId || ''}><Typography noWrap sx={{ maxWidth: 170, fontSize: '.8rem' }}>{sourceBomLabel(row)}</Typography></Tooltip>
-                      )}
-                    </TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={0.25}>
-                        <Tooltip title={!canWrite ? writeBlockedMessage : 'Upload / Replace Product Image'} arrow><span><IconButton size="small" color="primary" component="label" disabled={!canWrite || saving}><FileUpload fontSize="small" /><input hidden type="file" accept="image/*" onChange={(event) => uploadImage(event, row)} /></IconButton></span></Tooltip>
-                        {hasImage(row) && <Tooltip title={!canWrite ? writeBlockedMessage : 'Remove Product Image'} arrow><span><IconButton size="small" color="warning" disabled={!canWrite || saving} onClick={() => removeImage(row)}><Delete fontSize="small" /></IconButton></span></Tooltip>}
-                        <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit'} arrow><span><IconButton size="small" color="primary" disabled={!canWrite || saving} onClick={() => { if (canWrite) { setFormRecord(row); setFormOpen(true); } }}><Edit fontSize="small" /></IconButton></span></Tooltip>
-                        <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete Product Color'} arrow><span><IconButton size="small" color="error" disabled={!canWrite || saving} onClick={() => { if (canWrite) setDeleteTarget(row); }}><Delete fontSize="small" /></IconButton></span></Tooltip>
+                        <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Product Color / Image / Child Colors'} arrow>
+                          <span><IconButton size="small" color="primary" disabled={!canWrite || saving} onClick={() => { if (canWrite) { setFormRecord(row); setFormOpen(true); } }}><Edit fontSize="small" /></IconButton></span>
+                        </Tooltip>
+                        <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete Product Color'} arrow>
+                          <span><IconButton size="small" color="error" disabled={!canWrite || saving} onClick={() => { if (canWrite) setDeleteTarget(row); }}><Delete fontSize="small" /></IconButton></span>
+                        </Tooltip>
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -349,15 +579,54 @@ export default function ProductColorPage() {
         </TableContainer>
       </Paper>
 
-      <ProductColorDialog open={canWrite && formOpen} record={formRecord} saving={saving} onClose={() => setFormOpen(false)} onSave={save} />
+      <ProductColorDialog
+        open={canWrite && formOpen}
+        record={formRecord}
+        saving={saving}
+        canWrite={canWrite}
+        onClose={() => setFormOpen(false)}
+        onSave={save}
+        onUploadImage={uploadImage}
+        onRequestRemoveImage={setImageDeleteTarget}
+      />
 
-      <Dialog open={canWrite && Boolean(deleteTarget)} onClose={saving ? undefined : () => setDeleteTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete Product Color?</DialogTitle>
-        <DialogContent>Delete <strong>{deleteTarget?.productColor || ''}</strong>, its Child Colors, and its saved image?</DialogContent>
-        <DialogActions><Button onClick={() => setDeleteTarget(null)} disabled={saving}>Cancel</Button><Button color="error" variant="contained" onClick={remove} disabled={saving}>{saving ? 'Deleting...' : 'Delete'}</Button></DialogActions>
-      </Dialog>
+      <ChildColorsPreviewDialog
+        open={Boolean(childColorViewTarget)}
+        record={childColorViewTarget}
+        onClose={() => setChildColorViewTarget(null)}
+      />
 
-      <Snackbar open={notice.open} autoHideDuration={4200} onClose={() => setNotice((current) => ({ ...current, open: false }))}><Alert severity={notice.severity} variant="filled">{notice.message}</Alert></Snackbar>
+      <ConfirmDeleteDialog
+        open={canWrite && Boolean(imageDeleteTarget)}
+        record={{ label: imageDeleteTarget?.productColor || 'this Product Color image' }}
+        itemName="Product Image"
+        title="Remove Product Image?"
+        subtitle="Please confirm before removing this image."
+        message={<>Remove the saved image for <b>{imageDeleteTarget?.productColor || 'this Product Color'}</b>?</>}
+        warning="BOM screens linked to this Product Color will no longer show this image."
+        deleting={saving}
+        onClose={() => setImageDeleteTarget(null)}
+        onConfirm={removeImage}
+        confirmText="Remove Image"
+      />
+
+      <ConfirmDeleteDialog
+        open={canWrite && Boolean(deleteTarget)}
+        record={{ label: deleteTarget?.productColor || 'this Product Color' }}
+        itemName="Product Color"
+        title="Delete Product Color?"
+        subtitle="Please confirm before deleting this Product Color."
+        message={<>Delete <b>{deleteTarget?.productColor || 'this Product Color'}</b>, its Child Colors and saved image?</>}
+        warning="This can affect BOM screens linked to this Product Color Master."
+        deleting={saving}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={remove}
+        confirmText="Delete Product Color"
+      />
+
+      <Snackbar open={notice.open} autoHideDuration={4200} onClose={() => setNotice((current) => ({ ...current, open: false }))}>
+        <Alert severity={notice.severity} variant="filled">{notice.message}</Alert>
+      </Snackbar>
     </Box>
   );
 }

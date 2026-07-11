@@ -72,6 +72,7 @@ import { listMasterData } from '../../services/masterDataService';
 import ProductColorImage from '../../components/ProductColorImage';
 import { canManageBom } from 'utils/accessControl';
 import BomMprReviewDialog from './BomMprReviewDialog';
+import ConfirmDeleteDialog from '../shared/ConfirmDeleteDialog';
 
 const blankLine = {
   materialGroupNo: '',
@@ -117,7 +118,7 @@ const headerLabelSx = {
 
 const headerValueSx = {
   fontSize: '0.86rem',
-  fontWeight: 900,
+  fontWeight: 400,
   color: '#0f172a',
   wordBreak: 'break-word'
 };
@@ -179,27 +180,31 @@ const productColorsForBom = (bom) => {
   }));
 };
 
-const productColorLabel = (productColor = {}) => [
-  productColor.colorName,
-  productColor.patternNumber,
-  productColor.season
-].filter(Boolean).join(' · ');
+const productColorLabel = (productColor = {}) => {
+  const safeProductColor = productColor || {};
+  return [
+    safeProductColor.colorName,
+    safeProductColor.patternNumber,
+    safeProductColor.season
+  ].filter(Boolean).join(' · ');
+};
 
-const productColorMasterForBom = (productColor = {}, productColorMasters = []) => (
-  productColorMasters.find((item) => item?.id === productColor?.productColorMasterId)
-  || productColorMasters.find((item) => (
-    normalized(item?.productColor) === normalized(productColor?.colorName)
-    && (!productColor?.season || normalized(item?.season) === normalized(productColor?.season))
-    && (!productColor?.patternNumber || normalized(item?.patternNumber) === normalized(productColor?.patternNumber))
-  ))
-  || null
-);
+const productColorMasterForBom = (productColor = {}, productColorMasters = []) => {
+  const safeProductColor = productColor || {};
+  const safeMasters = Array.isArray(productColorMasters) ? productColorMasters : [];
+
+  return safeMasters.find((item) => item?.id === safeProductColor?.productColorMasterId)
+    || safeMasters.find((item) => normalized(item?.productColor) === normalized(safeProductColor?.colorName))
+    || null;
+};
 
 const childColorsForProductColor = (productColorId, productColors = [], productColorMasters = []) => {
-  const productColor = productColors.find((item) => item?.id === productColorId);
+  const safeProductColors = Array.isArray(productColors) ? productColors : [];
+  const safeMasters = Array.isArray(productColorMasters) ? productColorMasters : [];
+  const productColor = safeProductColors.find((item) => item?.id === productColorId);
   const masterId = productColor?.productColorMasterId;
-  const master = productColorMasters.find((item) => item?.id === masterId)
-    || productColorMasters.find((item) => normalized(item?.productColor) === normalized(productColor?.colorName));
+  const master = safeMasters.find((item) => item?.id === masterId)
+    || safeMasters.find((item) => normalized(item?.productColor) === normalized(productColor?.colorName));
   const unique = new Map();
   (master?.childColors || []).forEach((item) => {
     const id = String(item?.id || '').trim();
@@ -210,25 +215,100 @@ const childColorsForProductColor = (productColorId, productColors = [], productC
 };
 
 const productColorIdsForPacking = (packing = {}, productColors = []) => {
-  const linkedIds = Array.isArray(packing.applicableProductColorIds)
-    ? packing.applicableProductColorIds.filter(Boolean)
+  const safePacking = packing || {};
+  const safeProductColors = Array.isArray(productColors) ? productColors : [];
+
+  const linkedIds = Array.isArray(safePacking.applicableProductColorIds)
+    ? safePacking.applicableProductColorIds.filter(Boolean)
     : [];
 
   if (linkedIds.length) return linkedIds;
 
-  return (packing.applicableColors || [])
-    .map((colorName) => productColors.find((item) => normalized(item.colorName) === normalized(colorName))?.id)
+  return (safePacking.applicableColors || [])
+    .map((colorName) => safeProductColors.find((item) => normalized(item?.colorName) === normalized(colorName))?.id)
     .filter(Boolean);
 };
 
 const productColorNamesForLine = (line = {}, productColors = []) => {
-  const ids = (line.productColorValues || []).map((item) => item?.productColorId).filter(Boolean);
+  const safeLine = line || {};
+  const safeProductColors = Array.isArray(productColors) ? productColors : [];
+  const ids = (safeLine.productColorValues || []).map((item) => item?.productColorId).filter(Boolean);
   if (ids.length) {
     return ids
-      .map((id) => productColors.find((item) => item.id === id)?.colorName)
+      .map((id) => safeProductColors.find((item) => item?.id === id)?.colorName)
       .filter(Boolean);
   }
-  return Object.keys(line.colorValues || {});
+  return Object.keys(safeLine.colorValues || {});
+};
+
+const cssAttributeEscape = (value) => (
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(String(value || ''))
+    : String(value || '').replace(/["\\]/g, '\\$&')
+);
+
+const createdIdFromResponse = (response, keys = []) => {
+  const candidates = [
+    response,
+    response?.data,
+    response?.item,
+    response?.result,
+    response?.record,
+    response?.line,
+    response?.packing,
+    response?.productColor
+  ].filter((item) => item && typeof item === 'object');
+
+  for (const item of candidates) {
+    for (const key of [...keys, 'id']) {
+      if (item?.[key]) return String(item[key]);
+    }
+  }
+
+  return '';
+};
+
+const lastOf = (items = []) => items[items.length - 1];
+const valuesEqual = (left, right) => normalized(left) === normalized(right);
+
+const resolveCreatedPackingId = (created, nextBom, payload = {}) => {
+  const directId = createdIdFromResponse(created, ['packingId']);
+  if (directId) return directId;
+  const packings = nextBom?.packings || [];
+  const matches = packings.filter((packing) => (
+    valuesEqual(packing?.packingName, payload.packingName)
+    && (payload.sequence === null || payload.sequence === undefined || payload.sequence === '' || Number(packing?.sequence) === Number(payload.sequence))
+  ));
+  return String((lastOf(matches) || lastOf(packings) || {})?.id || '');
+};
+
+const resolveCreatedProductColorId = (created, nextBom, payload = {}) => {
+  const directId = createdIdFromResponse(created, ['productColorId']);
+  if (directId) return directId;
+  const productColors = productColorsForBom(nextBom);
+  const matches = productColors.filter((productColor) => (
+    valuesEqual(productColor?.colorName, payload.colorName)
+    && valuesEqual(productColor?.patternNumber, payload.patternNumber)
+    && valuesEqual(productColor?.season, payload.season)
+  ));
+  return String((lastOf(matches) || lastOf(productColors) || {})?.id || '');
+};
+
+const resolveCreatedLineId = (created, nextBom, payload = {}, packingId = '') => {
+  const directId = createdIdFromResponse(created, ['lineId', 'bomLineId']);
+  if (directId) return directId;
+  const lines = packingId
+    ? (nextBom?.packings || []).find((packing) => String(packing?.id || '') === String(packingId))?.lines || []
+    : nextBom?.coreLines || [];
+  const matches = lines.filter((line) => (
+    (payload.materialType ? valuesEqual(line?.materialType, payload.materialType) : true)
+    && (payload.sapCode ? valuesEqual(line?.sapCode, payload.sapCode) : true)
+    && (payload.detailNo ? valuesEqual(line?.detailNo, payload.detailNo) : true)
+    && (payload.position ? valuesEqual(line?.position, payload.position) : true)
+    && (payload.positionDescription ? valuesEqual(line?.positionDescription, payload.positionDescription) : true)
+    && (payload.bomRemark ? valuesEqual(line?.bomRemark, payload.bomRemark) : true)
+  ));
+  return String((lastOf(matches) || lastOf(lines) || {})?.id || '');
 };
 
 const emptyLineFilters = {
@@ -239,45 +319,48 @@ const emptyLineFilters = {
 };
 
 const lineMatchesFilters = (line = {}, filters = emptyLineFilters, productColors = []) => {
-  const keyword = String(filters.keyword || '').trim();
-  const selectedProductColorId = String(filters.productColorId || '').trim();
-  const selectedMaterialType = normalized(filters.materialType);
-  const lineProductColors = productColorNamesForLine(line, productColors);
+  const safeLine = line || {};
+  const safeFilters = filters || emptyLineFilters;
+  const safeProductColors = Array.isArray(productColors) ? productColors : [];
+  const keyword = String(safeFilters.keyword || '').trim();
+  const selectedProductColorId = String(safeFilters.productColorId || '').trim();
+  const selectedMaterialType = normalized(safeFilters.materialType);
+  const lineProductColors = productColorNamesForLine(safeLine, safeProductColors);
   const childColors = [
-    ...(line.productColorValues || []).map((item) => item?.value),
-    ...Object.values(line.colorValues || {})
+    ...(safeLine.productColorValues || []).map((item) => item?.value),
+    ...Object.values(safeLine.colorValues || {})
   ].filter(Boolean);
 
   if (keyword) {
     const searchable = [
-      line.materialGroupNo,
-      line.materialType,
-      line.sapCode,
-      line.detailNo,
-      line.position,
-      line.positionDescription,
-      line.positionDescriptionExtra,
-      line.pieceCode,
-      line.dimensionX,
-      line.dimensionY,
-      line.quantity,
-      line.direction,
-      line.costing,
-      line.costingUnit,
-      line.consumptionNet,
-      line.consumptionUnit,
-      line.bomRemark,
+      safeLine.materialGroupNo,
+      safeLine.materialType,
+      safeLine.sapCode,
+      safeLine.detailNo,
+      safeLine.position,
+      safeLine.positionDescription,
+      safeLine.positionDescriptionExtra,
+      safeLine.pieceCode,
+      safeLine.dimensionX,
+      safeLine.dimensionY,
+      safeLine.quantity,
+      safeLine.direction,
+      safeLine.costing,
+      safeLine.costingUnit,
+      safeLine.consumptionNet,
+      safeLine.consumptionUnit,
+      safeLine.bomRemark,
       ...lineProductColors,
       ...childColors
     ];
     if (!searchable.some((value) => normalized(value).includes(normalized(keyword)))) return false;
   }
 
-  if (selectedMaterialType && normalized(line.materialType) !== selectedMaterialType) return false;
+  if (selectedMaterialType && normalized(safeLine.materialType) !== selectedMaterialType) return false;
 
   if (selectedProductColorId) {
-    const selected = productColors.find((item) => String(item?.id || '') === selectedProductColorId);
-    const linkedIds = (line.productColorValues || []).map((item) => String(item?.productColorId || '')).filter(Boolean);
+    const selected = safeProductColors.find((item) => String(item?.id || '') === selectedProductColorId);
+    const linkedIds = (safeLine.productColorValues || []).map((item) => String(item?.productColorId || '')).filter(Boolean);
     const matchedById = linkedIds.includes(selectedProductColorId);
     const matchedByName = selected && lineProductColors.some((name) => normalized(name) === normalized(selected.colorName));
     if (!matchedById && !matchedByName) return false;
@@ -287,14 +370,16 @@ const lineMatchesFilters = (line = {}, filters = emptyLineFilters, productColors
 };
 
 const isImageAttachment = (attachment = {}) => {
-  const contentType = String(attachment.contentType || '').toLowerCase();
-  const name = String(attachment.originalFileName || '').toLowerCase();
+  const safeAttachment = attachment || {};
+  const contentType = String(safeAttachment.contentType || '').toLowerCase();
+  const name = String(safeAttachment.originalFileName || '').toLowerCase();
   return contentType.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
 };
 
 const attachmentLabel = (attachment = {}) => {
-  const name = attachment.originalFileName || 'Attachment';
-  return attachment.importedFromExcel ? `${name} · Imported From Excel` : name;
+  const safeAttachment = attachment || {};
+  const name = safeAttachment.originalFileName || 'Attachment';
+  return safeAttachment.importedFromExcel ? `${name} · Imported From Excel` : name;
 };
 
 const lineToForm = (line, productColors = []) => {
@@ -323,7 +408,7 @@ const lineToForm = (line, productColors = []) => {
   };
 };
 
-const formToLine = (form) => ({
+const formToLine = (form = {}) => ({
   materialGroupNo: asNumber(form.materialGroupNo),
   materialType: String(form.materialType || '').trim(),
   sapCode: String(form.sapCode || '').trim(),
@@ -547,7 +632,7 @@ function PackingDialog({ open, record, productColors = [], saving, onClose, onSa
   useEffect(() => {
     setPackingName(record?.packingName || '');
     setSequence(record?.sequence ?? '');
-    setApplicableProductColorIds(productColorIdsForPacking(record, productColors));
+    setApplicableProductColorIds(record ? productColorIdsForPacking(record, productColors) : []);
   }, [open, record, productColors]);
 
   const toggleProductColor = (productColorId) => {
@@ -641,11 +726,11 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
       ...current,
       productColorMasterId,
       colorName: master?.productColor || current.colorName,
-      patternNumber: master?.patternNumber || current.patternNumber,
-      season: master?.season || current.season
+      patternNumber: current.patternNumber,
+      season: current.season
     }));
   };
-  const canSave = Boolean(form.productColorMasterId) && form.colorName.trim() && form.patternNumber.trim() && form.season.trim();
+  const canSave = Boolean(form.productColorMasterId) && form.colorName.trim();
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="sm">
@@ -667,13 +752,12 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
           >
             {productColorMasters.map((item) => (
               <MenuItem key={item.id} value={item.id}>
-                {[item.productColor, item.season, item.patternNumber, item.styleName].filter(Boolean).join(' · ')}
+                {item.productColor}
               </MenuItem>
             ))}
           </TextField>
-          <TextField required label="Product Color" value={form.colorName} placeholder="BLACK" disabled />
-          <TextField required label="Pattern Number" value={form.patternNumber} placeholder="LLB 352 A" disabled />
-          <TextField required label="Season" value={form.season} placeholder="F26" disabled />
+          <TextField required label="Product / Style Color" value={form.colorName} placeholder="BLACK" disabled />
+          <Alert severity="info" sx={{ py: 0.25 }}>Pattern Number and Season belong to this BOM, not Product Color Master.</Alert>
           <Button component={RouterLink} to="/product-colors" size="small" sx={{ alignSelf: 'flex-start', textTransform: 'none' }}>
             Manage Product Color Master
           </Button>
@@ -819,7 +903,7 @@ function AttachmentCards({
 
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to delete files.' : 'Delete'}>
                   <span>
-                    <IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete(attachment.id)}>
+                    <IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete(attachment)}>
                       <Delete fontSize="inherit" />
                     </IconButton>
                   </span>
@@ -871,7 +955,7 @@ function LineTable({ rows, productColors = [], onEdit, onDelete, onAttach, empty
           {!rows.length ? (
             <TableRow><TableCell colSpan={columns.length + 2} align="center" sx={{ py: 2.5, color: 'text.secondary' }}>{emptyText}</TableCell></TableRow>
           ) : rows.map((line) => (
-            <TableRow key={line.id} hover>
+            <TableRow key={line.id} hover data-bom-line-id={line.id} sx={{ scrollMarginTop: 96 }}>
               {columns.map(([label, render]) => (
                 <TableCell key={label} sx={{ fontSize: '0.75rem', verticalAlign: 'top', maxWidth: label === 'Position Description' ? 220 : 170, whiteSpace: 'normal', wordBreak: 'break-word' }}>
                   {render(line) ?? '—'}
@@ -881,7 +965,7 @@ function LineTable({ rows, productColors = [], onEdit, onDelete, onAttach, empty
               <TableCell sx={{ whiteSpace: 'nowrap' }}>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Add Line Image Or File'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onAttach(line)}><Image fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Edit'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onEdit(line)}><Edit fontSize="small" /></IconButton></span></Tooltip>
-                <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Delete'}><span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete(line.id)}><Delete fontSize="small" /></IconButton></span></Tooltip>
+                <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Delete'}><span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete(line)}><Delete fontSize="small" /></IconButton></span></Tooltip>
               </TableCell>
             </TableRow>
           ))}
@@ -896,6 +980,8 @@ export default function BomDetailPage() {
   const canWrite = canManageBom();
   const writeBlockedMessage = 'BOM permission is required to modify BOM data.';
   const fileRef = useRef(null);
+  const scrollRestoreRef = useRef(null);
+  const scrollTargetRef = useRef(null);
 
   const [bom, setBom] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -913,29 +999,83 @@ export default function BomDetailPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewSavingId, setReviewSavingId] = useState('');
   const [lineFilters, setLineFilters] = useState(emptyLineFilters);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
 
   const notify = useCallback((message, severity = 'success') => setNotice({ open: true, severity, message }), []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ keepScroll = false, showLoading = true } = {}) => {
+    const scrollY = keepScroll && typeof window !== 'undefined' ? window.scrollY : null;
+
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       const [data, masterResponse, reviews] = await Promise.all([
         getBom(bomId),
         listMasterData('productColor', { page: 0, size: 200 }),
         listBomMprReviews(bomId)
       ]);
+
+      if (scrollY !== null) {
+        scrollRestoreRef.current = scrollY;
+      }
+
       setBom(data);
       setProductColorMasters(Array.isArray(masterResponse) ? masterResponse : (masterResponse?.content || masterResponse?.items || []));
       setMprReviews(Array.isArray(reviews) ? reviews : []);
       setHeaderForm(data?.header || {});
+      return data;
     } catch (error) {
       notify(getApiError(error, 'Unable to load BOM.'), 'error');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [bomId, notify]);
 
+  const reloadWithoutJump = useCallback(() => load({ keepScroll: true, showLoading: false }), [load]);
+
+  const scrollToCreatedTarget = useCallback((selector) => {
+    if (selector) scrollTargetRef.current = selector;
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (loading || scrollRestoreRef.current === null || typeof window === 'undefined') return;
+
+    const scrollY = scrollRestoreRef.current;
+    scrollRestoreRef.current = null;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: scrollY, left: 0, behavior: 'auto' });
+      });
+    });
+  }, [bom, loading]);
+
+  useEffect(() => {
+    if (loading || !scrollTargetRef.current || typeof document === 'undefined') return;
+
+    const selector = scrollTargetRef.current;
+    scrollTargetRef.current = null;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const element = document.querySelector(selector);
+        if (!element) return;
+
+        element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        const previousBoxShadow = element.style.boxShadow;
+        const previousTransition = element.style.transition;
+        element.style.transition = 'box-shadow 180ms ease';
+        element.style.boxShadow = '0 0 0 3px rgba(16, 59, 92, 0.28)';
+
+        window.setTimeout(() => {
+          element.style.boxShadow = previousBoxShadow;
+          element.style.transition = previousTransition;
+        }, 1600);
+      });
+    });
+  }, [bom, loading]);
 
   const productColors = useMemo(() => productColorsForBom(bom), [bom]);
   const allBomLines = useMemo(() => [
@@ -986,6 +1126,22 @@ export default function BomDetailPage() {
     () => rootAttachments.filter((item) => String(item.scope || 'BOM').toUpperCase() === 'BOM'),
     [rootAttachments]
   );
+
+  const requestDelete = useCallback((target) => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    setDeleteTarget(target || null);
+  }, [canWrite, notify]);
+
+  const closeDeleteDialog = useCallback(() => {
+    if (!deleteSaving) setDeleteTarget(null);
+  }, [deleteSaving]);
+
+  const lineDeleteLabel = useCallback((line = {}) => (
+    [line.materialType, line.positionDescription || line.position, line.detailNo]
+      .filter(Boolean)
+      .join(' — ') || line.id || 'this BOM line'
+  ), []);
+
   const saveHeader = async () => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     try {
@@ -993,7 +1149,7 @@ export default function BomDetailPage() {
       await updateBom(bomId, { bomNo: bom.bomNo, bomName: bom.bomName, header: headerForm });
       setHeaderOpen(false);
       notify('BOM Header Saved.');
-      await load();
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to save BOM header.'), 'error');
     } finally {
@@ -1003,16 +1159,28 @@ export default function BomDetailPage() {
 
   const saveLine = async (payload) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    const currentLineCtx = lineCtx || {};
+    const isCreate = !currentLineCtx?.record?.id;
+    const packingId = currentLineCtx?.packingId || '';
+
     try {
       setSaving(true);
-      if (lineCtx?.record?.id) {
-        await updateBomLine(bomId, lineCtx.record.id, payload);
+      let savedLine = null;
+      if (isCreate) {
+        savedLine = await addBomLine(bomId, payload, packingId);
       } else {
-        await addBomLine(bomId, payload, lineCtx?.packingId || '');
+        await updateBomLine(bomId, currentLineCtx.record.id, payload);
       }
       setLineCtx(null);
       notify('BOM Line Saved.');
-      await load();
+
+      if (isCreate) {
+        const nextBom = await load({ keepScroll: false, showLoading: false });
+        const createdLineId = resolveCreatedLineId(savedLine, nextBom, payload, packingId);
+        scrollToCreatedTarget(createdLineId ? `[data-bom-line-id="${cssAttributeEscape(createdLineId)}"]` : '');
+      } else {
+        await reloadWithoutJump();
+      }
     } catch (error) {
       notify(getApiError(error, 'Unable to save BOM line.'), 'error');
     } finally {
@@ -1025,7 +1193,7 @@ export default function BomDetailPage() {
     try {
       await deleteBomLine(bomId, lineId);
       notify('BOM Line Deleted.');
-      await load();
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to delete BOM line.'), 'error');
     }
@@ -1033,17 +1201,27 @@ export default function BomDetailPage() {
 
   const saveProductColor = async (payload) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    const isCreate = !productColorCtx?.record?.id;
+
     try {
       setSaving(true);
-      if (productColorCtx?.record?.id) {
+      let savedProductColor = null;
+      if (isCreate) {
+        savedProductColor = await addBomProductColor(bomId, payload);
+        notify('Product Color link created. Manage the shared image in Product Color Master edit screen.');
+      } else {
         await updateBomProductColor(bomId, productColorCtx.record.id, payload);
         notify('Product Color Information Updated. Linked Packing And Material Line Views Now Use The New Information.');
-      } else {
-        await addBomProductColor(bomId, payload);
-        notify('Product Color Created. Upload One Backpack Image For This Color.');
       }
       setProductColorCtx(null);
-      await load();
+
+      if (isCreate) {
+        const nextBom = await load({ keepScroll: false, showLoading: false });
+        const createdProductColorId = resolveCreatedProductColorId(savedProductColor, nextBom, payload);
+        scrollToCreatedTarget(createdProductColorId ? `[data-bom-product-color-id="${cssAttributeEscape(createdProductColorId)}"]` : '');
+      } else {
+        await reloadWithoutJump();
+      }
     } catch (error) {
       notify(getApiError(error, 'Unable to save Product Color.'), 'error');
     } finally {
@@ -1057,7 +1235,7 @@ export default function BomDetailPage() {
       setSaving(true);
       await deleteBomProductColor(bomId, productColorId);
       notify('Product Color Deleted.');
-      await load();
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to delete Product Color.'), 'error');
     } finally {
@@ -1067,16 +1245,26 @@ export default function BomDetailPage() {
 
   const savePacking = async (payload) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    const isCreate = !packingCtx?.record?.id;
+
     try {
       setSaving(true);
-      if (packingCtx?.record?.id) {
-        await updatePacking(bomId, packingCtx.record.id, payload);
+      let savedPacking = null;
+      if (isCreate) {
+        savedPacking = await addPacking(bomId, payload);
       } else {
-        await addPacking(bomId, payload);
+        await updatePacking(bomId, packingCtx.record.id, payload);
       }
       setPackingCtx(null);
       notify('Packing Saved.');
-      await load();
+
+      if (isCreate) {
+        const nextBom = await load({ keepScroll: false, showLoading: false });
+        const createdPackingId = resolveCreatedPackingId(savedPacking, nextBom, payload);
+        scrollToCreatedTarget(createdPackingId ? `[data-bom-packing-id="${cssAttributeEscape(createdPackingId)}"]` : '');
+      } else {
+        await reloadWithoutJump();
+      }
     } catch (error) {
       notify(getApiError(error, 'Unable to save packing.'), 'error');
     } finally {
@@ -1089,7 +1277,7 @@ export default function BomDetailPage() {
     try {
       await deletePacking(bomId, packingId);
       notify('Packing Deleted.');
-      await load();
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to delete packing.'), 'error');
     }
@@ -1104,8 +1292,8 @@ export default function BomDetailPage() {
     try {
       setSaving(true);
       await replaceBomExcel(bomId, file);
-      notify('BOM Excel Replaced. Product Color Items, Materials, And Packings Were Re-Imported.');
-      await load();
+      notify('BOM Excel replaced. Product / Style Colors and Child Colors were linked to Product Color Master; materials and packings were re-imported into this BOM.');
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to replace BOM Excel.'), 'error');
     } finally {
@@ -1133,7 +1321,7 @@ export default function BomDetailPage() {
       setSaving(true);
       await uploadBomAttachment(bomId, file, options);
       notify('File Uploaded.');
-      await load();
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to upload file.'), 'error');
     } finally {
@@ -1146,7 +1334,7 @@ export default function BomDetailPage() {
     try {
       await deleteBomAttachment(bomId, attachmentId);
       notify('Attachment Deleted.');
-      await load();
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to delete attachment.'), 'error');
     }
@@ -1180,13 +1368,36 @@ export default function BomDetailPage() {
     }
   };
 
+  const confirmDeleteTarget = async () => {
+    if (!deleteTarget?.type || !deleteTarget?.id) {
+      setDeleteTarget(null);
+      return;
+    }
+
+    setDeleteSaving(true);
+    try {
+      if (deleteTarget.type === 'line') {
+        await removeLine(deleteTarget.id);
+      } else if (deleteTarget.type === 'packing') {
+        await removePacking(deleteTarget.id);
+      } else if (deleteTarget.type === 'productColor') {
+        await removeProductColor(deleteTarget.id);
+      } else if (deleteTarget.type === 'attachment') {
+        await deleteAttachment(deleteTarget.id);
+      }
+      setDeleteTarget(null);
+    } finally {
+      setDeleteSaving(false);
+    }
+  };
+
   const applyMprReview = async (reviewId, comment) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     try {
       setReviewSavingId(reviewId);
       await applyBomMprReview(bomId, reviewId, { comment });
       notify('Sales MPR change was applied to the selected BOM line.');
-      await load();
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to apply the MPR change to BOM.'), 'error');
     } finally {
@@ -1200,7 +1411,7 @@ export default function BomDetailPage() {
       setReviewSavingId(reviewId);
       await recheckBomMprReview(bomId, reviewId, { comment });
       notify('The item was returned to Sales for recheck.');
-      await load();
+      await reloadWithoutJump();
     } catch (error) {
       notify(getApiError(error, 'Unable to return the MPR change to Sales.'), 'error');
     } finally {
@@ -1354,7 +1565,14 @@ export default function BomDetailPage() {
           productColors={productColors}
           emptyText="No Core BOM lines match the current filter."
           onEdit={(record) => setLineCtx({ record, packingId: '' })}
-          onDelete={removeLine}
+          onDelete={(record) => requestDelete({
+            type: 'line',
+            id: record?.id,
+            itemName: 'BOM Line',
+            label: lineDeleteLabel(record),
+            message: <>Delete BOM Line <b>{lineDeleteLabel(record)}</b>?</>,
+            warning: 'This will remove only the selected BOM material line.'
+          })}
           onAttach={(record) => setAttachmentLineId(record.id) || setAttachmentScope('LINE')}
           actionsDisabled={!canWrite}
         />
@@ -1382,7 +1600,7 @@ export default function BomDetailPage() {
         const filteredPackingLines = (packing.lines || []).filter((line) => lineMatchesFilters(line, lineFilters, productColors));
 
         return (
-          <Accordion key={packing.id} defaultExpanded>
+          <Accordion key={packing.id} defaultExpanded data-bom-packing-id={packing.id} sx={{ scrollMarginTop: 96 }}>
             <AccordionSummary component="div" expandIcon={<ExpandMore />}>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ width: 1, pr: 1 }}>
                 <Typography sx={{ fontWeight: 900 }}>{packing.packingName}</Typography>
@@ -1390,7 +1608,17 @@ export default function BomDetailPage() {
                 <Chip size="small" label={linkedProductColors.length ? `${linkedProductColors.length} Product Colors` : 'All Product Colors'} variant="outlined" />
                 <Box sx={{ flex: 1 }} />
                 <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Packing'}><span><IconButton size="small" disabled={!canWrite} onClick={(event) => { event.stopPropagation(); setPackingCtx({ record: packing }); }}><Edit fontSize="small" /></IconButton></span></Tooltip>
-                <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete Packing'}><span><IconButton color="error" size="small" disabled={!canWrite} onClick={(event) => { event.stopPropagation(); removePacking(packing.id); }}><Delete fontSize="small" /></IconButton></span></Tooltip>
+                <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete Packing'}><span><IconButton color="error" size="small" disabled={!canWrite} onClick={(event) => {
+                      event.stopPropagation();
+                      requestDelete({
+                        type: 'packing',
+                        id: packing.id,
+                        itemName: 'Packing',
+                        label: packing.packingName || 'this packing',
+                        message: <>Delete Packing <b>{packing.packingName || 'this packing'}</b>?</>,
+                        warning: 'This will remove the selected Packing and its material lines from this BOM.'
+                      });
+                    }}><Delete fontSize="small" /></IconButton></span></Tooltip>
               </Stack>
             </AccordionSummary>
             <AccordionDetails>
@@ -1413,7 +1641,22 @@ export default function BomDetailPage() {
               {(packing.attachments || []).length > 0 && (
                 <Box sx={{ mb: 1.25 }}>
                   <Typography sx={{ fontSize: '0.73rem', color: 'text.secondary' }}>Imported Packing Files</Typography>
-                  <AttachmentCards attachments={packing.attachments || []} bomId={bomId} onDelete={deleteAttachment} onOpen={openAttachment} onDownload={downloadAttachment} actionsDisabled={!canWrite} emptyText="" />
+                  <AttachmentCards
+                    attachments={packing.attachments || []}
+                    bomId={bomId}
+                    onDelete={(attachment) => requestDelete({
+                      type: 'attachment',
+                      id: attachment?.id,
+                      itemName: 'Attachment',
+                      label: attachmentLabel(attachment),
+                      message: <>Delete file <b>{attachmentLabel(attachment)}</b>?</>,
+                      warning: 'This will remove the selected file from this BOM.'
+                    })}
+                    onOpen={openAttachment}
+                    onDownload={downloadAttachment}
+                    actionsDisabled={!canWrite}
+                    emptyText=""
+                  />
                 </Box>
               )}
               <Box sx={{ mt: 1.5 }}>
@@ -1422,7 +1665,14 @@ export default function BomDetailPage() {
                   productColors={productColors}
                   emptyText="No Packing lines match the current filter."
                   onEdit={(record) => setLineCtx({ record, packingId: packing.id })}
-                  onDelete={removeLine}
+                  onDelete={(record) => requestDelete({
+                    type: 'line',
+                    id: record?.id,
+                    itemName: 'Packing Line',
+                    label: lineDeleteLabel(record),
+                    message: <>Delete Packing Line <b>{lineDeleteLabel(record)}</b>?</>,
+                    warning: 'This will remove only the selected Packing material line.'
+                  })}
                   onAttach={(record) => setAttachmentLineId(record.id) || setAttachmentScope('LINE')}
                   actionsDisabled={!canWrite}
                 />
@@ -1465,7 +1715,22 @@ export default function BomDetailPage() {
         <Divider sx={{ my: 1.75 }} />
 
         <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>Whole BOM Files</Typography>
-        <AttachmentCards attachments={bomAttachments} bomId={bomId} onDelete={deleteAttachment} onOpen={openAttachment} onDownload={downloadAttachment} actionsDisabled={!canWrite} emptyText="No BOM-level images/files." />
+        <AttachmentCards
+          attachments={bomAttachments}
+          bomId={bomId}
+          onDelete={(attachment) => requestDelete({
+            type: 'attachment',
+            id: attachment?.id,
+            itemName: 'Attachment',
+            label: attachmentLabel(attachment),
+            message: <>Delete file <b>{attachmentLabel(attachment)}</b>?</>,
+            warning: 'This will remove the selected file from this BOM.'
+          })}
+          onOpen={openAttachment}
+          onDownload={downloadAttachment}
+          actionsDisabled={!canWrite}
+          emptyText="No BOM-level images/files."
+        />
 
         <Box sx={{ mt: 2 }}>
           <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
@@ -1483,7 +1748,7 @@ export default function BomDetailPage() {
             {productColors.map((productColor) => {
               const master = productColorMasterForBom(productColor, productColorMasters);
               return (
-                <Paper key={productColor.id} elevation={0} sx={{ p: 1.2, border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
+                <Paper key={productColor.id} elevation={0} data-bom-product-color-id={productColor.id} sx={{ p: 1.2, border: '1px solid #e5e7eb', borderRadius: 1.5, scrollMarginTop: 96 }}>
                   <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
                     <Box>
                       <Typography sx={{ fontWeight: 900, fontSize: '0.8rem' }}>{productColor.colorName}</Typography>
@@ -1494,7 +1759,14 @@ export default function BomDetailPage() {
                       <Tooltip title={!canWrite ? writeBlockedMessage : 'Change Product Color Master link'}><span><Button size="small" startIcon={<Edit />} disabled={!canWrite} onClick={() => setProductColorCtx({ record: productColor })} sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
                         Change Link
                       </Button></span></Tooltip>
-                      <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete BOM Product Color link'}><span><Button size="small" color="error" startIcon={<Delete />} disabled={!canWrite} onClick={() => removeProductColor(productColor.id)} sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
+                      <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete BOM Product Color link'}><span><Button size="small" color="error" startIcon={<Delete />} disabled={!canWrite} onClick={() => requestDelete({
+                          type: 'productColor',
+                          id: productColor.id,
+                          itemName: 'Product Color Link',
+                          label: productColorLabel(productColor) || productColor.colorName || 'this Product Color link',
+                          message: <>Delete Product Color Link <b>{productColorLabel(productColor) || productColor.colorName || 'this Product Color link'}</b>?</>,
+                          warning: 'This removes only the Product Color link from this BOM. It does not delete the Product Color Master record.'
+                        })} sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
                         Delete Link
                       </Button></span></Tooltip>
                     </Stack>
@@ -1556,6 +1828,19 @@ export default function BomDetailPage() {
         onClose={() => setReviewOpen(false)}
         onApply={applyMprReview}
         onRecheck={recheckMprReview}
+      />
+
+      <ConfirmDeleteDialog
+        open={canWrite && Boolean(deleteTarget)}
+        record={deleteTarget}
+        itemName={deleteTarget?.itemName || 'Item'}
+        title={`Delete ${deleteTarget?.itemName || 'Item'}?`}
+        subtitle="Please confirm before deleting this item."
+        message={deleteTarget?.message}
+        warning={deleteTarget?.warning}
+        deleting={deleteSaving}
+        onClose={closeDeleteDialog}
+        onConfirm={confirmDeleteTarget}
       />
 
       <Snackbar open={notice.open} autoHideDuration={3500} onClose={() => setNotice((current) => ({ ...current, open: false }))}>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Pagination, Snackbar, Stack, Typography } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { createOrder, deleteOrder, getApiError, listOrders, updateOrder } from '../../services/orderBomMprService';
@@ -9,6 +9,34 @@ import OrderTable from './OrderTable';
 
 const emptyFilters = { keyword: '', season: '', status: '' };
 const SALES_WRITE_MESSAGE = 'Sales permission is required to create, edit, or delete orders.';
+
+const cssAttributeEscape = (value) => (
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(String(value || ''))
+    : String(value || '').replace(/["\\]/g, '\\$&')
+);
+
+const responseRecordId = (response) => {
+  const candidates = [response, response?.data, response?.item, response?.result, response?.record].filter((item) => item && typeof item === 'object');
+  for (const item of candidates) {
+    if (item?.id) return String(item.id);
+  }
+  return '';
+};
+
+const normalizeText = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+const lastOf = (items = []) => items[items.length - 1];
+
+const resolveCreatedOrderId = (created, rows = [], payload = {}) => {
+  const directId = responseRecordId(created);
+  if (directId) return directId;
+  const matches = rows.filter((row) => (
+    normalizeText(row?.orderNo) === normalizeText(payload.orderNo)
+    && normalizeText(row?.style) === normalizeText(payload.style)
+    && normalizeText(row?.customer) === normalizeText(payload.customer)
+  ));
+  return String((lastOf(matches) || lastOf(rows) || {})?.id || '');
+};
 
 export default function OrdersPage() {
   const navigate = useNavigate();
@@ -25,15 +53,18 @@ export default function OrdersPage() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [notice, setNotice] = useState({ open: false, severity: 'success', message: '' });
+  const scrollTargetRef = useRef('');
 
   const notify = (message, severity = 'success') => setNotice({ open: true, severity, message });
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await listOrders({ ...applied, page, size: 25 });
-      setRows(Array.isArray(data?.content) ? data.content : Array.isArray(data) ? data : []);
+      const nextRows = Array.isArray(data?.content) ? data.content : Array.isArray(data) ? data : [];
+      setRows(nextRows);
       setTotalPages(Math.max(1, data?.totalPages || 1));
       setTotal(data?.totalElements || (Array.isArray(data) ? data.length : 0));
+      return nextRows;
     } catch (error) {
       notify(getApiError(error, 'Unable to load orders.'), 'error');
     } finally {
@@ -42,6 +73,31 @@ export default function OrdersPage() {
   }, [applied, page]);
 
   useEffect(() => { load(); }, [load]);
+
+  const scrollToCreatedOrder = useCallback((id) => {
+    if (id) scrollTargetRef.current = `[data-order-row-id="${cssAttributeEscape(id)}"]`;
+  }, []);
+
+  useEffect(() => {
+    if (loading || !scrollTargetRef.current || typeof document === 'undefined') return;
+    const selector = scrollTargetRef.current;
+    scrollTargetRef.current = '';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const element = document.querySelector(selector);
+        if (!element) return;
+        element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        const previousBoxShadow = element.style.boxShadow;
+        const previousTransition = element.style.transition;
+        element.style.transition = 'box-shadow 180ms ease';
+        element.style.boxShadow = '0 0 0 3px rgba(16, 59, 92, 0.28)';
+        window.setTimeout(() => {
+          element.style.boxShadow = previousBoxShadow;
+          element.style.transition = previousTransition;
+        }, 1600);
+      });
+    });
+  }, [loading, rows]);
 
   const openAdd = () => {
     if (!canWrite) {
@@ -75,14 +131,20 @@ export default function OrdersPage() {
       return;
     }
 
+    const isCreate = !formRecord?.id;
+
     setSaving(true);
     try {
-      if (formRecord?.id) await updateOrder(formRecord.id, payload);
-      else await createOrder(payload);
+      let savedOrder = null;
+      if (isCreate) savedOrder = await createOrder(payload);
+      else await updateOrder(formRecord.id, payload);
       setFormOpen(false);
       setFormRecord(null);
       notify('Order saved successfully.');
-      await load();
+      const nextRows = await load();
+      if (isCreate) {
+        scrollToCreatedOrder(resolveCreatedOrderId(savedOrder, nextRows, payload));
+      }
     } catch (error) {
       notify(getApiError(error, 'Unable to save order.'), 'error');
     } finally {

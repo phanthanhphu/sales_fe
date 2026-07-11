@@ -56,7 +56,7 @@ const emptyBomSelection = () => ({
 });
 
 const initialSelection = (boms = []) => Object.fromEntries(
-  boms.map((bom) => [bom.id, emptyBomSelection()])
+  (Array.isArray(boms) ? boms : []).filter(Boolean).map((bom) => [bom.id, emptyBomSelection()])
 );
 
 const productColorsForBom = (bom) => {
@@ -72,11 +72,14 @@ const productColorsForBom = (bom) => {
   }));
 };
 
-const productColorLabel = (item = {}) => [
-  item.colorName,
-  item.patternNumber,
-  item.season
-].filter(Boolean).join(' · ');
+const productColorLabel = (item = {}) => {
+  const safeItem = item || {};
+  return [
+    safeItem.colorName,
+    safeItem.patternNumber,
+    safeItem.season
+  ].filter(Boolean).join(' · ');
+};
 
 const numberValue = (value) => {
   if (value === '' || value === null || value === undefined) return '';
@@ -94,8 +97,46 @@ const formatValue = (value, maximumFractionDigits = 6) => {
   });
 };
 
+const textValue = (value) => {
+  if (value === null || value === undefined || value === '') return '';
+  return String(value);
+};
+
+const vendorCodeValue = (value) => {
+  const text = textValue(value).trim();
+  // Vendor Code is an identifier, not a money/quantity column.
+  // Remove thousands separators only when the whole value is numeric-like.
+  return /^[0-9,]+$/.test(text) ? text.replace(/,/g, '') : text;
+};
+
+const MPR_TEXT_FIELDS = new Set([
+  'styleColorKey',
+  'styleDescription',
+  'styleColor',
+  'shipTo',
+  'salesComment',
+  'sapCode',
+  'materialType',
+  'matFullDescription',
+  'matColor',
+  'matUnit',
+  'currency',
+  'shortNameSupplier',
+  'vendorCode',
+  'vendorName',
+  'matCharger',
+  'matDueDate'
+]);
+
+const renderMprCellValue = (field, value) => {
+  if (field === 'vendorCode') return vendorCodeValue(value);
+  if (MPR_TEXT_FIELDS.has(field)) return textValue(value);
+  return formatValue(value);
+};
+
 const latestBomReview = (line = {}) => {
-  const reviews = Array.isArray(line.bomReviews) ? line.bomReviews : [];
+  const safeLine = line || {};
+  const reviews = Array.isArray(safeLine.bomReviews) ? safeLine.bomReviews : [];
   return reviews.reduce((latest, item) => {
     if (!item) return latest;
     if (!latest) return item;
@@ -126,65 +167,70 @@ const MPR_CORE_SOURCE = '__CORE_BOM__';
 const normalizeText = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
 const includesText = (value, needle) => normalizeText(value).includes(normalizeText(needle));
 
-const mprLineSourceKey = (line = {}) => (
-  !line.packingId && !line.packingName
+const mprLineSourceKey = (line = {}) => {
+  const safeLine = line || {};
+  return !safeLine.packingId && !safeLine.packingName
     ? MPR_CORE_SOURCE
-    : String(line.packingId || line.packingName || '')
-);
+    : String(safeLine.packingId || safeLine.packingName || '');
+};
 
-const mprLineSourceLabel = (line = {}) => (
-  mprLineSourceKey(line) === MPR_CORE_SOURCE
+const mprLineSourceLabel = (line = {}) => {
+  const safeLine = line || {};
+  return mprLineSourceKey(safeLine) === MPR_CORE_SOURCE
     ? 'Core BOM (No Packing)'
-    : (line.packingName || `Packing ${line.packingId || ''}`.trim())
-);
+    : (safeLine.packingName || `Packing ${safeLine.packingId || ''}`.trim());
+};
 
 const mprLineReviewStatus = (line = {}) => latestBomReview(line)?.status || 'NO_REVIEW';
 
 const mprLineMatchesFilters = (line = {}, filters = emptyMprFilters) => {
-  const keyword = String(filters.keyword || '').trim();
-  const reviewStatus = mprLineReviewStatus(line);
+  const safeLine = line || {};
+  const safeFilters = filters || emptyMprFilters;
+  const keyword = String(safeFilters.keyword || '').trim();
+  const reviewStatus = mprLineReviewStatus(safeLine);
 
   if (keyword) {
     const searchable = [
-      line.styleColorKey,
-      line.styleDescription,
-      line.styleColor,
-      line.shipTo,
-      line.salesComment,
-      line.sapCode,
-      line.bomLineNo,
-      line.materialType,
-      line.matFullDescription,
-      line.matColor,
-      line.matUnit,
-      line.shortNameSupplier,
-      line.vendorCode,
-      line.vendorName,
-      line.matCharger,
-      mprLineSourceLabel(line)
+      safeLine.styleColorKey,
+      safeLine.styleDescription,
+      safeLine.styleColor,
+      safeLine.shipTo,
+      safeLine.salesComment,
+      safeLine.sapCode,
+      safeLine.bomLineNo,
+      safeLine.materialType,
+      safeLine.matFullDescription,
+      safeLine.matColor,
+      safeLine.matUnit,
+      safeLine.shortNameSupplier,
+      safeLine.vendorCode,
+      safeLine.vendorName,
+      safeLine.matCharger,
+      mprLineSourceLabel(safeLine)
     ];
     if (!searchable.some((value) => includesText(value, keyword))) return false;
   }
 
-  if (filters.productColor && normalizeText(line.styleColor) !== normalizeText(filters.productColor)) return false;
-  if (filters.source && mprLineSourceKey(line) !== filters.source) return false;
-  if (filters.shipTo && normalizeText(line.shipTo) !== normalizeText(filters.shipTo)) return false;
-  if (filters.reviewStatus && reviewStatus !== filters.reviewStatus) return false;
+  if (safeFilters.productColor && normalizeText(safeLine.styleColor) !== normalizeText(safeFilters.productColor)) return false;
+  if (safeFilters.source && mprLineSourceKey(safeLine) !== safeFilters.source) return false;
+  if (safeFilters.shipTo && normalizeText(safeLine.shipTo) !== normalizeText(safeFilters.shipTo)) return false;
+  if (safeFilters.reviewStatus && reviewStatus !== safeFilters.reviewStatus) return false;
 
   return true;
 };
 
 const salesBomMatchesKeyword = (bom = {}, keyword = '') => {
+  const safeBom = bom || {};
   const needle = String(keyword || '').trim();
   if (!needle) return true;
-  const productColors = productColorsForBom(bom).map((item) => item?.colorName);
-  const packings = (bom.packings || []).map((packing) => packing?.packingName);
+  const productColors = productColorsForBom(safeBom).map((item) => item?.colorName);
+  const packings = (safeBom.packings || []).map((packing) => packing?.packingName);
   return [
-    bom.bomNo,
-    bom.bomName,
-    bom.header?.styleNumber,
-    bom.header?.styleName,
-    bom.header?.season,
+    safeBom.bomNo,
+    safeBom.bomName,
+    safeBom.header?.styleNumber,
+    safeBom.header?.styleName,
+    safeBom.header?.season,
     ...productColors,
     ...packings
   ].some((value) => includesText(value, needle));
@@ -660,6 +706,13 @@ export default function MprTab({ order }) {
     () => unfilteredVisibleLines.filter((line) => mprLineMatchesFilters(line, mprFilters)),
     [unfilteredVisibleLines, mprFilters]
   );
+  const subtotalMatAmountUsd = useMemo(
+    () => visibleLines.reduce((total, line) => {
+      const value = Number(line?.matAmountUsd);
+      return Number.isFinite(value) ? total + value : total;
+    }, 0),
+    [visibleLines]
+  );
   const canEditLines = Boolean(canWrite && mpr?.id && (!preview || preview?.id === mpr.id));
   const canManageBatches = Boolean(canWrite && mpr?.id && (!preview || preview?.id === mpr.id));
 
@@ -707,9 +760,6 @@ export default function MprTab({ order }) {
         <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" spacing={2}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Sales / MPR</Typography>
-            <Typography sx={{ mt: 0.25, fontSize: '.8rem', color: 'text.secondary' }}>
-              Select submitted BOM and Product Color. Original BOM rows without a Packing are always included; Packing is optional and adds extra rows only for the applicable Product Color. Duplicate material rows within the same Product Color are kept once, with the original BOM row taking priority.
-            </Typography>
           </Box>
           <Stack direction="row" flexWrap="wrap" spacing={1}>
             <Button startIcon={<Refresh />} onClick={load} disabled={loading} sx={{ textTransform: 'none' }}>Refresh</Button>
@@ -745,9 +795,6 @@ export default function MprTab({ order }) {
             <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={0.75} alignItems={{ md: 'center' }}>
               <Box>
                 <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Sales BOM Search</Typography>
-                <Typography sx={{ fontSize: '.75rem', color: 'text.secondary' }}>
-                  Search submitted BOM number, BOM name, style, product color, or packing before creating MPR.
-                </Typography>
               </Box>
               <Typography sx={{ fontSize: '.78rem', color: 'text.secondary', fontWeight: 700 }}>
                 Showing {salesFilteredBoms.length} / {boms.length} BOM(s)
@@ -851,9 +898,6 @@ export default function MprTab({ order }) {
                   <Typography sx={{ fontSize: '.8rem', fontWeight: 900, mt: 1.5, mb: 0.2 }}>
                     2. Add Packing (Optional)
                   </Typography>
-                  <Typography sx={{ fontSize: '.75rem', color: 'text.secondary', mb: 0.5 }}>
-                    Core BOM rows without a Packing are always included for each selected Product Color. Select Packing only to add its extra rows.
-                  </Typography>
                   <Stack direction="row" flexWrap="wrap">
                     {(bom.packings || []).map((packing) => (
                       <FormControlLabel
@@ -875,15 +919,7 @@ export default function MprTab({ order }) {
           <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 1.25 }}>
             <Box>
               <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>MPR Generation Batches</Typography>
-              <Typography sx={{ mt: 0.2, fontSize: '.76rem', color: 'text.secondary' }}>
-                Each row below is one Create / Add To MPR action. Update applies PO Qty and Ship To to all Core and selected Packing lines for the selected Product Color in that batch; Delete removes that batch only.
-              </Typography>
             </Box>
-            {!canManageBatches && (
-              <Typography sx={{ fontSize: '.76rem', color: 'text.secondary' }}>
-                Create the current preview first before deleting a saved batch.
-              </Typography>
-            )}
           </Stack>
 
           <Stack spacing={1}>
@@ -964,22 +1000,14 @@ export default function MprTab({ order }) {
                 </Stack>
               )}
             </Stack>
-            <Typography sx={{ mt: 0.35, fontSize: '.76rem', color: 'text.secondary' }}>
-              POUCH has been removed. MPR always includes original BOM Core rows for every selected Product Color; selected Packing rows are added after Core rows. Matching material items within the same Product Color are kept once, with Core taking priority. Every Add To MPR action keeps existing rows and appends only genuinely new material rows. BOM rows without a Consumption Unit are skipped when MPR is generated.
-              {!canEditLines && ' Create MPR first to edit or delete Preview rows.'}
-            </Typography>
 
             <Box sx={{ mt: 1.25, p: 1.15, border: '1px solid #e5e7eb', borderRadius: 1.5, backgroundColor: '#fbfdff' }}>
               <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={0.75} sx={{ mb: 0.85 }}>
-                <Box>
-                  <Typography sx={{ fontWeight: 900, fontSize: '.83rem', color: '#103B5C' }}>Sales / MPR Line Search & Filter</Typography>
-                  <Typography sx={{ fontSize: '.73rem', color: 'text.secondary' }}>
-                    Search material, SAP code, style color, child color, Ship To, vendor, packing, or BOM-review status.
-                  </Typography>
-                </Box>
-                <Typography sx={{ fontSize: '.76rem', color: 'text.secondary', fontWeight: 700 }}>
-                  Showing {visibleLines.length} / {unfilteredVisibleLines.length} line(s)
-                </Typography>
+                <Typography sx={{ fontWeight: 900, fontSize: '.83rem', color: '#103B5C' }}>Sales / MPR Line Search & Filter</Typography>
+                <Stack direction="row" flexWrap="wrap" spacing={1} useFlexGap alignItems="center">
+                  <Chip size="small" variant="outlined" label={`Showing ${visibleLines.length} / ${unfilteredVisibleLines.length} line(s)`} />
+                  <Chip size="small" variant="outlined" label={`SUBTOTAL MAT AMOUNT in USD: ${formatValue(subtotalMatAmountUsd, 2)}`} />
+                </Stack>
               </Stack>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 1 }}>
                 <TextField
@@ -1014,10 +1042,19 @@ export default function MprTab({ order }) {
             </Box>
           </Box>
 
+          <Box sx={{ px: 1.5, py: 0.9, display: 'flex', justifyContent: 'flex-end', borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
+            <Typography sx={{ fontWeight: 900, color: '#103B5C', fontSize: '.82rem' }}>
+              =SUBTOTAL MAT AMOUNT in USD: {formatValue(subtotalMatAmountUsd, 2)}
+            </Typography>
+          </Box>
+
           <TableContainer sx={{ maxHeight: 540 }}>
-            <Table stickyHeader size="small" sx={{ minWidth: 5000 }}>
+            <Table stickyHeader size="small" sx={{ minWidth: 5120 }}>
               <TableHead>
                 <TableRow>
+                  <TableCell sx={{ minWidth: 70, fontWeight: 900, backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>
+                    No.
+                  </TableCell>
                   {MPR_COLUMNS.map(([, header, minWidth]) => (
                     <TableCell key={header} sx={{ minWidth, fontWeight: 900, backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>
                       {header}
@@ -1033,8 +1070,9 @@ export default function MprTab({ order }) {
                   const colorGroups = [];
                   const groupByColor = new Map();
 
-                  visibleLines.forEach((line) => {
-                    const color = line.styleColor || 'No Product Color';
+                  visibleLines.forEach((line, index) => {
+                    const lineWithRowNo = { ...line, __displayNo: index + 1 };
+                    const color = lineWithRowNo.styleColor || 'No Product Color';
                     if (!groupByColor.has(color)) {
                       const group = { color, packingGroups: [], packingByKey: new Map(), lineCount: 0 };
                       groupByColor.set(color, group);
@@ -1042,26 +1080,26 @@ export default function MprTab({ order }) {
                     }
 
                     const colorGroup = groupByColor.get(color);
-                    const isCoreLine = !line.packingId && !line.packingName;
-                    const packingKey = line.packingId || line.packingName || 'CORE_BOM';
+                    const isCoreLine = !lineWithRowNo.packingId && !lineWithRowNo.packingName;
+                    const packingKey = lineWithRowNo.packingId || lineWithRowNo.packingName || 'CORE_BOM';
                     if (!colorGroup.packingByKey.has(packingKey)) {
                       const packingGroup = {
                         key: packingKey,
-                        name: isCoreLine ? 'Core BOM (No Packing)' : (line.packingName || `Packing ${line.packingId}`),
+                        name: isCoreLine ? 'Core BOM (No Packing)' : (lineWithRowNo.packingName || `Packing ${lineWithRowNo.packingId}`),
                         lines: []
                       };
                       colorGroup.packingByKey.set(packingKey, packingGroup);
                       colorGroup.packingGroups.push(packingGroup);
                     }
 
-                    colorGroup.packingByKey.get(packingKey).lines.push(line);
+                    colorGroup.packingByKey.get(packingKey).lines.push(lineWithRowNo);
                     colorGroup.lineCount += 1;
                   });
 
                   return colorGroups.flatMap((colorGroup) => ([
                     <TableRow key={`color-group-${colorGroup.color}`}>
                       <TableCell
-                        colSpan={MPR_COLUMNS.length + 1}
+                        colSpan={MPR_COLUMNS.length + 2}
                         sx={{
                           py: 0.9,
                           fontWeight: 900,
@@ -1076,7 +1114,7 @@ export default function MprTab({ order }) {
                     ...colorGroup.packingGroups.flatMap((packingGroup) => ([
                       <TableRow key={`packing-group-${colorGroup.color}-${packingGroup.key}`}>
                         <TableCell
-                          colSpan={MPR_COLUMNS.length + 1}
+                          colSpan={MPR_COLUMNS.length + 2}
                           sx={{
                             py: 0.65,
                             pl: 3,
@@ -1090,11 +1128,12 @@ export default function MprTab({ order }) {
                       </TableRow>,
                       ...packingGroup.lines.map((line) => (
                         <TableRow key={line.id} hover>
+                          <TableCell sx={{ whiteSpace: 'nowrap', verticalAlign: 'top', fontWeight: 700 }}>
+                            {line.__displayNo}
+                          </TableCell>
                           {MPR_COLUMNS.map(([field, header]) => (
                             <TableCell key={header} sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
-                              {field === 'matFullDescription' || field === 'salesComment'
-                                ? (line[field] || '')
-                                : formatValue(line[field])}
+                              {renderMprCellValue(field, line[field])}
                             </TableCell>
                           ))}
                           <TableCell sx={{ whiteSpace: 'nowrap' }}>
@@ -1129,7 +1168,7 @@ export default function MprTab({ order }) {
                 })()}
                 {!visibleLines.length && (
                   <TableRow>
-                    <TableCell colSpan={MPR_COLUMNS.length + 1} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                    <TableCell colSpan={MPR_COLUMNS.length + 2} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                       No MPR rows were generated.
                     </TableCell>
                   </TableRow>

@@ -22,7 +22,7 @@ const getEndpoint = (type) => {
 };
 
 const cleanParams = (params = {}) => {
-  return Object.entries(params).reduce((result, [key, value]) => {
+  return Object.entries(params || {}).reduce((result, [key, value]) => {
     if (value === undefined || value === null || value === '') {
       return result;
     }
@@ -33,7 +33,7 @@ const cleanParams = (params = {}) => {
 };
 
 export const listMasterData = (type, params = {}) => {
-  return apiClient.get(getEndpoint(type), { params: cleanParams(params) });
+  return apiClient.get(getEndpoint(type), { params: cleanParams(params || {}) });
 };
 
 export const getMasterDataById = (type, id) => {

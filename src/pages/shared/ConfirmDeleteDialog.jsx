@@ -11,21 +11,55 @@ import {
 } from '@mui/material';
 import { Close, DeleteForever } from '@mui/icons-material';
 
-export default function ConfirmDeleteDialog({ open, record, config, deleting, onClose, onConfirm }) {
-  const label = record?.[config.primaryField] || config.singular;
+const fallbackLabel = (record, config, itemName) => {
+  if (!record || typeof record !== 'object') return itemName || config?.singular || 'this item';
+  const primaryField = config?.primaryField;
+  return (
+    (primaryField && record?.[primaryField])
+    || record?.label
+    || record?.name
+    || record?.title
+    || record?.code
+    || record?.id
+    || itemName
+    || config?.singular
+    || 'this item'
+  );
+};
+
+export default function ConfirmDeleteDialog({
+  open,
+  record,
+  config = {},
+  title,
+  subtitle,
+  message,
+  warning,
+  itemName,
+  confirmText = 'Delete',
+  deleting,
+  onClose,
+  onConfirm
+}) {
+  const singular = itemName || config?.singular || 'Item';
+  const label = fallbackLabel(record, config, itemName);
+  const dialogTitle = title || `Delete ${singular}`;
+  const helperText = subtitle || 'Please confirm before deleting this item.';
+  const confirmMessage = message || <>Delete <b>{label}</b> permanently?</>;
+  const warningText = warning || 'This action cannot be undone. The system may block deletion when this record is referenced by other data.';
 
   return (
     <Dialog
-      open={open}
+      open={Boolean(open)}
       onClose={deleting ? undefined : onClose}
       maxWidth="xs"
       fullWidth
       PaperProps={{ sx: { borderRadius: 2 } }}
     >
       <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#b91c1c' }}>
-        Delete {config.singular}
+        {dialogTitle}
         <Typography sx={{ mt: 0.25, fontSize: '0.8rem', color: 'text.secondary', fontWeight: 400 }}>
-          This action permanently removes the selected record.
+          {helperText}
         </Typography>
         <IconButton
           onClick={onClose}
@@ -39,11 +73,13 @@ export default function ConfirmDeleteDialog({ open, record, config, deleting, on
 
       <DialogContent dividers>
         <Typography sx={{ mb: 1.25 }}>
-          Delete <b>{label}</b> permanently?
+          {confirmMessage}
         </Typography>
-        <Alert severity="warning" sx={{ borderRadius: 1.25 }}>
-          This action cannot be undone. The system may block deletion when this record is referenced by MAT_INFO, BOM or MPR data.
-        </Alert>
+        {warningText && (
+          <Alert severity="warning" sx={{ borderRadius: 1.25 }}>
+            {warningText}
+          </Alert>
+        )}
       </DialogContent>
 
       <DialogActions sx={{ p: 2 }}>
@@ -58,7 +94,7 @@ export default function ConfirmDeleteDialog({ open, record, config, deleting, on
           disabled={deleting}
           sx={{ textTransform: 'none', fontWeight: 800 }}
         >
-          {deleting ? 'Deleting...' : 'Delete'}
+          {deleting ? 'Deleting...' : confirmText}
         </Button>
       </DialogActions>
     </Dialog>

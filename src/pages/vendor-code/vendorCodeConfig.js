@@ -1,5 +1,10 @@
 import { formatDateTime, trimText } from '../shared/masterDataUtils';
 
+const vendorCodeText = (value) => {
+  const text = trimText(value);
+  return /^[0-9,]+$/.test(text) ? text.replace(/,/g, '') : text;
+};
+
 export const vendorCodeConfig = {
   type: 'vendor',
   menuTitle: 'Vendor Code',
@@ -99,7 +104,7 @@ export const vendorCodeConfig = {
   columns: [
     { label: 'Key', key: 'masterKey', minWidth: 115 },
     { label: 'Short Name Supplier', key: 'shortNameSupplier', minWidth: 180 },
-    { label: 'Vendor Code', key: 'vendorCode', minWidth: 130 },
+    { label: 'Vendor Code', key: 'vendorCode', minWidth: 130, render: (row) => vendorCodeText(row.vendorCode) || '-' },
     { label: 'Vendor Name', key: 'vendorName', minWidth: 230 },
     { label: 'Mat Charger', key: 'matCharger', minWidth: 130 },
     { label: 'Remark', key: 'remark', minWidth: 220, hideOnSmall: true },
@@ -115,7 +120,7 @@ export const vendorCodeConfig = {
 
   toPayload: (values) => ({
     shortNameSupplier: trimText(values.shortNameSupplier),
-    vendorCode: trimText(values.vendorCode),
+    vendorCode: vendorCodeText(values.vendorCode),
     vendorName: trimText(values.vendorName),
     matCharger: trimText(values.matCharger),
     remark: trimText(values.remark)

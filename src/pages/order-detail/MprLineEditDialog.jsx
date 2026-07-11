@@ -22,15 +22,25 @@ const emptyForm = {
 };
 
 const text = (value) => value === null || value === undefined ? '' : String(value);
+const vendorCodeText = (value) => {
+  const raw = text(value).trim();
+  return /^[0-9,]+$/.test(raw) ? raw.replace(/,/g, '') : raw;
+};
 const number = (value) => {
   if (value === '' || value === null || value === undefined) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const toForm = (line = {}) => Object.fromEntries(
-  Object.keys(emptyForm).map((key) => [key, text(line[key])])
-);
+const toForm = (line = {}) => {
+  const safeLine = line || {};
+  return Object.fromEntries(
+    Object.keys(emptyForm).map((key) => [
+      key,
+      key === 'vendorCode' ? vendorCodeText(safeLine[key]) : text(safeLine[key])
+    ])
+  );
+};
 
 const displayNumber = (value) => Number.isFinite(value)
   ? value.toLocaleString('en-US', { maximumFractionDigits: 6 })
@@ -60,9 +70,10 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
     const normalize = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
     const styleColor = normalize(form.styleColor);
     const styleDescription = normalize(form.styleDescription);
-    const master = productColorMasters.find((item) => (
+    const safeProductColorMasters = Array.isArray(productColorMasters) ? productColorMasters : [];
+    const master = safeProductColorMasters.find((item) => (
       normalize(item?.productColor) === styleColor && normalize(item?.styleName) === styleDescription
-    )) || productColorMasters.find((item) => normalize(item?.productColor) === styleColor);
+    )) || safeProductColorMasters.find((item) => normalize(item?.productColor) === styleColor);
     const unique = new Map();
     (master?.childColors || []).forEach((item) => {
       const id = String(item?.id || '').trim();
@@ -117,7 +128,7 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
       currency: form.currency.trim().toUpperCase(),
       matPriceWithoutTax: number(form.matPriceWithoutTax),
       shortNameSupplier: form.shortNameSupplier.trim(),
-      vendorCode: form.vendorCode.trim(),
+      vendorCode: vendorCodeText(form.vendorCode),
       vendorName: form.vendorName.trim(),
       matCharger: form.matCharger.trim()
     });

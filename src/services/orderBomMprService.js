@@ -5,10 +5,13 @@ const authHeaders = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-const withAuth = (config = {}) => ({
-  ...config,
-  headers: { ...authHeaders(), ...(config.headers || {}) }
-});
+const withAuth = (config = {}) => {
+  const safeConfig = config || {};
+  return {
+    ...safeConfig,
+    headers: { ...authHeaders(), ...(safeConfig.headers || {}) }
+  };
+};
 
 const unwrap = async (request) => (await request).data;
 
@@ -21,7 +24,7 @@ export const getApiError = (error, fallback = 'Unable to complete the request.')
   return data?.message || error?.message || fallback;
 };
 
-export const listOrders = (params = {}) => unwrap(apiRawClient.get('/api/orders', withAuth({ params })));
+export const listOrders = (params = {}) => unwrap(apiRawClient.get('/api/orders', withAuth({ params: params || {} })));
 export const getOrder = (id) => unwrap(apiRawClient.get(`/api/orders/${encodeURIComponent(id)}`, withAuth()));
 export const createOrder = (payload) => unwrap(apiRawClient.post('/api/orders', payload, withAuth()));
 export const updateOrder = (id, payload) => unwrap(apiRawClient.put(`/api/orders/${encodeURIComponent(id)}`, payload, withAuth()));
@@ -34,7 +37,8 @@ export const updateBom = (id, payload) => unwrap(apiRawClient.put(`/api/boms/${e
 export const deleteBom = (id) => unwrap(apiRawClient.delete(`/api/boms/${encodeURIComponent(id)}`, withAuth()));
 export const submitBom = (id) => unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(id)}/submit`, {}, withAuth()));
 
-export const uploadBom = (orderId, file, { bomNo = '', bomName = '' } = {}) => {
+export const uploadBom = (orderId, file, options = {}) => {
+  const { bomNo = '', bomName = '' } = options || {};
   const formData = new FormData();
   formData.append('file', file);
   if (bomNo) formData.append('bomNo', bomNo);
@@ -66,7 +70,8 @@ export const addBomLine = (bomId, payload, packingId = '') => unwrap(apiRawClien
 export const updateBomLine = (bomId, lineId, payload) => unwrap(apiRawClient.put(`/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}`, payload, withAuth()));
 export const deleteBomLine = (bomId, lineId) => unwrap(apiRawClient.delete(`/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}`, withAuth()));
 
-export const uploadBomAttachment = (bomId, file, { scope = 'BOM', productColorId = '', colorKey = '', packingId = '', lineId = '' } = {}) => {
+export const uploadBomAttachment = (bomId, file, options = {}) => {
+  const { scope = 'BOM', productColorId = '', colorKey = '', packingId = '', lineId = '' } = options || {};
   const formData = new FormData();
   formData.append('file', file);
   formData.append('scope', scope);
@@ -85,7 +90,7 @@ export const deleteBomAttachment = (bomId, attachmentId) => unwrap(apiRawClient.
 export const listBomMprReviews = (bomId, params = {}) => unwrap(
   apiRawClient.get(
     `/api/boms/${encodeURIComponent(bomId)}/mpr-reviews`,
-    withAuth({ params })
+    withAuth({ params: params || {} })
   )
 );
 
@@ -219,7 +224,7 @@ export const downloadWithAuth = async (url, fileName) => {
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
-  anchor.download = fileName;
+  anchor.download = fileName || 'download';
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

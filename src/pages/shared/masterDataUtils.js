@@ -1,11 +1,11 @@
 export const createEmptyFilters = (fields = []) =>
-  fields.reduce((result, field) => {
+  (Array.isArray(fields) ? fields : []).reduce((result, field) => {
     result[field.name] = field.defaultValue ?? '';
     return result;
   }, {});
 
 export const cleanFilters = (values = {}) =>
-  Object.entries(values).reduce((result, [key, value]) => {
+  Object.entries(values || {}).reduce((result, [key, value]) => {
     if (value === null || value === undefined) return result;
 
     const cleaned = typeof value === 'string' ? value.trim() : value;

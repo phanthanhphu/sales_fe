@@ -20,7 +20,7 @@ export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, ac
             {loading && <TableRow><TableCell colSpan={7}><Typography sx={{ py: 3, textAlign: 'center', color: 'text.secondary' }}>Loading orders...</Typography></TableCell></TableRow>}
             {!loading && rows.length === 0 && <TableRow><TableCell colSpan={7}><Typography sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>No orders found.</Typography></TableCell></TableRow>}
             {!loading && rows.map((row) => (
-              <TableRow hover key={row.id} sx={{ '&:last-child td': { borderBottom: 0 } }}>
+              <TableRow hover key={row.id} data-order-row-id={row.id} sx={{ scrollMarginTop: 96, '&:last-child td': { borderBottom: 0 } }}>
                 <TableCell sx={{ fontWeight: 800, color: '#103B5C' }}>{row.orderNo}</TableCell>
                 <TableCell>{row.style}</TableCell>
                 <TableCell>{row.customer}</TableCell>

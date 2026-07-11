@@ -370,7 +370,7 @@ export default function MasterDataFormDialog({
         ? await updateMasterData(config.type, record?.id, payload)
         : await createMasterData(config.type, payload);
 
-      onSaved?.(response, `${config.singular} ${isEditing ? 'updated' : 'created'} successfully.`);
+      onSaved?.(response, `${config.singular} ${isEditing ? 'updated' : 'created'} successfully.`, { mode: isEditing ? 'update' : 'create' });
     } catch (error) {
       const message = getMasterDataErrorMessage(error, `Unable to ${isEditing ? 'update' : 'create'} ${config.singular}.`);
       setServerError(message);
