@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
@@ -33,10 +33,10 @@ import {
   getApiError,
   getBomExportUrl,
   listBoms,
-  submitBom,
-  uploadBom
+  submitBom
 } from '../../services/orderBomMprService';
 import { formatDateTime, statusSx } from '../orders/orderUi';
+import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
 import BomCreateDialog from './BomCreateDialog';
 
 const emptyFilters = {
@@ -91,11 +91,11 @@ const bomMatchesFilters = (bom, filters) => {
   return true;
 };
 
-export default function BomTab({ order }) {
+export default function BomTab({ order, buyerKey: buyerKeyProp }) {
+  const buyerKey = normalizeBuyerKey(buyerKeyProp || order?.buyerKey);
   const navigate = useNavigate();
   const canWrite = canManageBom();
   const writeBlockedMessage = 'BOM permission is required to modify BOM data.';
-  const inputRef = useRef(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -149,33 +149,10 @@ export default function BomTab({ order }) {
     try {
       const bom = await createBom(order.id, payload);
       setAddOpen(false);
-      notify('BOM created. Add materials/packings or upload the Excel file.');
-      navigate(`/orders/${order.id}/boms/${bom.id}`);
+      notify('BOM created. Add materials and packings in the BOM detail screen.');
+      navigate(buyerPath(buyerKey, `orders/${order.id}/boms/${bom.id}`));
     } catch (error) {
       notify(getApiError(error, 'Unable to create BOM.'), 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const upload = async (event) => {
-    if (!canWrite) {
-      event.target.value = '';
-      notify(writeBlockedMessage, 'warning');
-      return;
-    }
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-
-    setSaving(true);
-    try {
-      const bom = await uploadBom(order.id, file);
-      notify('BOM Excel imported successfully.');
-      await load();
-      navigate(`/orders/${order.id}/boms/${bom.id}`);
-    } catch (error) {
-      notify(getApiError(error, 'Unable to import BOM Excel.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -223,10 +200,6 @@ export default function BomTab({ order }) {
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap">
             <Button startIcon={<Refresh />} onClick={load} disabled={loading} sx={{ textTransform: 'none' }}>Refresh</Button>
-            <Tooltip title={!canWrite ? writeBlockedMessage : ''} arrow disableHoverListener={canWrite}>
-              <span><Button variant="outlined" startIcon={<FileUpload />} onClick={() => inputRef.current?.click()} disabled={saving || !canWrite} sx={{ textTransform: 'none' }}>Upload BOM Excel</Button></span>
-            </Tooltip>
-            <input ref={inputRef} hidden type="file" accept=".xlsx,.xls" onChange={upload} />
             <Tooltip title={!canWrite ? writeBlockedMessage : ''} arrow disableHoverListener={canWrite}>
               <span><Button variant="contained" startIcon={<Add />} onClick={() => setAddOpen(true)} disabled={!canWrite} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>Add BOM</Button></span>
             </Tooltip>
@@ -288,7 +261,7 @@ export default function BomTab({ order }) {
               {loading && <TableRow><TableCell colSpan={7}>Loading...</TableCell></TableRow>}
               {!loading && filteredRows.length === 0 && (
                 <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                  {rows.length ? 'No BOM matches the current filter.' : 'No BOM yet. Add a blank BOM or upload a BOM Excel file.'}
+                  {rows.length ? 'No BOM matches the current filter.' : 'No BOM yet. Use Add BOM to create one.'}
                 </TableCell></TableRow>
               )}
               {filteredRows.map((bom) => {
@@ -305,7 +278,7 @@ export default function BomTab({ order }) {
                     <TableCell><Chip label={bom.status} sx={statusSx(bom.status)} /></TableCell>
                     <TableCell>{formatDateTime(bom.updatedAt)}</TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                      <Tooltip title="Open BOM"><IconButton color="primary" onClick={() => navigate(`/orders/${order.id}/boms/${bom.id}`)}><OpenInNew fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title="Open BOM"><IconButton color="primary" onClick={() => navigate(buyerPath(buyerKey, `orders/${order.id}/boms/${bom.id}`))}><OpenInNew fontSize="small" /></IconButton></Tooltip>
                       <Tooltip title={!canWrite ? writeBlockedMessage : (bom.status === 'SUBMITTED' ? 'BOM already submitted' : 'Submit BOM')}><span><IconButton color="success" disabled={!canWrite || bom.status === 'SUBMITTED'} onClick={() => submit(bom)}><Publish fontSize="small" /></IconButton></span></Tooltip>
                       <Tooltip title="Export"><IconButton onClick={() => downloadWithAuth(getBomExportUrl(bom.id), `${bom.bomNo || 'BOM'}.xlsx`)}><FileUpload fontSize="small" /></IconButton></Tooltip>
                       <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete'}><span><IconButton color="error" disabled={!canWrite} onClick={() => setDeleteTarget(bom)}><Delete fontSize="small" /></IconButton></span></Tooltip>

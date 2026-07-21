@@ -16,9 +16,11 @@ export default function MasterDataFeaturePage({
   SearchComponent,
   TableComponent,
   AddDialog,
-  EditDialog
+  EditDialog,
+  scopeParams = {},
+  scopeTitle = ''
 }) {
-  const page = useMasterDataPage(config);
+  const page = useMasterDataPage(config, scopeParams);
   const canWrite = canManageSales();
   const [editUploadOpen, setEditUploadOpen] = useState(false);
   const [downloadingEdit, setDownloadingEdit] = useState(false);
@@ -34,7 +36,7 @@ export default function MasterDataFeaturePage({
 
     setDownloadingEdit(true);
     try {
-      const response = await downloadMasterDataEditWorkbook(config.type);
+      const response = await downloadMasterDataEditWorkbook(config.type, scopeParams);
       const blob = response?.data instanceof Blob
         ? response.data
         : new Blob([response?.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -59,6 +61,11 @@ export default function MasterDataFeaturePage({
 
   return (
     <Box sx={{ p: { xs: 1.25, sm: 1.75, md: 2 } }}>
+      {scopeTitle && (
+        <Box sx={{ mb: 1.5 }}>
+          <Box sx={{ color: '#103B5C', fontSize: '1.35rem', fontWeight: 950 }}>{scopeTitle}</Box>
+        </Box>
+      )}
       <SearchComponent
         values={page.draftFilters}
         onChange={page.changeDraftFilter}
@@ -92,6 +99,7 @@ export default function MasterDataFeaturePage({
         open={canWrite && page.addOpen}
         onClose={() => page.setAddOpen(false)}
         onSaved={page.handleSaved}
+        scopeParams={scopeParams}
       />
 
       <EditDialog
@@ -99,21 +107,26 @@ export default function MasterDataFeaturePage({
         record={page.editRecord}
         onClose={page.closeEdit}
         onSaved={page.handleSaved}
+        scopeParams={scopeParams}
       />
 
       {config.allowUpload !== false && (
         <MasterDataUploadDialog
+          key={`${config.type}-create-upload`}
           config={config}
           open={canWrite && page.uploadOpen}
           onClose={() => page.setUploadOpen(false)}
           onImported={page.handleImported}
+          scopeParams={scopeParams}
         />
       )}
 
       {config.allowEditWorkbook && (
         <MasterDataUploadDialog
+          key={`${config.type}-edit-upload`}
           config={config}
           editMode
+          scopeParams={scopeParams}
           open={canWrite && editUploadOpen}
           onClose={() => setEditUploadOpen(false)}
           onImported={(result) => {

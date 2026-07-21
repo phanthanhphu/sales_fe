@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
@@ -6,7 +6,9 @@ import Box from '@mui/material/Box';
 import NavGroup from './NavGroup';
 import NavItem from './NavItem';
 import { useGetMenuMaster } from 'api/menu';
-import menuItems from 'menu-items';
+import { getDashboardMenu } from 'menu-items/dashboard';
+import { listAccessibleBuyers } from 'services/buyerService';
+import { getAccessibleBuyers } from 'utils/buyerContext';
 
 export default function Navigation() {
   const { pathname } = useLocation();
@@ -16,7 +18,34 @@ export default function Navigation() {
   const [selectedID, setSelectedID] = useState('');
   const [selectedItems, setSelectedItems] = useState('');
   const [selectedLevel, setSelectedLevel] = useState(0);
+  const [buyers, setBuyers] = useState(() => getAccessibleBuyers());
 
+  useEffect(() => {
+    let active = true;
+    const loadBuyers = async () => {
+      try {
+        const data = await listAccessibleBuyers();
+        if (!active || !Array.isArray(data)) return;
+        const normalized = data
+          .filter((item) => item?.active !== false)
+          .map((item) => ({
+            buyerKey: item.buyerKey,
+            buyerName: item.buyerName || item.buyerKey,
+            sequence: Number(item.sequence || 0)
+          }));
+        setBuyers(normalized);
+        localStorage.setItem('accessibleBuyers', JSON.stringify(normalized));
+      } catch {
+        // Keep the permissions embedded in the current login response as fallback.
+      }
+    };
+    loadBuyers();
+    const refresh = () => loadBuyers();
+    window.addEventListener('buyers:changed', refresh);
+    return () => { active = false; window.removeEventListener('buyers:changed', refresh); };
+  }, []);
+
+  const menuItems = useMemo(() => ({ items: [getDashboardMenu(buyers)] }), [buyers]);
   const lastItem = null;
   let lastItemIndex = menuItems.items.length - 1;
   let remItems = [];

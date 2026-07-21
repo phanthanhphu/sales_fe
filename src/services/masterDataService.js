@@ -40,16 +40,16 @@ export const getMasterDataById = (type, id) => {
   return apiClient.get(`${getEndpoint(type)}/${encodeURIComponent(id)}`);
 };
 
-export const createMasterData = (type, payload) => {
-  return apiClient.post(getEndpoint(type), payload);
+export const createMasterData = (type, payload, params = {}) => {
+  return apiClient.post(getEndpoint(type), payload, { params: cleanParams(params) });
 };
 
-export const updateMasterData = (type, id, payload) => {
-  return apiClient.put(`${getEndpoint(type)}/${encodeURIComponent(id)}`, payload);
+export const updateMasterData = (type, id, payload, params = {}) => {
+  return apiClient.put(`${getEndpoint(type)}/${encodeURIComponent(id)}`, payload, { params: cleanParams(params) });
 };
 
-export const deleteMasterData = (type, id) => {
-  return apiClient.delete(`${getEndpoint(type)}/${encodeURIComponent(id)}`);
+export const deleteMasterData = (type, id, params = {}) => {
+  return apiClient.delete(`${getEndpoint(type)}/${encodeURIComponent(id)}`, { params: cleanParams(params) });
 };
 
 
@@ -73,31 +73,54 @@ export const getProductColorImageObjectUrl = async (id, signal) => {
   return URL.createObjectURL(blob);
 };
 
-export const uploadMasterData = (type, file, mode = 'CREATE_ONLY') => {
+const masterExcelUploadConfig = (file, params = {}, options = {}) => ({
+  params: cleanParams(params),
+  onUploadProgress: options?.onUploadProgress,
+  headers: {
+    'X-File-Name': encodeURIComponent(file?.name || 'excel-file'),
+    'X-File-Size': String(file?.size || 0)
+  }
+});
+
+export const uploadMasterData = (type, file, mode = 'CREATE_ONLY', params = {}, options = {}) => {
   const formData = new FormData();
   formData.append('file', file);
 
-  return apiClient.post(`${getEndpoint(type)}/upload`, formData, {
-    params: { mode }
-  });
+  return apiClient.post(
+    `${getEndpoint(type)}/upload`,
+    formData,
+    masterExcelUploadConfig(file, { mode, ...params }, options)
+  );
 };
 
-export const uploadEditedMasterData = (type, file) => {
+export const uploadEditedMasterData = (type, file, params = {}, options = {}) => {
   const formData = new FormData();
   formData.append('file', file);
 
-  return apiClient.post(`${getEndpoint(type)}/upload-edited`, formData);
+  return apiClient.post(
+    `${getEndpoint(type)}/upload-edited`,
+    formData,
+    masterExcelUploadConfig(file, params, options)
+  );
 };
 
-export const downloadMasterDataEditWorkbook = (type) => (
-  apiRawClient.get(`${getEndpoint(type)}/export-edit`, { responseType: 'blob' })
+export const downloadMasterDataEditWorkbook = (type, params = {}) => (
+  apiRawClient.get(`${getEndpoint(type)}/export-edit`, { responseType: 'blob', params: cleanParams(params) })
 );
 
 export const listActiveShipTos = () => apiClient.get(`${MASTER_DATA_ENDPOINTS.shipTo}/active`);
 
+
 export const resolveVendorCode = (shortNameSupplier) => {
   return apiClient.get(`${MASTER_DATA_ENDPOINTS.vendor}/resolve`, {
     params: { shortNameSupplier }
+  });
+};
+
+
+export const searchVendorCodeOptions = (keyword = '', limit = 50) => {
+  return apiClient.get(`${MASTER_DATA_ENDPOINTS.vendor}/options`, {
+    params: cleanParams({ keyword, limit })
   });
 };
 

@@ -6,8 +6,11 @@ export const shipToConfig = {
   pageTitle: 'Ship To Master',
   singular: 'Ship To',
   primaryField: 'shipToName',
-  minTableWidth: 980,
-  allowUpload: false,
+  minTableWidth: 1080,
+  allowUpload: true,
+  allowEditWorkbook: true,
+  excelSheetName: 'SHIP TO',
+  importHint: 'Expected columns: Ship To Code, Ship To Name, Active and Remark. Ship To Code and Ship To Name must be unique. Edited files support CREATE, UPDATE and DELETE with Row Version validation.',
 
   defaultValues: {
     shipToName: '',
@@ -45,6 +48,7 @@ export const shipToConfig = {
   ],
 
   columns: [
+    { label: 'Key', key: 'masterKey', minWidth: 115 },
     { label: 'Ship To Name', key: 'shipToName', minWidth: 250 },
     { label: 'Ship To Code', key: 'shipToCode', minWidth: 170 },
     {

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Pagination, Snackbar, Stack, Typography } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { createOrder, deleteOrder, getApiError, listOrders, updateOrder } from '../../services/orderBomMprService';
 import { canManageSales } from 'utils/accessControl';
+import { buyerPath, getBuyerDefinition, normalizeBuyerKey } from 'utils/buyerContext';
 import OrderFormDialog from './OrderFormDialog';
 import OrderSearch from './OrderSearch';
 import OrderTable from './OrderTable';
@@ -40,6 +41,9 @@ const resolveCreatedOrderId = (created, rows = [], payload = {}) => {
 
 export default function OrdersPage() {
   const navigate = useNavigate();
+  const { buyerKey: routeBuyerKey } = useParams();
+  const buyerKey = normalizeBuyerKey(routeBuyerKey);
+  const buyer = getBuyerDefinition(buyerKey);
   const canWrite = canManageSales();
   const [filters, setFilters] = useState(emptyFilters);
   const [applied, setApplied] = useState(emptyFilters);
@@ -59,7 +63,7 @@ export default function OrdersPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await listOrders({ ...applied, page, size: 25 });
+      const data = await listOrders({ ...applied, buyerKey, page, size: 25 });
       const nextRows = Array.isArray(data?.content) ? data.content : Array.isArray(data) ? data : [];
       setRows(nextRows);
       setTotalPages(Math.max(1, data?.totalPages || 1));
@@ -70,7 +74,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [applied, page]);
+  }, [applied, buyerKey, page]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -136,14 +140,15 @@ export default function OrdersPage() {
     setSaving(true);
     try {
       let savedOrder = null;
-      if (isCreate) savedOrder = await createOrder(payload);
-      else await updateOrder(formRecord.id, payload);
+      const scopedPayload = { ...payload, buyerKey };
+      if (isCreate) savedOrder = await createOrder(scopedPayload);
+      else await updateOrder(formRecord.id, scopedPayload);
       setFormOpen(false);
       setFormRecord(null);
       notify('Order saved successfully.');
       const nextRows = await load();
       if (isCreate) {
-        scrollToCreatedOrder(resolveCreatedOrderId(savedOrder, nextRows, payload));
+        scrollToCreatedOrder(resolveCreatedOrderId(savedOrder, nextRows, scopedPayload));
       }
     } catch (error) {
       notify(getApiError(error, 'Unable to save order.'), 'error');
@@ -168,7 +173,7 @@ export default function OrdersPage() {
   return (
     <Box sx={{ p: { xs: 1.5, md: 2.5 } }}>
       <Box sx={{ mb: 2 }}>
-        <Typography sx={{ fontSize: '1.5rem', fontWeight: 950, color: '#103B5C' }}>Order Management</Typography>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 950, color: '#103B5C' }}>{buyer.buyerName} — Order Management</Typography>
         <Typography sx={{ mt: 0.35, color: 'text.secondary' }}>Create orders, then open an order to manage BOM and Sales / MPR.</Typography>
       </Box>
 
@@ -186,7 +191,7 @@ export default function OrdersPage() {
         rows={rows}
         loading={loading}
         actionsDisabled={!canWrite}
-        onOpen={(row) => navigate(`/orders/${row.id}`)}
+        onOpen={(row) => navigate(buyerPath(buyerKey, `orders/${row.id}`))}
         onEdit={openEdit}
         onDelete={requestDelete}
       />

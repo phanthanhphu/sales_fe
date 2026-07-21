@@ -17,6 +17,7 @@ import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import { useTheme } from '@mui/material/styles';
 import { API_BASE_URL } from '../../config';
 import { getAccessLabel } from 'utils/accessControl';
+import { getBuyerDefinition, isAdminUser, normalizeBuyerKey } from 'utils/buyerContext';
 import {
   STABLE_FORM_COLORS,
   stableCloseButtonSx,
@@ -34,6 +35,13 @@ const imageUrl = (raw) => {
   const clean = String(raw).replace(/\\/g, '/').split('?')[0];
   if (clean.startsWith('http://') || clean.startsWith('https://')) return `${clean}?t=${Date.now()}`;
   return `${API_BASE_URL}${clean.startsWith('/') ? clean : `/${clean}`}?t=${Date.now()}`;
+};
+
+
+const buyerAccessLabel = (user = {}) => {
+  if (isAdminUser(user)) return 'All active Buyers';
+  const keys = Array.isArray(user?.buyerKeys) && user.buyerKeys.length ? user.buyerKeys : ['LLBEAN'];
+  return keys.map((key) => getBuyerDefinition(normalizeBuyerKey(key)).buyerName).join(', ');
 };
 
 const detailFieldSx = {
@@ -92,6 +100,7 @@ export default function ViewUserDialog({ open, onClose, user, onEdit, onResetPas
           <Box sx={{ gridColumn: { xs: 'span 1', sm: 'span 6' } }}><DetailField label="Phone" value={user?.phone} /></Box>
           <Box sx={{ gridColumn: { xs: 'span 1', sm: 'span 12' } }}><DetailField label="Address" value={user?.address} /></Box>
           <Box sx={{ gridColumn: { xs: 'span 1', sm: 'span 12' } }}><DetailField label="System Access" value={getAccessLabel(user?.accessPermissions, user?.role)} /></Box>
+          <Box sx={{ gridColumn: { xs: 'span 1', sm: 'span 12' } }}><DetailField label="Buyer Access" value={buyerAccessLabel(user)} /></Box>
         </Box>
       </DialogContent>
       <DialogActions sx={stableDialogActionsSx}>

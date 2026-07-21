@@ -31,7 +31,7 @@ const responseRecordId = (response) => {
 };
 
 
-export default function useMasterDataPage(config = {}) {
+export default function useMasterDataPage(config = {}, scopeParams = {}) {
   const emptyFilters = useMemo(
     () => createEmptyFilters(config.searchFields || []),
     [config.searchFields]
@@ -74,6 +74,7 @@ export default function useMasterDataPage(config = {}) {
 
     try {
       const response = await listMasterData(config.type, {
+        ...scopeParams,
         ...cleanFilters(appliedFilters),
         page,
         size: rowsPerPage
@@ -99,7 +100,7 @@ export default function useMasterDataPage(config = {}) {
     } finally {
       setLoading(false);
     }
-  }, [appliedFilters, config.menuTitle, config.type, notify, page, rowsPerPage]);
+  }, [appliedFilters, config.menuTitle, config.type, notify, page, rowsPerPage, scopeParams?.buyerKey]);
 
   useEffect(() => {
     load();
@@ -203,7 +204,7 @@ export default function useMasterDataPage(config = {}) {
     setDeleting(true);
 
     try {
-      await deleteMasterData(config.type, deleteTarget.id);
+      await deleteMasterData(config.type, deleteTarget.id, scopeParams);
       notify(`${config.singular || 'Record'} deleted successfully.`, 'success');
       setDeleteTarget(null);
 
@@ -220,7 +221,7 @@ export default function useMasterDataPage(config = {}) {
     } finally {
       setDeleting(false);
     }
-  }, [config.singular, config.type, deleteTarget, load, notify, page, rows.length]);
+  }, [config.singular, config.type, deleteTarget, load, notify, page, rows.length, scopeParams?.buyerKey]);
 
   const changeRowsPerPage = useCallback((size) => {
     const normalizedSize = Number(size);

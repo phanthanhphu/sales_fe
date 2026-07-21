@@ -9,13 +9,14 @@ import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined';
 import { useTheme } from '@mui/material/styles';
 import { API_BASE_URL } from '../../config';
 import AccessPermissionSelector, { normalizeAccess } from './AccessPermissionSelector';
+import BuyerPermissionSelector, { normalizeBuyerPermissions } from './BuyerPermissionSelector';
 import {
   STABLE_FORM_COLORS, stableCloseButtonSx, stableDialogActionsSx, stableDialogContentSx, stableDialogPaperSx,
   stableDialogTitleSx, stableFieldSx, stableFloatingLabelSx, stableFormGridSx, stableImageFieldSx,
   stableOutlineButtonSx, stablePrimaryButtonSx, stableSelectFieldSx, stableTextButtonSx
 } from '../shared/stableDialogUi';
 
-const EMPTY_FORM = { username: '', email: '', password: '', address: '', phone: '', role: 'USER', accessPermissions: ['VIEW_SYSTEM'], isEnabled: true, departmentId: '' };
+const EMPTY_FORM = { username: '', email: '', password: '', address: '', phone: '', role: 'USER', accessPermissions: ['VIEW_SYSTEM'], buyerKeys: ['LLBEAN'], isEnabled: true, departmentId: '' };
 const getDepartments = (payload) => Array.isArray(payload) ? payload : (payload?.departments || payload?.data || []);
 const departmentLabel = (department) => [department?.division, department?.departmentName || department?.name].filter(Boolean).join(' — ');
 
@@ -72,6 +73,7 @@ export default function AddUserDialog({ open, onClose, onAdd }) {
     if (!form.password || form.password.length < 6) next.password = 'Password must contain at least 6 characters.';
     if (!form.departmentId) next.departmentId = 'Department is required.';
     if (form.role === 'USER' && !normalizeAccess(form.accessPermissions, form.role).length) next.accessPermissions = 'Select an access permission.';
+    if (form.role === 'USER' && !(Array.isArray(form.buyerKeys) && form.buyerKeys.length)) next.buyerKeys = 'Select at least one Buyer.';
     setErrors(next); return !Object.keys(next).length;
   };
 
@@ -84,6 +86,7 @@ export default function AddUserDialog({ open, onClose, onAdd }) {
       payload.append('address', form.address.trim()); payload.append('phone', form.phone.trim()); payload.append('role', form.role);
       payload.append('departmentId', form.departmentId); payload.append('isEnabled', String(form.isEnabled));
       payload.append('accessPermissions', normalizeAccess(form.accessPermissions, form.role).join(','));
+      payload.append('buyerKeys', normalizeBuyerPermissions(form.buyerKeys, form.role).join(','));
       if (image) payload.append('profileImage', image);
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/api/users/add`, { method: 'POST', headers: { accept: '*/*', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: payload });
@@ -107,6 +110,7 @@ export default function AddUserDialog({ open, onClose, onAdd }) {
         <FormControl disabled={locked} sx={{ ...stableSelectFieldSx, gridColumn: { xs: 'span 1', sm: 'span 3' } }}><InputLabel>Account Status</InputLabel><Select value={form.isEnabled ? 'true' : 'false'} label="Account Status" onChange={(event) => update('isEnabled', event.target.value === 'true')}><MenuItem value="true">Enabled</MenuItem><MenuItem value="false">Disabled</MenuItem></Select></FormControl>
         <TextField label="Address" value={form.address} onChange={(event) => update('address', event.target.value)} disabled={locked} sx={{ ...stableFieldSx, gridColumn: { xs: 'span 1', sm: 'span 12' } }} />
         <AccessPermissionSelector role={form.role} value={form.accessPermissions} onChange={(value) => update('accessPermissions', value)} disabled={locked} error={errors.accessPermissions} />
+        <BuyerPermissionSelector role={form.role} value={form.buyerKeys} onChange={(value) => update('buyerKeys', value)} disabled={locked} error={errors.buyerKeys} />
         <Box sx={{ gridColumn: { xs: 'span 1', sm: 'span 12' }, ...stableImageFieldSx }}><Typography sx={stableFloatingLabelSx}>Profile Image</Typography><Avatar src={preview || undefined} sx={{ width: 34, height: 34, bgcolor: '#EAF1F8', color: STABLE_FORM_COLORS.navy, fontSize: '0.82rem', fontWeight: 800 }}>{!preview ? (form.username?.[0] || 'U').toUpperCase() : null}</Avatar><Typography noWrap sx={{ flex: 1, minWidth: 0, color: '#64748B', fontSize: '0.82rem' }}>{image?.name || 'No image selected'}</Typography>{preview && <IconButton aria-label="Remove profile image" onClick={() => { if (preview?.startsWith('blob:')) URL.revokeObjectURL(preview); setImage(null); setPreview(''); }} disabled={locked} size="small" sx={{ color: '#64748B' }}><DeleteOutlineRoundedIcon fontSize="small" /></IconButton>}<Button component="label" disabled={locked} startIcon={<PhotoCameraOutlinedIcon />} variant="outlined" sx={stableOutlineButtonSx}>Choose Image<input hidden type="file" accept="image/*" onChange={selectImage} /></Button></Box>
       </Box></DialogContent>
       <DialogActions sx={stableDialogActionsSx}><Button onClick={onClose} disabled={locked} sx={stableTextButtonSx}>Cancel</Button><Button onClick={save} disabled={locked} variant="contained" sx={stablePrimaryButtonSx}>{saving ? <CircularProgress size={19} color="inherit" /> : 'Create User'}</Button></DialogActions>

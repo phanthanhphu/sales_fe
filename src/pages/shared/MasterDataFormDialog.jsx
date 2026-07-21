@@ -26,44 +26,11 @@ import {
   createMasterData,
   getMasterDataErrorMessage,
   listCurrentCurrencies,
-  listMasterData,
+  searchVendorCodeOptions,
   updateMasterData
 } from '../../services/masterDataService';
 
 const textValue = (value) => (value === null || value === undefined ? '' : String(value));
-
-const pageContent = (response) => {
-  if (Array.isArray(response)) return response;
-  if (Array.isArray(response?.content)) return response.content;
-  if (Array.isArray(response?.items)) return response.items;
-  if (Array.isArray(response?.data)) return response.data;
-  return [];
-};
-
-/* The backend limits one page to 200 rows. Read all option pages so MAT_INFO
- * can link to the complete Vendor Code master, not only the first 200 rows. */
-const loadAllMasterDataOptions = async (type, params = {}) => {
-  const first = await listMasterData(type, { ...params, page: 0, size: 200 });
-  const firstContent = pageContent(first);
-
-  if (Array.isArray(first)) return firstContent;
-
-  const totalPages = Math.max(1, Number(first?.totalPages || 1));
-  const maxPages = Math.min(totalPages, 25);
-
-  if (maxPages <= 1) return firstContent;
-
-  const remaining = await Promise.all(
-    Array.from({ length: maxPages - 1 }, (_, index) =>
-      listMasterData(type, { ...params, page: index + 1, size: 200 })
-    )
-  );
-
-  return [
-    ...firstContent,
-    ...remaining.flatMap((response) => pageContent(response))
-  ];
-};
 
 const createFormValues = (config, record) => {
   const defaults = { ...(config.defaultValues || {}) };
@@ -163,7 +130,7 @@ const formatVnd = (value, maxDigits = 2) => {
   const number = Number(value);
   if (!Number.isFinite(number)) return '-';
 
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('vi-VN', {
     maximumFractionDigits: maxDigits,
     minimumFractionDigits: 0
   }).format(number);
@@ -175,7 +142,8 @@ export default function MasterDataFormDialog({
   open,
   record = null,
   onClose,
-  onSaved
+  onSaved,
+  scopeParams = {}
 }) {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
@@ -186,6 +154,7 @@ export default function MasterDataFormDialog({
   const [serverError, setServerError] = useState('');
   const [currencyOptions, setCurrencyOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
+  const [supplierSearch, setSupplierSearch] = useState('');
   const [optionLoading, setOptionLoading] = useState({ currency: false, supplier: false });
   const [optionError, setOptionError] = useState('');
   const [snack, setSnack] = useState({ open: false, severity: 'error', message: '' });
@@ -205,7 +174,9 @@ export default function MasterDataFormDialog({
   useEffect(() => {
     if (!open) return;
 
-    setValues(createFormValues(config, record));
+    const initialValues = createFormValues(config, record);
+    setValues(initialValues);
+    setSupplierSearch(String(initialValues?.shortNameSupplier || ''));
     setErrors({});
     setServerError('');
     setSaving(false);
@@ -221,55 +192,56 @@ export default function MasterDataFormDialog({
       return undefined;
     }
 
+    if (!usesCurrencyOptions) return undefined;
     let alive = true;
-    setOptionError('');
+    setOptionLoading((current) => ({ ...current, currency: true }));
 
-    const loadCurrencyOptions = async () => {
-      if (!usesCurrencyOptions) return;
-      setOptionLoading((current) => ({ ...current, currency: true }));
-
-      try {
-        // Currency Master can contain historical rows. MAT_INFO must receive
-        // only the newest row for each Currency Code.
-        const items = await listCurrentCurrencies();
+    listCurrentCurrencies()
+      .then((items) => {
         if (alive) setCurrencyOptions(items);
-      } catch {
+      })
+      .catch(() => {
         if (alive) {
           setCurrencyOptions([]);
           setOptionError('Unable to load Currency Master. Please reload the dialog.');
         }
-      } finally {
+      })
+      .finally(() => {
         if (alive) setOptionLoading((current) => ({ ...current, currency: false }));
-      }
-    };
-
-    const loadSupplierOptions = async () => {
-      if (!usesSupplierOptions) return;
-      setOptionLoading((current) => ({ ...current, supplier: true }));
-
-      try {
-        // UI field key remains "supplier", but the Master Data service type is
-        // "vendor" so it maps to /api/master-data/vendor-codes.
-        const items = await loadAllMasterDataOptions('vendor');
-        if (alive) setSupplierOptions(items);
-      } catch (error) {
-        console.error('Unable to load Vendor Code Master:', error);
-        if (alive) {
-          setSupplierOptions([]);
-          setOptionError('Unable to load Vendor Code Master. Please reload the dialog.');
-        }
-      } finally {
-        if (alive) setOptionLoading((current) => ({ ...current, supplier: false }));
-      }
-    };
-
-    loadCurrencyOptions();
-    loadSupplierOptions();
+      });
 
     return () => {
       alive = false;
     };
-  }, [open, usesCurrencyOptions, usesSupplierOptions]);
+  }, [open, usesCurrencyOptions]);
+
+  useEffect(() => {
+    if (!open || !usesSupplierOptions) return undefined;
+
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      setOptionLoading((current) => ({ ...current, supplier: true }));
+      searchVendorCodeOptions(supplierSearch, 50)
+        .then((items) => {
+          if (alive) setSupplierOptions(Array.isArray(items) ? items : []);
+        })
+        .catch((error) => {
+          console.error('Unable to search Vendor Code Master:', error);
+          if (alive) {
+            setSupplierOptions([]);
+            setOptionError('Unable to search Vendor Code Master. You may still enter a new supplier name.');
+          }
+        })
+        .finally(() => {
+          if (alive) setOptionLoading((current) => ({ ...current, supplier: false }));
+        });
+    }, 250);
+
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [open, supplierSearch, usesSupplierOptions]);
 
   const getOptions = (field) => {
     if (field.optionSource === 'currency') return currencyOptions;
@@ -367,8 +339,8 @@ export default function MasterDataFormDialog({
     try {
       const payload = config.toPayload ? config.toPayload(values) : values;
       const response = isEditing
-        ? await updateMasterData(config.type, record?.id, payload)
-        : await createMasterData(config.type, payload);
+        ? await updateMasterData(config.type, record?.id, payload, scopeParams)
+        : await createMasterData(config.type, payload, scopeParams);
 
       onSaved?.(response, `${config.singular} ${isEditing ? 'updated' : 'created'} successfully.`, { mode: isEditing ? 'update' : 'create' });
     } catch (error) {
@@ -462,8 +434,16 @@ export default function MasterDataFormDialog({
                       noOptionsText={loadingOptions ? 'Loading options…' : 'No matching master-data record'}
                       isOptionEqualToValue={(option, selected) => optionValue(field, option) === optionValue(field, selected)}
                       getOptionLabel={(option) => optionLabel(field, option)}
-                      onChange={(_, nextOption) => handleChange(field, nextOption ? optionValue(field, nextOption) : '')}
+                      filterOptions={(items) => items}
+                      onChange={(_, nextOption) => {
+                        const nextValue = nextOption ? optionValue(field, nextOption) : '';
+                        if (field.optionSource === 'supplier') setSupplierSearch(String(nextValue || ''));
+                        handleChange(field, nextValue);
+                      }}
                       onInputChange={(_, nextInput, reason) => {
+                        if (field.optionSource === 'supplier' && (reason === 'input' || reason === 'clear')) {
+                          setSupplierSearch(nextInput);
+                        }
                         if (field.freeSolo === true && (reason === 'input' || reason === 'clear')) {
                           handleChange(field, nextInput);
                         }
@@ -579,7 +559,7 @@ export default function MasterDataFormDialog({
 
                   <Typography sx={{ mt: 1.15, fontSize: '0.88rem', fontWeight: 700, color: '#111827' }}>
                     {canCalculateVnd
-                      ? `${formatVnd(materialPrice, 6)} ${String(values?.currency || '').trim().toUpperCase()} × ${formatVnd(selectedRateToVnd, 6)} = ${formatVnd(conversionToVnd, 2)} VND`
+                      ? `${formatVnd(materialPrice, 6)} ${String(values?.currency || '').trim().toUpperCase()} × ${formatVnd(selectedRateToVnd, 6)} = ${formatVnd(conversionToVnd, 0)} VND`
                       : 'Enter MAT PRICE (W/O TAX) and select a currency to preview the VND value.'}
                   </Typography>
                 </Box>

@@ -99,8 +99,26 @@ export const formatNumber = (value, maximumFractionDigits = 2) => {
 };
 
 export const formatCurrency = (value, currency = '') => {
-  const formatted = formatNumber(value, 4);
-  return formatted === '-' ? '-' : `${formatted}${currency ? ` ${currency}` : ''}`;
+  if (value === null || value === undefined || value === '') return '-';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+
+  const code = normalizeText(currency);
+  const formatted = new Intl.NumberFormat(code === 'VND' ? 'vi-VN' : 'en-US', {
+    maximumFractionDigits: code === 'VND' ? 0 : 4,
+    minimumFractionDigits: 0
+  }).format(number);
+  return `${formatted}${code ? ` ${code}` : ''}`;
+};
+
+export const formatVnd = (value) => {
+  if (value === null || value === undefined || value === '') return '-';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  return new Intl.NumberFormat('vi-VN', {
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0
+  }).format(number);
 };
 
 export const formatPercent = (value, maximumFractionDigits = 2) => {

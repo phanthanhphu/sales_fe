@@ -12,6 +12,8 @@ const AUTH_KEYS = [
   'userId',
   'isAuthenticated',
   'role',
+  'buyerKeys',
+  'accessibleBuyers',
   'loginAt',
 ];
 

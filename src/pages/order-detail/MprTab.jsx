@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -12,6 +12,7 @@ import {
   DialogTitle,
   Divider,
   FormControlLabel,
+  LinearProgress,
   IconButton,
   MenuItem,
   Paper,
@@ -27,7 +28,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { Delete, Download, Edit, Preview, Refresh, RestartAlt, Save } from '@mui/icons-material';
+import { CheckCircle, Delete, Download, Edit, ErrorOutline, Preview, Refresh, RestartAlt, Save } from '@mui/icons-material';
 import {
   deleteMpr,
   deleteMprBatch,
@@ -46,6 +47,7 @@ import MprLineEditDialog from './MprLineEditDialog';
 import { formatDateTime, statusSx } from '../orders/orderUi';
 import { listActiveShipTos, listMasterData } from '../../services/masterDataService';
 import { canManageSales } from 'utils/accessControl';
+import { normalizeBuyerKey } from 'utils/buyerContext';
 
 const emptyBomSelection = () => ({
   selected: false,
@@ -102,9 +104,17 @@ const textValue = (value) => {
   return String(value);
 };
 
+const formatFileSize = (value) => {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return '-';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+};
+
 const vendorCodeValue = (value) => {
   const text = textValue(value).trim();
-  // Vendor Code is an identifier, not a money/quantity column.
+  // Vender Code is an identifier, not a money/quantity column.
   // Remove thousands separators only when the whole value is numeric-like.
   return /^[0-9,]+$/.test(text) ? text.replace(/,/g, '') : text;
 };
@@ -128,9 +138,12 @@ const MPR_TEXT_FIELDS = new Set([
   'matDueDate'
 ]);
 
-const renderMprCellValue = (field, value) => {
+const renderMprCellValue = (field, value, row = {}) => {
   if (field === 'vendorCode') return vendorCodeValue(value);
   if (MPR_TEXT_FIELDS.has(field)) return textValue(value);
+  if (field === 'matPriceWithoutTax' && String(row?.currency || '').trim().toUpperCase() === 'VND') {
+    return formatValue(value, 0).replace(/,/g, '.');
+  }
   return formatValue(value);
 };
 
@@ -263,8 +276,8 @@ const MPR_COLUMNS = [
   ['currency', 'CUR', 80],
   ['matPriceWithoutTax', 'MAT PRICE (W/O TAX)', 170],
   ['shortNameSupplier', 'Short Name Supplier', 180],
-  ['vendorCode', 'Vendor Code', 135],
-  ['vendorName', 'Vendor Name', 190],
+  ['vendorCode', 'Vender Code', 135],
+  ['vendorName', 'Vender Name', 190],
   ['matCharger', 'MAT CHARGER', 140],
   ['exchangeRate', 'Exchange Rate', 140],
   ['matPriceUsd', 'MAT PRICE (USD)', 150],
@@ -273,9 +286,12 @@ const MPR_COLUMNS = [
   ['totalMatAmountPerStyle', 'TOTAL MAT AMOUNT per STYLE', 215]
 ];
 
-export default function MprTab({ order }) {
+export default function MprTab({ order, buyerKey: buyerKeyProp }) {
+  const buyerKey = normalizeBuyerKey(buyerKeyProp || order?.buyerKey);
+  const llBeanMprEnabled = buyerKey === 'LLBEAN';
   const canWrite = canManageSales();
   const writeBlockedMessage = 'Sales permission is required to create or modify MPR data.';
+  const buyerStrategyMessage = 'MPR calculation is currently configured for L.L.BEAN only. The formula strategy for this Buyer has not been configured yet.';
   const [boms, setBoms] = useState([]);
   const [selection, setSelection] = useState({});
   const [mpr, setMpr] = useState(null);
@@ -295,6 +311,33 @@ export default function MprTab({ order }) {
   const [batchSaving, setBatchSaving] = useState(false);
   const [salesBomFilter, setSalesBomFilter] = useState(emptySalesBomFilter);
   const [mprFilters, setMprFilters] = useState(emptyMprFilters);
+  const progressTimerRef = useRef(null);
+  const exportProgressTimerRef = useRef(null);
+  const [generateProgress, setGenerateProgress] = useState({
+    open: false,
+    status: 'idle',
+    percent: 0,
+    message: '',
+    currentColor: '',
+    processedRows: 0,
+    estimatedRows: 0,
+    totalColors: 0,
+    completedColors: 0,
+    addedRows: 0,
+    errorMessage: ''
+  });
+  const [exportProgress, setExportProgress] = useState({
+    open: false,
+    status: 'idle',
+    percent: 0,
+    message: '',
+    lineCount: 0,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    fileSizeBytes: 0,
+    fileName: '',
+    errorMessage: ''
+  });
 
   const notify = (message, severity = 'success') => {
     setNotice({ open: true, severity, message: String(message || '') });
@@ -307,7 +350,7 @@ export default function MprTab({ order }) {
       const [allBoms, activeShipTos, productColorResponse] = await Promise.all([
         listBoms(order.id),
         listActiveShipTos(),
-        listMasterData('productColor', { page: 0, size: 200 })
+        listMasterData('productColor', { buyerKey, page: 0, size: 200 })
       ]);
       const submitted = (allBoms || []).filter((bom) => bom.status === 'SUBMITTED');
       setBoms(submitted);
@@ -333,11 +376,16 @@ export default function MprTab({ order }) {
     } finally {
       setLoading(false);
     }
-  }, [order?.id]);
+  }, [buyerKey, order?.id]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => () => {
+    if (progressTimerRef.current) window.clearInterval(progressTimerRef.current);
+    if (exportProgressTimerRef.current) window.clearInterval(exportProgressTimerRef.current);
+  }, []);
 
   const toggleBom = (bomId, checked) => {
     if (!canWrite) return;
@@ -460,6 +508,214 @@ export default function MprTab({ order }) {
       })
   }), [boms, selection, order?.orderNo]);
 
+  const generationPlan = useMemo(() => {
+    const items = [];
+
+    payload.selections.forEach((selectedBom) => {
+      const bom = boms.find((item) => item.id === selectedBom.bomId);
+      if (!bom) return;
+
+      const coreLines = Number(bom.coreLineCount ?? (bom.coreLines || []).length) || 0;
+      const selectedPackingLines = (bom.packings || [])
+        .filter((packing) => (selectedBom.packingIds || []).includes(packing.id))
+        .reduce((total, packing) => total + (Number(packing.lineCount ?? (packing.lines || []).length) || 0), 0);
+      const estimatedRowsPerColor = coreLines + selectedPackingLines;
+      const productColors = productColorsForBom(bom);
+
+      (selectedBom.colors || []).forEach((colorId) => {
+        const color = productColors.find((item) => (item.id || item.colorName) === colorId);
+        items.push({
+          bomId: bom.id,
+          bomNo: bom.bomNo || '',
+          colorId,
+          colorName: color?.colorName || String(colorId || ''),
+          estimatedRows: estimatedRowsPerColor
+        });
+      });
+    });
+
+    return {
+      items,
+      totalColors: items.length,
+      estimatedRows: items.reduce((total, item) => total + item.estimatedRows, 0)
+    };
+  }, [boms, payload.selections]);
+
+  const stopProgressTimer = () => {
+    if (progressTimerRef.current) {
+      window.clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  };
+
+  const startGenerateProgress = () => {
+    stopProgressTimer();
+
+    const totalColors = Math.max(1, generationPlan.totalColors);
+    const estimatedRows = Math.max(0, generationPlan.estimatedRows);
+
+    setGenerateProgress({
+      open: true,
+      status: 'processing',
+      percent: 4,
+      message: 'Checking BOM data and preparing MPR lines...',
+      currentColor: generationPlan.items[0]?.colorName || '',
+      processedRows: 0,
+      estimatedRows,
+      totalColors: generationPlan.totalColors,
+      completedColors: 0,
+      addedRows: 0,
+      errorMessage: ''
+    });
+
+    progressTimerRef.current = window.setInterval(() => {
+      setGenerateProgress((current) => {
+        if (current.status !== 'processing') return current;
+
+        const increment = current.percent < 24 ? 4 : current.percent < 60 ? 2 : 1;
+        const percent = Math.min(92, current.percent + increment);
+        const workRatio = Math.max(0, Math.min(1, (percent - 10) / 82));
+        const activeIndex = Math.min(totalColors - 1, Math.floor(workRatio * totalColors));
+        const completedColors = Math.min(totalColors, Math.floor(workRatio * totalColors));
+        const currentItem = generationPlan.items[activeIndex];
+        const processedRows = estimatedRows > 0 ? Math.min(estimatedRows, Math.floor(estimatedRows * workRatio)) : 0;
+
+        return {
+          ...current,
+          percent,
+          message: percent < 12
+            ? 'Checking BOM data and preparing MPR lines...'
+            : `Processing Product Color ${currentItem?.colorName || activeIndex + 1}...`,
+          currentColor: currentItem?.colorName || '',
+          processedRows,
+          completedColors
+        };
+      });
+    }, 350);
+  };
+
+  const finishGenerateProgress = (addedRows) => {
+    stopProgressTimer();
+    setGenerateProgress((current) => ({
+      ...current,
+      open: true,
+      status: 'success',
+      percent: 100,
+      message: 'MPR created successfully.',
+      currentColor: '',
+      processedRows: current.estimatedRows,
+      completedColors: current.totalColors,
+      addedRows: Number(addedRows || 0),
+      errorMessage: ''
+    }));
+  };
+
+  const failGenerateProgress = (message) => {
+    stopProgressTimer();
+    setGenerateProgress((current) => ({
+      ...current,
+      open: true,
+      status: 'error',
+      message: 'Unable to create MPR.',
+      errorMessage: String(message || 'An unexpected error occurred.')
+    }));
+  };
+
+  const closeGenerateProgress = () => {
+    if (generateProgress.status === 'processing') return;
+    setGenerateProgress((current) => ({ ...current, open: false }));
+  };
+
+  const stopExportProgressTimer = () => {
+    if (exportProgressTimerRef.current) {
+      window.clearInterval(exportProgressTimerRef.current);
+      exportProgressTimerRef.current = null;
+    }
+  };
+
+  const startExportProgress = () => {
+    stopExportProgressTimer();
+
+    setExportProgress({
+      open: true,
+      status: 'processing',
+      percent: 3,
+      message: 'Preparing MPR data for Excel export...',
+      lineCount: mpr?.lines?.length || 0,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      fileSizeBytes: 0,
+      fileName: `${mpr?.mprNo || 'MPR'}.xlsx`,
+      errorMessage: ''
+    });
+
+    exportProgressTimerRef.current = window.setInterval(() => {
+      setExportProgress((current) => {
+        if (current.status !== 'processing' || current.percent >= 90) return current;
+
+        const increment = current.percent < 20 ? 3 : current.percent < 55 ? 2 : 1;
+        const percent = Math.min(88, current.percent + increment);
+        let message = 'Preparing MPR data for Excel export...';
+
+        if (percent >= 18 && percent < 45) message = 'Creating Excel workbook and worksheets...';
+        else if (percent >= 45 && percent < 70) message = 'Writing MPR rows, formulas and totals...';
+        else if (percent >= 70) message = 'Applying Excel formatting and finalizing the file...';
+
+        return { ...current, percent, message };
+      });
+    }, 450);
+  };
+
+  const updateExportDownloadProgress = ({ loaded = 0, total = 0, progress = null } = {}) => {
+    setExportProgress((current) => {
+      if (current.status !== 'processing') return current;
+
+      const networkPercent = progress === null
+        ? Math.max(92, current.percent)
+        : Math.min(99, 90 + (progress * 9));
+
+      return {
+        ...current,
+        percent: networkPercent,
+        message: 'Excel file generated. Downloading to your computer...',
+        downloadedBytes: Number(loaded || 0),
+        totalBytes: Number(total || 0)
+      };
+    });
+  };
+
+  const finishExportProgress = (result = {}) => {
+    stopExportProgressTimer();
+    setExportProgress((current) => ({
+      ...current,
+      open: true,
+      status: 'success',
+      percent: 100,
+      message: 'MPR Excel file exported successfully.',
+      downloadedBytes: Number(result?.sizeBytes || current.downloadedBytes || 0),
+      totalBytes: Number(result?.sizeBytes || current.totalBytes || 0),
+      fileSizeBytes: Number(result?.sizeBytes || 0),
+      fileName: result?.fileName || current.fileName,
+      errorMessage: ''
+    }));
+  };
+
+  const failExportProgress = (message) => {
+    stopExportProgressTimer();
+    setExportProgress((current) => ({
+      ...current,
+      open: true,
+      status: 'error',
+      message: 'Unable to export MPR Excel file.',
+      errorMessage: String(message || 'An unexpected export error occurred.')
+    }));
+  };
+
+  const closeExportProgress = () => {
+    if (exportProgress.status === 'processing') return;
+    setExportProgress((current) => ({ ...current, open: false }));
+  };
+
   const validateSelection = () => {
     if (!payload.selections.length) {
       notify('Select at least one submitted BOM.', 'error');
@@ -491,7 +747,10 @@ export default function MprTab({ order }) {
   };
 
   const previewMprAction = async () => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canWrite || !llBeanMprEnabled) {
+      notify(!canWrite ? writeBlockedMessage : buyerStrategyMessage, 'warning');
+      return;
+    }
     if (!validateSelection()) return;
     try {
       const result = await previewMpr(order.id, payload);
@@ -510,8 +769,15 @@ export default function MprTab({ order }) {
   };
 
   const generate = async () => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canWrite || !llBeanMprEnabled) {
+      notify(!canWrite ? writeBlockedMessage : buyerStrategyMessage, 'warning');
+      return;
+    }
+    if (generateProgress.status === 'processing') return;
     if (!validateSelection()) return;
+
+    startGenerateProgress();
+
     try {
       const previousCount = mpr?.lines?.length || 0;
       const result = await generateMpr(order.id, payload);
@@ -520,6 +786,7 @@ export default function MprTab({ order }) {
       setMpr(result);
       setPreview(null);
       resetSelection();
+      finishGenerateProgress(addedCount);
 
       notify(
         previousCount
@@ -527,7 +794,34 @@ export default function MprTab({ order }) {
           : 'MPR generated and saved successfully.'
       );
     } catch (error) {
-      notify(getApiError(error, 'Unable to add MPR lines.'), 'error');
+      const message = getApiError(error, 'Unable to add MPR lines.');
+      failGenerateProgress(message);
+      notify(message, 'error');
+    }
+  };
+
+  const exportMprExcel = async () => {
+    if (!mpr?.id || !order?.id) {
+      notify('Create MPR data before exporting Excel.', 'warning');
+      return;
+    }
+    if (generateProgress.status === 'processing' || exportProgress.status === 'processing') return;
+
+    const fileName = `${mpr.mprNo || 'MPR'}.xlsx`;
+    startExportProgress();
+
+    try {
+      const result = await downloadWithAuth(
+        getMprExportUrl(order.id),
+        fileName,
+        { onDownloadProgress: updateExportDownloadProgress }
+      );
+      finishExportProgress(result);
+      notify(`MPR Excel exported successfully: ${fileName}`);
+    } catch (error) {
+      const message = getApiError(error, 'Unable to export MPR Excel file.');
+      failExportProgress(message);
+      notify(message, 'error');
     }
   };
 
@@ -754,6 +1048,10 @@ export default function MprTab({ order }) {
       .filter((batch) => batch.lineCount > 0);
   }, [mpr]);
 
+  const generationBusy = generateProgress.status === 'processing';
+  const exportBusy = exportProgress.status === 'processing';
+  const operationBusy = generationBusy || exportBusy;
+
   return (
     <Box>
       <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
@@ -762,26 +1060,37 @@ export default function MprTab({ order }) {
             <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Sales / MPR</Typography>
           </Box>
           <Stack direction="row" flexWrap="wrap" spacing={1}>
-            <Button startIcon={<Refresh />} onClick={load} disabled={loading} sx={{ textTransform: 'none' }}>Refresh</Button>
+            <Button startIcon={<Refresh />} onClick={load} disabled={loading || operationBusy} sx={{ textTransform: 'none' }}>Refresh</Button>
             {mpr && (
               <>
-                <Button startIcon={<Download />} onClick={() => downloadWithAuth(getMprExportUrl(order.id), `${mpr.mprNo || 'MPR'}.xlsx`)} sx={{ textTransform: 'none' }}>
-                  Export MPR
+                <Button
+                  startIcon={<Download />}
+                  onClick={exportMprExcel}
+                  disabled={loading || operationBusy}
+                  sx={{ textTransform: 'none' }}
+                >
+                  {exportBusy ? 'Exporting Excel...' : 'Export MPR'}
                 </Button>
-                <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete MPR'}><span><Button color="error" startIcon={<Delete />} onClick={() => setDeleteOpen(true)} disabled={!canWrite} sx={{ textTransform: 'none' }}>
+                <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete MPR'}><span><Button color="error" startIcon={<Delete />} onClick={() => setDeleteOpen(true)} disabled={!canWrite || operationBusy} sx={{ textTransform: 'none' }}>
                   Delete MPR
                 </Button></span></Tooltip>
               </>
             )}
-            <Tooltip title={!canWrite ? writeBlockedMessage : 'Preview MPR'}><span><Button variant="outlined" startIcon={<Preview />} onClick={previewMprAction} disabled={loading || !canWrite} sx={{ textTransform: 'none' }}>
+            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : 'Preview MPR')}><span><Button variant="outlined" startIcon={<Preview />} onClick={previewMprAction} disabled={loading || operationBusy || !canWrite || !llBeanMprEnabled} sx={{ textTransform: 'none' }}>
               Preview MPR
             </Button></span></Tooltip>
-            <Tooltip title={!canWrite ? writeBlockedMessage : (mpr ? 'Add To MPR' : 'Create MPR')}><span><Button variant="contained" startIcon={<Save />} onClick={generate} disabled={loading || !canWrite} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
-              {mpr ? 'Add To MPR' : 'Create MPR'}
+            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : (mpr ? 'Add To MPR' : 'Create MPR'))}><span><Button variant="contained" startIcon={<Save />} onClick={generate} disabled={loading || operationBusy || !canWrite || !llBeanMprEnabled} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
+              {generationBusy ? 'Creating MPR...' : (mpr ? 'Add To MPR' : 'Create MPR')}
             </Button></span></Tooltip>
           </Stack>
         </Stack>
       </Paper>
+
+      {!llBeanMprEnabled && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {buyerStrategyMessage}
+        </Alert>
+      )}
 
       <Stack spacing={1.5}>
         {boms.length === 0 && (
@@ -839,7 +1148,7 @@ export default function MprTab({ order }) {
                   <Box>
                     <Typography sx={{ fontWeight: 900 }}>{bom.bomNo} — {bom.bomName}</Typography>
                     <Typography sx={{ fontSize: '.78rem', color: 'text.secondary' }}>
-                      {(bom.coreLines || []).length} core lines · {(bom.packings || []).length} packings
+                      {bom.coreLineCount ?? (bom.coreLines || []).length} core lines · {bom.lineCount ?? ((bom.coreLines || []).length + (bom.packings || []).reduce((total, packing) => total + (packing.lineCount ?? (packing.lines || []).length), 0))} total lines · {(bom.packings || []).length} packings
                     </Typography>
                   </Box>
                 )}
@@ -1070,9 +1379,8 @@ export default function MprTab({ order }) {
                   const colorGroups = [];
                   const groupByColor = new Map();
 
-                  visibleLines.forEach((line, index) => {
-                    const lineWithRowNo = { ...line, __displayNo: index + 1 };
-                    const color = lineWithRowNo.styleColor || 'No Product Color';
+                  visibleLines.forEach((line) => {
+                    const color = line?.styleColor || 'No Product Color';
                     if (!groupByColor.has(color)) {
                       const group = { color, packingGroups: [], packingByKey: new Map(), lineCount: 0 };
                       groupByColor.set(color, group);
@@ -1080,6 +1388,7 @@ export default function MprTab({ order }) {
                     }
 
                     const colorGroup = groupByColor.get(color);
+                    const lineWithRowNo = { ...line, __displayNo: colorGroup.lineCount + 1 };
                     const isCoreLine = !lineWithRowNo.packingId && !lineWithRowNo.packingName;
                     const packingKey = lineWithRowNo.packingId || lineWithRowNo.packingName || 'CORE_BOM';
                     if (!colorGroup.packingByKey.has(packingKey)) {
@@ -1133,7 +1442,7 @@ export default function MprTab({ order }) {
                           </TableCell>
                           {MPR_COLUMNS.map(([field, header]) => (
                             <TableCell key={header} sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
-                              {renderMprCellValue(field, line[field])}
+                              {renderMprCellValue(field, line[field], line)}
                             </TableCell>
                           ))}
                           <TableCell sx={{ whiteSpace: 'nowrap' }}>
@@ -1178,6 +1487,201 @@ export default function MprTab({ order }) {
           </TableContainer>
         </Paper>
       )}
+
+      <Dialog
+        open={generateProgress.open}
+        onClose={closeGenerateProgress}
+        disableEscapeKeyDown={generationBusy}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ fontWeight: 900, color: '#103B5C' }}>
+          {generateProgress.status === 'processing' && 'Creating MPR'}
+          {generateProgress.status === 'success' && 'MPR Created Successfully'}
+          {generateProgress.status === 'error' && 'MPR Creation Failed'}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Stack direction="row" spacing={1.25} alignItems="center">
+              {generateProgress.status === 'success' && <CheckCircle color="success" sx={{ fontSize: 34 }} />}
+              {generateProgress.status === 'error' && <ErrorOutline color="error" sx={{ fontSize: 34 }} />}
+              <Box sx={{ flex: 1 }}>
+                <Typography sx={{ fontWeight: 800 }}>{generateProgress.message}</Typography>
+                {generateProgress.status === 'processing' && generateProgress.currentColor && (
+                  <Typography sx={{ mt: 0.35, fontSize: '.85rem', color: 'text.secondary' }}>
+                    Current Product Color: {generateProgress.currentColor}
+                  </Typography>
+                )}
+              </Box>
+              <Typography sx={{ minWidth: 54, textAlign: 'right', fontSize: '1.05rem', fontWeight: 900, color: '#103B5C' }}>
+                {Math.round(generateProgress.percent)}%
+              </Typography>
+            </Stack>
+
+            <LinearProgress
+              variant="determinate"
+              value={generateProgress.percent}
+              color={generateProgress.status === 'error' ? 'error' : generateProgress.status === 'success' ? 'success' : 'primary'}
+              sx={{ height: 10, borderRadius: 999 }}
+            />
+
+            <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 1.5, backgroundColor: '#f8fafc' }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between">
+                <Box>
+                  <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>PRODUCT COLORS</Typography>
+                  <Typography sx={{ fontWeight: 900 }}>
+                    {generateProgress.status === 'processing'
+                      ? `${Math.min(generateProgress.completedColors, generateProgress.totalColors)} / ${generateProgress.totalColors}`
+                      : generateProgress.totalColors}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>ESTIMATED MPR LINES</Typography>
+                  <Typography sx={{ fontWeight: 900 }}>
+                    {generateProgress.estimatedRows > 0
+                      ? `${Math.min(generateProgress.processedRows, generateProgress.estimatedRows)} / ${generateProgress.estimatedRows}`
+                      : '-'}
+                  </Typography>
+                </Box>
+                {generateProgress.status === 'success' && (
+                  <Box>
+                    <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>NEW LINES ADDED</Typography>
+                    <Typography sx={{ fontWeight: 900 }}>{generateProgress.addedRows}</Typography>
+                  </Box>
+                )}
+              </Stack>
+            </Paper>
+
+            {generateProgress.status === 'processing' && (
+              <Alert severity="info">
+                Progress is estimated while the server is processing. Please do not close this window or click Create MPR again.
+              </Alert>
+            )}
+
+            {generateProgress.status === 'error' && (
+              <Alert severity="error">{generateProgress.errorMessage}</Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          {generateProgress.status === 'error' && (
+            <Button
+              variant="outlined"
+              onClick={() => {
+                setGenerateProgress((current) => ({ ...current, open: false, status: 'idle' }));
+                window.setTimeout(generate, 0);
+              }}
+              sx={{ textTransform: 'none' }}
+            >
+              Retry
+            </Button>
+          )}
+          <Button
+            variant={generateProgress.status === 'success' ? 'contained' : 'text'}
+            disabled={generationBusy}
+            onClick={closeGenerateProgress}
+            sx={{ textTransform: 'none', ...(generateProgress.status === 'success' ? { backgroundColor: '#103B5C' } : {}) }}
+          >
+            {generateProgress.status === 'success' ? 'View MPR' : 'Close'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={exportProgress.open}
+        onClose={closeExportProgress}
+        disableEscapeKeyDown={exportBusy}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ fontWeight: 900, color: '#103B5C' }}>
+          {exportProgress.status === 'processing' && 'Exporting MPR Excel'}
+          {exportProgress.status === 'success' && 'Excel Export Completed'}
+          {exportProgress.status === 'error' && 'Excel Export Failed'}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Stack direction="row" spacing={1.25} alignItems="center">
+              {exportProgress.status === 'processing' && <Download color="primary" sx={{ fontSize: 34 }} />}
+              {exportProgress.status === 'success' && <CheckCircle color="success" sx={{ fontSize: 34 }} />}
+              {exportProgress.status === 'error' && <ErrorOutline color="error" sx={{ fontSize: 34 }} />}
+              <Box sx={{ flex: 1 }}>
+                <Typography sx={{ fontWeight: 800 }}>{exportProgress.message}</Typography>
+                <Typography sx={{ mt: 0.35, fontSize: '.85rem', color: 'text.secondary' }}>
+                  {exportProgress.fileName || 'MPR.xlsx'}
+                </Typography>
+              </Box>
+              <Typography sx={{ minWidth: 54, textAlign: 'right', fontSize: '1.05rem', fontWeight: 900, color: '#103B5C' }}>
+                {Math.round(exportProgress.percent)}%
+              </Typography>
+            </Stack>
+
+            <LinearProgress
+              variant="determinate"
+              value={exportProgress.percent}
+              color={exportProgress.status === 'error' ? 'error' : exportProgress.status === 'success' ? 'success' : 'primary'}
+              sx={{ height: 10, borderRadius: 999 }}
+            />
+
+            <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 1.5, backgroundColor: '#f8fafc' }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between">
+                <Box>
+                  <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>MPR LINES</Typography>
+                  <Typography sx={{ fontWeight: 900 }}>{exportProgress.lineCount}</Typography>
+                </Box>
+                <Box>
+                  <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>DOWNLOAD</Typography>
+                  <Typography sx={{ fontWeight: 900 }}>
+                    {exportProgress.totalBytes > 0
+                      ? `${formatFileSize(exportProgress.downloadedBytes)} / ${formatFileSize(exportProgress.totalBytes)}`
+                      : exportProgress.downloadedBytes > 0
+                        ? formatFileSize(exportProgress.downloadedBytes)
+                        : 'Waiting for file...'}
+                  </Typography>
+                </Box>
+                {exportProgress.status === 'success' && (
+                  <Box>
+                    <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>FILE SIZE</Typography>
+                    <Typography sx={{ fontWeight: 900 }}>{formatFileSize(exportProgress.fileSizeBytes)}</Typography>
+                  </Box>
+                )}
+              </Stack>
+            </Paper>
+
+            {exportProgress.status === 'processing' && (
+              <Alert severity="info">
+                The server is generating the Excel workbook. Progress is estimated until the file starts downloading. Please do not export again or close this window.
+              </Alert>
+            )}
+
+            {exportProgress.status === 'error' && (
+              <Alert severity="error">{exportProgress.errorMessage}</Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          {exportProgress.status === 'error' && (
+            <Button
+              variant="outlined"
+              onClick={() => {
+                setExportProgress((current) => ({ ...current, open: false, status: 'idle' }));
+                window.setTimeout(exportMprExcel, 0);
+              }}
+              sx={{ textTransform: 'none' }}
+            >
+              Retry Export
+            </Button>
+          )}
+          <Button
+            variant={exportProgress.status === 'success' ? 'contained' : 'text'}
+            disabled={exportBusy}
+            onClick={closeExportProgress}
+            sx={{ textTransform: 'none', ...(exportProgress.status === 'success' ? { backgroundColor: '#103B5C' } : {}) }}
+          >
+            {exportProgress.status === 'success' ? 'Done' : 'Close'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={canWrite && deleteOpen} onClose={() => setDeleteOpen(false)}>
         <DialogTitle>Delete MPR?</DialogTitle>

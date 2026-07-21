@@ -25,6 +25,7 @@ import {
 // Keep this file at: src/assets/images/background/background_login.png
 import backgroundLogin from '../assets/images/background/background_login.png';
 import { apiRawClient } from './globalApi';
+import { defaultAuthorizedPath } from '../utils/buyerContext';
 
 const LOGIN_DRAFT_EMAIL_KEY = 'loginDraftEmail';
 const LOGIN_DRAFT_PASSWORD_KEY = 'loginDraftPassword';
@@ -116,9 +117,9 @@ const canManageBookingUser = (user = {}, fallbackRole = '') => {
     || normalizePermission(user?.bookingPermission || user?.booking_permission) === 'BOOKING';
 };
 
-const getPostLoginPath = (user = {}, fallbackRole = '') => {
-  return isAdminRole(getUserRole(user, fallbackRole)) ? '/users' : '/departments';
-};
+const getPostLoginPath = (user = {}, fallbackRole = '') => (
+  defaultAuthorizedPath({ ...user, role: getUserRole(user, fallbackRole) })
+);
 
 const getStoredUserForRedirect = () => {
   try {
@@ -149,6 +150,8 @@ const clearAuthSession = () => {
   localStorage.removeItem('userId');
   localStorage.removeItem('isAuthenticated');
   localStorage.removeItem('role');
+  localStorage.removeItem('buyerKeys');
+  localStorage.removeItem('accessibleBuyers');
   localStorage.removeItem('approvePermission');
   localStorage.removeItem('canApproveNotice');
   localStorage.removeItem('canApproveDocument');
@@ -225,6 +228,7 @@ const persistAuthSession = ({ token, user, role }) => {
   localStorage.setItem('userId', userId);
   localStorage.setItem('isAuthenticated', 'true');
   localStorage.setItem('role', safeRole);
+  localStorage.setItem('buyerKeys', JSON.stringify(Array.isArray(mergedUser.buyerKeys) ? mergedUser.buyerKeys : []));
   localStorage.setItem('approvePermission', safeApprovePermission);
   localStorage.setItem('canApproveNotice', String(safeCanApproveNotice));
   localStorage.setItem('canApproveDocument', String(safeCanApproveDocument));
@@ -239,7 +243,7 @@ const persistAuthSession = ({ token, user, role }) => {
 export default function LoginPage() {
   const navigate = useNavigate();
 
-  const DEFAULT_PATH = useMemo(() => '/departments', []);
+  const DEFAULT_PATH = useMemo(() => defaultAuthorizedPath(), []);
 
   const [email, setEmail] = useState(() => getSavedLoginDraft(LOGIN_DRAFT_EMAIL_KEY));
   const [password, setPassword] = useState(() => getSavedLoginDraft(LOGIN_DRAFT_PASSWORD_KEY));

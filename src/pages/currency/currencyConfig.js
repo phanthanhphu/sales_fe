@@ -1,6 +1,7 @@
 import {
   formatDateTime,
   formatNumber,
+  formatVnd,
   normalizeText,
   trimText
 } from '../shared/masterDataUtils';
@@ -20,7 +21,7 @@ export const getCurrentRateToVnd = (record = {}) => {
 const rateLabel = (record = {}) => {
   const code = normalizeText(record?.currencyCode) || 'CUR';
   const rate = getCurrentRateToVnd(record);
-  return Number.isFinite(rate) ? `1 ${code} = ${formatNumber(rate, 6)} VND` : '-';
+  return Number.isFinite(rate) ? `1 ${code} = ${formatVnd(rate)} VND` : '-';
 };
 
 export const currencyConfig = {
@@ -28,6 +29,7 @@ export const currencyConfig = {
   menuTitle: 'Currency',
   pageTitle: 'Currency Master',
   singular: 'Currency',
+  allowUpload: false,
   primaryField: 'currencyCode',
   minTableWidth: 1080,
   excelSheetName: 'CURRENCY',

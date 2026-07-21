@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -19,25 +19,49 @@ import CloseIcon from '@mui/icons-material/Close';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import InsertDriveFileRoundedIcon from '@mui/icons-material/InsertDriveFileRounded';
 import { getMasterDataErrorMessage, uploadEditedMasterData, uploadMasterData } from '../../services/masterDataService';
+import { initialUploadProgress, startProcessingTicker, uploadProgressFromEvent, uploadStage } from '../../utils/uploadProgress';
+import ExcelUploadProgressDialog from '../../components/ExcelUploadProgressDialog';
+import SalesBomLoadingPanel from '../../components/SalesBomLoadingPanel';
 
 const formatFileSize = (size = 0) => `${(size / 1024 / 1024).toFixed(2)} MB`;
+const LARGE_PROGRESS_MODULES = new Set(['matInfo', 'vendor', 'loss']);
 
-export default function MasterDataUploadDialog({ config, open, onClose, onImported, editMode = false }) {
+export default function MasterDataUploadDialog({ config, open, onClose, onImported, editMode = false, scopeParams = {} }) {
   const sheetName = config.excelSheetName || config.menuTitle;
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  const tickerRef = useRef(null);
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(initialUploadProgress());
+  const useLargeProgressDialog = LARGE_PROGRESS_MODULES.has(config?.type);
 
   const locked = uploading;
 
-  const reset = () => {
+  const stopTicker = () => {
+    if (tickerRef.current) window.clearInterval(tickerRef.current);
+    tickerRef.current = null;
+  };
+
+  useEffect(() => {
+    if (tickerRef.current) window.clearInterval(tickerRef.current);
+    tickerRef.current = null;
     setFile(null);
     setError('');
     setResult(null);
     setUploading(false);
+    setUploadProgress(initialUploadProgress());
+  }, [config?.type, editMode, open]);
+
+  const reset = () => {
+    stopTicker();
+    setFile(null);
+    setError('');
+    setResult(null);
+    setUploading(false);
+    setUploadProgress(initialUploadProgress());
   };
 
   const close = () => {
@@ -60,6 +84,7 @@ export default function MasterDataUploadDialog({ config, open, onClose, onImport
     setFile(selected);
     setError('');
     setResult(null);
+    setUploadProgress(initialUploadProgress());
   };
 
   const upload = async () => {
@@ -71,22 +96,73 @@ export default function MasterDataUploadDialog({ config, open, onClose, onImport
     setUploading(true);
     setError('');
     setResult(null);
+    setUploadProgress(initialUploadProgress(file));
+    stopTicker();
+    tickerRef.current = startProcessingTicker(setUploadProgress);
+
+    const options = {
+      onUploadProgress: (event) => {
+        const nextValue = uploadProgressFromEvent(event);
+        setUploadProgress((current) => ({
+          ...current,
+          open: true,
+          file,
+          progress: Math.max(Number(current.progress || 0), nextValue),
+          status: uploadStage(nextValue),
+          state: 'processing'
+        }));
+      }
+    };
 
     try {
       const response = editMode
-        ? await uploadEditedMasterData(config.type, file)
-        : await uploadMasterData(config.type, file, 'CREATE_ONLY');
+        ? await uploadEditedMasterData(config.type, file, scopeParams, options)
+        : await uploadMasterData(config.type, file, 'CREATE_ONLY', scopeParams, options);
+      stopTicker();
       setResult(response);
-      if (response?.applied) onImported?.(response);
+      setUploadProgress({
+        open: true,
+        file,
+        progress: 100,
+        status: `${config.menuTitle} Excel import completed.`,
+        detail: `Processed ${response?.totalRows ?? 0} row(s); created ${response?.created ?? 0}, updated ${response?.updated ?? 0}, deleted ${response?.deleted ?? 0}, skipped ${response?.skipped ?? 0}.`,
+        state: 'success'
+      });
+      if (response?.applied && !useLargeProgressDialog) onImported?.(response);
     } catch (requestError) {
-      setError(getMasterDataErrorMessage(requestError, 'Excel import failed.'));
+      stopTicker();
+      const message = getMasterDataErrorMessage(requestError, `${config.menuTitle} Excel import failed.`);
+      setError(message);
       setResult(requestError?.response?.data || null);
+      setUploadProgress((current) => ({
+        ...current,
+        open: true,
+        file,
+        status: `${config.menuTitle} Excel import failed.`,
+        detail: message,
+        state: 'error'
+      }));
     } finally {
       setUploading(false);
     }
   };
 
   const errors = Array.isArray(result?.errors) ? result.errors : [];
+
+  const closeProgress = () => {
+    if (uploading || uploadProgress.state === 'processing') return;
+
+    if (useLargeProgressDialog && uploadProgress.state === 'success' && result?.applied) {
+      onImported?.(result);
+      return;
+    }
+
+    setUploadProgress(initialUploadProgress());
+  };
+
+  const progressTitle = editMode
+    ? `${config.menuTitle} — Upload Edited Excel`
+    : `${config.menuTitle} — Upload New Excel`;
 
   return (
     <Dialog
@@ -98,7 +174,7 @@ export default function MasterDataUploadDialog({ config, open, onClose, onImport
       PaperProps={{ sx: { borderRadius: fullScreen ? 0 : 2 } }}
     >
       <DialogTitle sx={{ pr: 6, px: 3, pt: 2.35, pb: 1.75, fontWeight: 900, color: '#103B5C' }}>
-        {editMode ? `Upload Edited ${config.menuTitle}` : `Upload ${config.menuTitle}`}
+        {editMode ? `${config.menuTitle} — Upload Edited Excel` : `${config.menuTitle} — Upload New Excel`}
         <Typography sx={{ mt: 0.25, fontSize: '0.8rem', color: 'text.secondary', fontWeight: 400 }}>
           {editMode
             ? 'Upload the Excel file downloaded from this page after editing data.'
@@ -114,6 +190,7 @@ export default function MasterDataUploadDialog({ config, open, onClose, onImport
           {error && <Alert severity="error" sx={{ borderRadius: 1.25 }}>{error}</Alert>}
 
           <Alert severity="info" sx={{ borderRadius: 1.25 }}>
+            <b>Current module: {config.menuTitle}</b><br />
             {editMode ? (
               <>Use the downloaded <b>{sheetName}</b> edit file. Keep Key to update; leave Key blank to create a new row.</>
             ) : (
@@ -155,11 +232,22 @@ export default function MasterDataUploadDialog({ config, open, onClose, onImport
             )}
           </Box>
 
+          {uploadProgress.open && !useLargeProgressDialog && (
+            <SalesBomLoadingPanel
+              compact
+              file={uploadProgress.file || file}
+              progress={uploadProgress.progress}
+              status={uploadProgress.status}
+              detail={uploadProgress.detail}
+              state={uploadProgress.state}
+            />
+          )}
+
           {result && (
             <Box sx={{ p: 1.5, borderRadius: 1.25, border: '1px solid #d1fae5', backgroundColor: '#f0fdf4' }}>
               <Typography fontWeight={800} color="#166534">Import result</Typography>
               <Typography sx={{ mt: 0.45, fontSize: '0.86rem', color: '#166534' }}>
-                Total: {result.totalRows ?? 0} · Valid: {result.validRows ?? 0} · Created: {result.created ?? 0} · Updated: {result.updated ?? 0}
+                Total: {result.totalRows ?? 0} · Valid: {result.validRows ?? 0} · Created: {result.created ?? 0} · Updated: {result.updated ?? 0} · Deleted: {result.deleted ?? 0}
               </Typography>
               {errors.length > 0 && (
                 <>
@@ -191,6 +279,18 @@ export default function MasterDataUploadDialog({ config, open, onClose, onImport
           {uploading ? <CircularProgress size={20} color="inherit" /> : (editMode ? 'Upload Edited File' : 'Upload & Create')}
         </Button>
       </DialogActions>
+
+      <ExcelUploadProgressDialog
+        open={useLargeProgressDialog && uploadProgress.open}
+        title={progressTitle}
+        file={uploadProgress.file || file}
+        progress={uploadProgress.progress}
+        status={uploadProgress.status}
+        detail={uploadProgress.detail}
+        state={uploadProgress.state}
+        onClose={closeProgress}
+        onRetry={uploadProgress.state === 'error' ? upload : undefined}
+      />
     </Dialog>
   );
 }

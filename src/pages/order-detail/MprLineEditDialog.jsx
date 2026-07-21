@@ -214,8 +214,8 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
           {field('currency', 'CUR', { inputProps: { maxLength: 3 } })}
           {field('matPriceWithoutTax', 'MAT Price (W/O Tax)', { type: 'number', inputProps: { min: 0, step: 'any' } })}
           {field('shortNameSupplier', 'Short Name Supplier')}
-          {field('vendorCode', 'Vendor Code')}
-          {field('vendorName', 'Vendor Name')}
+          {field('vendorCode', 'Vender Code')}
+          {field('vendorName', 'Vender Name')}
           {field('matCharger', 'MAT Charger')}
         </Box>
       </DialogContent>

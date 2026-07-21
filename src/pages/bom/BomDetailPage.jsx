@@ -31,6 +31,7 @@ import {
 } from '@mui/material';
 import {
   Add,
+  Close,
   Delete,
   Edit,
   ExpandMore,
@@ -50,13 +51,16 @@ import {
   applyBomMprReview,
   deleteBomAttachment,
   deleteBomLine,
+  deleteBomLineImage,
   deleteBomProductColor,
   deletePacking,
   downloadBomAttachment,
   downloadWithAuth,
   getApiError,
   getBomAttachmentObjectUrl,
+  getBomLineImageObjectUrl,
   getBom,
+  listBomLines,
   listBomMprReviews,
   openBomAttachment,
   getBomExportUrl,
@@ -66,13 +70,17 @@ import {
   updateBomLine,
   updateBomProductColor,
   updatePacking,
-  uploadBomAttachment
+  uploadBomAttachment,
+  uploadBomLineImage
 } from '../../services/orderBomMprService';
 import { listMasterData } from '../../services/masterDataService';
 import ProductColorImage from '../../components/ProductColorImage';
 import { canManageBom } from 'utils/accessControl';
+import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
 import BomMprReviewDialog from './BomMprReviewDialog';
 import ConfirmDeleteDialog from '../shared/ConfirmDeleteDialog';
+import ExcelUploadProgressDialog from '../../components/ExcelUploadProgressDialog';
+import { initialUploadProgress, startProcessingTicker, uploadProgressFromEvent, uploadStage } from '../../utils/uploadProgress';
 
 const blankLine = {
   materialGroupNo: '',
@@ -89,9 +97,11 @@ const blankLine = {
   direction: '',
   costing: '',
   costingUnit: '',
+  detailConsumption: '',
   consumptionNet: '',
   consumptionUnit: '',
   bomRemark: '',
+  additionalRemark: '',
   detailLine: false,
   productColorValues: []
 };
@@ -133,6 +143,8 @@ const headerDisplayFields = [
   { key: 'patternNumber', label: 'Pattern Number' },
   { key: 'patternMaker', label: 'Pattern Maker' },
   { key: 'styleName', label: 'Style Name' },
+  { key: 'markerDate', label: 'Marker Date' },
+  { key: 'markerMaker', label: 'Marker Maker' },
   { key: 'factoryProduct', label: 'Factory Product' },
   { key: 'size', label: 'Size (W x H x D)' },
   { key: 'bomMaker', label: 'BOM Maker' },
@@ -176,35 +188,51 @@ const productColorsForBom = (bom) => {
     id: color,
     colorName: color,
     patternNumber: safeBom.header?.patternNumber || '',
-    season: safeBom.header?.season || ''
+    season: safeBom.header?.season || '',
+    styleNumber: safeBom.header?.styleNumber || '',
+    sequence: null
   }));
 };
 
 const productColorLabel = (productColor = {}) => {
   const safeProductColor = productColor || {};
   return [
+    safeProductColor.sequence ? `#${safeProductColor.sequence}` : '',
     safeProductColor.colorName,
     safeProductColor.patternNumber,
-    safeProductColor.season
+    safeProductColor.season,
+    safeProductColor.styleNumber
   ].filter(Boolean).join(' · ');
 };
+
+const productColorIdentityMatches = (master = {}, productColor = {}) => (
+  normalized(master?.patternNumber) === normalized(productColor?.patternNumber)
+  && normalized(master?.productColor) === normalized(productColor?.colorName)
+  && normalized(master?.season) === normalized(productColor?.season)
+  && normalized(master?.styleNumber) === normalized(productColor?.styleNumber)
+);
+
+const productColorMasterLabel = (master = {}) => [
+  master?.patternNumber,
+  master?.productColor,
+  master?.season,
+  master?.styleNumber
+].map((value) => String(value || '').trim()).filter(Boolean).join(' · ');
 
 const productColorMasterForBom = (productColor = {}, productColorMasters = []) => {
   const safeProductColor = productColor || {};
   const safeMasters = Array.isArray(productColorMasters) ? productColorMasters : [];
+  const linked = safeMasters.find((item) => item?.id === safeProductColor?.productColorMasterId);
 
-  return safeMasters.find((item) => item?.id === safeProductColor?.productColorMasterId)
-    || safeMasters.find((item) => normalized(item?.productColor) === normalized(safeProductColor?.colorName))
-    || null;
+  if (linked && productColorIdentityMatches(linked, safeProductColor)) return linked;
+  return safeMasters.find((item) => productColorIdentityMatches(item, safeProductColor)) || null;
 };
 
 const childColorsForProductColor = (productColorId, productColors = [], productColorMasters = []) => {
   const safeProductColors = Array.isArray(productColors) ? productColors : [];
   const safeMasters = Array.isArray(productColorMasters) ? productColorMasters : [];
   const productColor = safeProductColors.find((item) => item?.id === productColorId);
-  const masterId = productColor?.productColorMasterId;
-  const master = safeMasters.find((item) => item?.id === masterId)
-    || safeMasters.find((item) => normalized(item?.productColor) === normalized(productColor?.colorName));
+  const master = productColorMasterForBom(productColor || {}, safeMasters);
   const unique = new Map();
   (master?.childColors || []).forEach((item) => {
     const id = String(item?.id || '').trim();
@@ -290,6 +318,8 @@ const resolveCreatedProductColorId = (created, nextBom, payload = {}) => {
     valuesEqual(productColor?.colorName, payload.colorName)
     && valuesEqual(productColor?.patternNumber, payload.patternNumber)
     && valuesEqual(productColor?.season, payload.season)
+    && (payload.styleNumber ? valuesEqual(productColor?.styleNumber, payload.styleNumber) : true)
+    && (payload.sequence === null || payload.sequence === undefined || payload.sequence === '' || Number(productColor?.sequence) === Number(payload.sequence))
   ));
   return String((lastOf(matches) || lastOf(productColors) || {})?.id || '');
 };
@@ -347,9 +377,11 @@ const lineMatchesFilters = (line = {}, filters = emptyLineFilters, productColors
       safeLine.direction,
       safeLine.costing,
       safeLine.costingUnit,
+      safeLine.detailConsumption,
       safeLine.consumptionNet,
       safeLine.consumptionUnit,
       safeLine.bomRemark,
+      safeLine.additionalRemark,
       ...lineProductColors,
       ...childColors
     ];
@@ -403,7 +435,9 @@ const lineToForm = (line, productColors = []) => {
     dimensionY: line?.dimensionY ?? '',
     quantity: line?.quantity ?? '',
     costing: line?.costing ?? '',
+    detailConsumption: line?.detailConsumption ?? '',
     consumptionNet: line?.consumptionNet ?? '',
+    additionalRemark: line?.additionalRemark ?? '',
     productColorValues: linkedValues
   };
 };
@@ -423,9 +457,11 @@ const formToLine = (form = {}) => ({
   direction: String(form.direction || '').trim(),
   costing: asNumber(form.costing),
   costingUnit: String(form.costingUnit || '').trim(),
+  detailConsumption: asNumber(form.detailConsumption),
   consumptionNet: asNumber(form.consumptionNet),
   consumptionUnit: String(form.consumptionUnit || '').trim(),
   bomRemark: String(form.bomRemark || '').trim(),
+  additionalRemark: String(form.additionalRemark || '').trim(),
   detailLine: Boolean(form.detailLine),
   productColorValues: (form.productColorValues || [])
     .map((item) => ({
@@ -459,7 +495,7 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
       <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
         {record ? 'Edit BOM Line' : 'Add BOM Line'}
         <Typography sx={{ mt: 0.25, fontSize: '0.8rem', color: 'text.secondary', fontWeight: 400 }}>
-          All fields match the BOM Details Excel columns A to Q. For each Product / Style Color, select one saved Child Color; the BOM row stores its stable Child Color link.
+          Supports both the legacy BOM format and the new A:Y format. Consumption MPR is stored separately from the new detail CONS. value.
         </Typography>
         <IconButton onClick={onClose} disabled={saving} sx={{ position: 'absolute', right: 14, top: 14 }}>
           ×
@@ -483,10 +519,11 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
           <TextField label="Q.TY" type="number" value={form.quantity} onChange={set('quantity')} sx={fieldSx} />
           <TextField label="><" value={form.direction} onChange={set('direction')} sx={fieldSx} />
 
-          <TextField label="Costing / MK" type="number" value={form.costing} onChange={set('costing')} sx={fieldSx} />
-          <TextField label="Costing / Unit" value={form.costingUnit} onChange={set('costingUnit')} sx={fieldSx} />
-          <TextField label="Consumption / Net" type="number" value={form.consumptionNet} onChange={set('consumptionNet')} sx={fieldSx} />
-          <TextField label="Consumption / Unit" value={form.consumptionUnit} onChange={set('consumptionUnit')} sx={fieldSx} />
+          <TextField label="Legacy Costing / MK" type="number" value={form.costing} onChange={set('costing')} sx={fieldSx} />
+          <TextField label="Legacy Costing / Unit" value={form.costingUnit} onChange={set('costingUnit')} sx={fieldSx} />
+          <TextField label="Detail CONS. (New Format)" type="number" value={form.detailConsumption} onChange={set('detailConsumption')} sx={fieldSx} />
+          <TextField label="Consumption MPR" type="number" value={form.consumptionNet} onChange={set('consumptionNet')} sx={fieldSx} />
+          <TextField label="Consumption Unit" value={form.consumptionUnit} onChange={set('consumptionUnit')} sx={fieldSx} />
 
           <FormControlLabel
             control={<Checkbox checked={Boolean(form.detailLine)} onChange={set('detailLine')} />}
@@ -495,12 +532,20 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
           />
 
           <TextField
-            label="B.O.M Remarks"
+            label="Remarks On BOM"
             value={form.bomRemark}
             onChange={set('bomRemark')}
             multiline
             minRows={2}
-            sx={{ gridColumn: { xs: '1', sm: 'span 4' } }}
+            sx={{ gridColumn: { xs: '1', sm: 'span 2' } }}
+          />
+          <TextField
+            label="Additional Remarks (New Format)"
+            value={form.additionalRemark}
+            onChange={set('additionalRemark')}
+            multiline
+            minRows={2}
+            sx={{ gridColumn: { xs: '1', sm: 'span 2' } }}
           />
 
           <Box sx={{ gridColumn: { xs: '1', sm: 'span 4' }, border: '1px solid #dbe3ec', borderRadius: 1.5, p: 1.25 }}>
@@ -523,7 +568,7 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
             </Stack>
 
             {!productColors.length ? (
-              <Alert severity="info" sx={{ py: 0.25 }}>Upload or replace the BOM Excel first to load its Product Color items.</Alert>
+              <Alert severity="info" sx={{ py: 0.25 }}>Replace the BOM Excel first to load its Product Color items.</Alert>
             ) : !(form.productColorValues || []).length ? (
               <Typography sx={{ py: 1, color: 'text.secondary', fontSize: '0.78rem' }}>No Product Color value is assigned to this material line.</Typography>
             ) : (
@@ -706,16 +751,18 @@ function PackingDialog({ open, record, productColors = [], saving, onClose, onSa
   );
 }
 
-function ProductColorDialog({ open, record, header = {}, productColorMasters = [], saving, onClose, onSave }) {
-  const [form, setForm] = useState({ productColorMasterId: '', colorName: '', patternNumber: '', season: '' });
+function ProductColorDialog({ open, record, header = {}, productColorMasters = [], buyerKey, saving, onClose, onSave }) {
+  const [form, setForm] = useState({ productColorMasterId: '', colorName: '', patternNumber: '', season: '', styleNumber: '', sequence: '' });
 
   useEffect(() => {
     const matchedMaster = productColorMasterForBom(record || {}, productColorMasters);
     setForm({
-      productColorMasterId: record?.productColorMasterId || matchedMaster?.id || '',
+      productColorMasterId: matchedMaster?.id || '',
       colorName: record?.colorName || matchedMaster?.productColor || '',
-      patternNumber: record?.patternNumber || matchedMaster?.patternNumber || header?.patternNumber || header?.styleNumber || '',
-      season: record?.season || matchedMaster?.season || header?.season || ''
+      patternNumber: matchedMaster?.patternNumber || record?.patternNumber || header?.patternNumber || '',
+      season: matchedMaster?.season || record?.season || header?.season || '',
+      styleNumber: matchedMaster?.styleNumber || record?.styleNumber || header?.styleNumber || '',
+      sequence: record?.sequence ?? ''
     });
   }, [open, record, header, productColorMasters]);
 
@@ -725,12 +772,18 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
     setForm((current) => ({
       ...current,
       productColorMasterId,
-      colorName: master?.productColor || current.colorName,
-      patternNumber: current.patternNumber,
-      season: current.season
+      colorName: master?.productColor || '',
+      patternNumber: master?.patternNumber || '',
+      season: master?.season || '',
+      styleNumber: master?.styleNumber || '',
+      sequence: current.sequence
     }));
   };
-  const canSave = Boolean(form.productColorMasterId) && form.colorName.trim();
+  const canSave = Boolean(form.productColorMasterId)
+    && form.colorName.trim()
+    && form.patternNumber.trim()
+    && form.season.trim()
+    && form.styleNumber.trim();
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="sm">
@@ -752,13 +805,19 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
           >
             {productColorMasters.map((item) => (
               <MenuItem key={item.id} value={item.id}>
-                {item.productColor}
+                {productColorMasterLabel(item) || item.productColor}
               </MenuItem>
             ))}
           </TextField>
           <TextField required label="Product / Style Color" value={form.colorName} placeholder="BLACK" disabled />
-          <Alert severity="info" sx={{ py: 0.25 }}>Pattern Number and Season belong to this BOM, not Product Color Master.</Alert>
-          <Button component={RouterLink} to="/product-colors" size="small" sx={{ alignSelf: 'flex-start', textTransform: 'none' }}>
+          <TextField required label="Pattern Number" value={form.patternNumber} disabled />
+          <TextField required label="Season" value={form.season} disabled />
+          <TextField required label="Style Number" value={form.styleNumber} disabled />
+          <TextField label="Sequence" type="number" value={form.sequence} onChange={(event) => setForm((current) => ({ ...current, sequence: event.target.value }))} inputProps={{ min: 1, step: 1 }} />
+          <Alert severity="info" sx={{ py: 0.25 }}>
+            Pattern Number, Product / Style Color, Season and Style Number must all match the selected Product Color Master. Sequence remains specific to this BOM.
+          </Alert>
+          <Button component={RouterLink} to={buyerPath(buyerKey, 'product-colors')} size="small" sx={{ alignSelf: 'flex-start', textTransform: 'none' }}>
             Manage Product Color Master
           </Button>
         </Stack>
@@ -769,7 +828,9 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
           productColorMasterId: form.productColorMasterId || null,
           colorName: form.colorName.trim(),
           patternNumber: form.patternNumber.trim(),
-          season: form.season.trim()
+          season: form.season.trim(),
+          styleNumber: form.styleNumber.trim(),
+          sequence: asNumber(form.sequence)
         })} sx={{ textTransform: 'none', fontWeight: 800, backgroundColor: '#103B5C' }}>
           {saving ? 'Saving...' : record ? 'Save Changes' : 'Create Product Color'}
         </Button>
@@ -916,10 +977,228 @@ function AttachmentCards({
     </Stack>
   );
 }
-function LineTable({ rows, productColors = [], onEdit, onDelete, onAttach, emptyText = 'No BOM lines.', actionsDisabled = false }) {
+function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+
+    setPreviewUrl('');
+    setLoadError(false);
+
+    if (!open || !bomId || !line?.id || !line?.primaryImage) {
+      setLoading(false);
+      return undefined;
+    }
+
+    setLoading(true);
+    getBomLineImageObjectUrl(
+      bomId,
+      line.id,
+      'preview',
+      line?.primaryImage?.id || line?.primaryImage?.updatedAt || ''
+    )
+      .then((url) => {
+        objectUrl = url;
+        if (!active) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setPreviewUrl(url);
+        setLoadError(false);
+      })
+      .catch(() => {
+        if (active) setLoadError(true);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [open, bomId, line?.id, line?.primaryImage?.id, line?.primaryImage?.updatedAt]);
+
+  const title = line?.primaryImage?.originalFileName
+    || [line?.materialType, line?.detailNo, line?.sapCode].filter(Boolean).join(' - ')
+    || 'BOM Material Image';
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      maxWidth="lg"
+      PaperProps={{
+        sx: {
+          width: 'min(1100px, calc(100vw - 32px))',
+          maxHeight: 'calc(100vh - 32px)',
+          borderRadius: 2
+        }
+      }}
+    >
+      <DialogTitle sx={{ pr: 7, py: 1.5, fontWeight: 900, color: '#103B5C' }}>
+        <Typography noWrap sx={{ pr: 1, fontWeight: 900, color: '#103B5C' }}>
+          {title}
+        </Typography>
+        <IconButton
+          aria-label="Close image preview"
+          onClick={onClose}
+          sx={{ position: 'absolute', right: 12, top: 8 }}
+        >
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent
+        dividers
+        sx={{
+          p: { xs: 1, sm: 2 },
+          minHeight: 260,
+          display: 'grid',
+          placeItems: 'center',
+          bgcolor: '#0f172a'
+        }}
+      >
+        {loading && (
+          <Typography sx={{ color: '#fff', fontWeight: 700 }}>
+            Loading image...
+          </Typography>
+        )}
+
+        {!loading && loadError && (
+          <Stack spacing={1} alignItems="center" sx={{ color: '#fff', textAlign: 'center' }}>
+            <Image sx={{ fontSize: 54, opacity: 0.8 }} />
+            <Typography sx={{ fontWeight: 800 }}>Image preview is unavailable.</Typography>
+            <Typography sx={{ fontSize: '0.78rem', opacity: 0.8 }}>
+              Check the image conversion service on the Backend server.
+            </Typography>
+          </Stack>
+        )}
+
+        {!loading && previewUrl && (
+          <Box
+            component="img"
+            src={previewUrl}
+            alt={title}
+            sx={{
+              display: 'block',
+              maxWidth: '100%',
+              maxHeight: 'calc(100vh - 150px)',
+              width: 'auto',
+              height: 'auto',
+              objectFit: 'contain',
+              mx: 'auto'
+            }}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsDisabled = false }) {
+  const [thumbnailUrl, setThumbnailUrl] = useState('');
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+    if (!line?.primaryImage) {
+      setThumbnailUrl('');
+      setLoadError(false);
+      return undefined;
+    }
+
+    setLoadError(false);
+    getBomLineImageObjectUrl(bomId, line.id, 'thumbnail', line?.primaryImage?.id || line?.primaryImage?.updatedAt || '')
+      .then((url) => {
+        objectUrl = url;
+        if (active) {
+          setThumbnailUrl(url);
+          setLoadError(false);
+        } else URL.revokeObjectURL(url);
+      })
+      .catch(() => {
+        if (active) {
+          setThumbnailUrl('');
+          setLoadError(true);
+        }
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [bomId, line?.id, line?.primaryImage?.id, line?.primaryImage?.updatedAt, retryKey]);
+
+  return (
+    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 118 }}>
+      {thumbnailUrl ? (
+        <Box
+          component="img"
+          loading="lazy"
+          src={thumbnailUrl}
+          alt={line?.primaryImage?.originalFileName || 'BOM material'}
+          onClick={() => onPreview?.(line)}
+          onError={() => {
+            setThumbnailUrl('');
+            setLoadError(true);
+          }}
+          sx={{ width: 54, height: 54, objectFit: 'contain', border: '1px solid #dbe3ec', borderRadius: 1, cursor: 'zoom-in', backgroundColor: '#fff' }}
+        />
+      ) : (
+        <Tooltip title={loadError ? 'Cannot create PNG preview. Check LibreOffice / LIBREOFFICE_PATH on the Backend server.' : ''}>
+          <Box sx={{ width: 54, height: 54, display: 'grid', placeItems: 'center', border: '1px dashed #cbd5e1', borderRadius: 1, color: loadError ? '#dc2626' : '#94a3b8' }}>
+            <Stack spacing={0} alignItems="center">
+              <Image fontSize="small" />
+              {loadError && <Typography sx={{ fontSize: '0.58rem', fontWeight: 800 }}>EMF</Typography>}
+            </Stack>
+          </Box>
+        </Tooltip>
+      )}
+      <Stack spacing={0.1}>
+        <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : (line?.primaryImage ? 'Replace Image' : 'Upload Image')}>
+          <span>
+            <IconButton component="label" size="small" disabled={actionsDisabled}>
+              <FileUpload fontSize="inherit" />
+              <input
+                hidden
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,.emf,.wmf"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) onUpload?.(line, file);
+                }}
+              />
+            </IconButton>
+          </span>
+        </Tooltip>
+        {line?.primaryImage && loadError && (
+          <Tooltip title="Retry Image Preview">
+            <span><IconButton size="small" onClick={() => setRetryKey((value) => value + 1)}><RestartAlt fontSize="inherit" /></IconButton></span>
+          </Tooltip>
+        )}
+        {line?.primaryImage && (
+          <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Delete Image'}>
+            <span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete?.(line)}><Delete fontSize="inherit" /></IconButton></span>
+          </Tooltip>
+        )}
+      </Stack>
+    </Stack>
+  );
+}
+
+function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach, onImageUpload, onImageDelete, onImagePreview, emptyText = 'No BOM lines.', actionsDisabled = false }) {
   const columns = [
     ['No.', (line) => line.materialGroupNo],
     ['Material Type', (line) => line.materialType],
+    ['Image', null],
     ['SAP Code', (line) => line.sapCode],
     ['Detail No', (line) => line.detailNo],
     ['Position', (line) => line.position],
@@ -929,11 +1208,13 @@ function LineTable({ rows, productColors = [], onEdit, onDelete, onAttach, empty
     ['Y', (line) => line.dimensionY],
     ['Q.TY', (line) => line.quantity],
     ['><', (line) => line.direction],
-    ['Costing / MK', (line) => line.costing],
-    ['Costing / Unit', (line) => line.costingUnit],
-    ['Consumption / Net', (line) => line.consumptionNet],
-    ['Consumption / Unit', (line) => line.consumptionUnit],
-    ['B.O.M Remarks', (line) => line.bomRemark],
+    ['Legacy Costing / MK', (line) => line.costing],
+    ['Legacy Costing / Unit', (line) => line.costingUnit],
+    ['Detail CONS.', (line) => line.detailConsumption],
+    ['Consumption MPR', (line) => line.consumptionNet],
+    ['Consumption Unit', (line) => line.consumptionUnit],
+    ['Remarks On BOM', (line) => line.bomRemark],
+    ['Additional Remarks', (line) => line.additionalRemark],
     ['Product Colors', (line) => productColorNamesForLine(line, productColors).join(', ')]
   ];
 
@@ -958,12 +1239,14 @@ function LineTable({ rows, productColors = [], onEdit, onDelete, onAttach, empty
             <TableRow key={line.id} hover data-bom-line-id={line.id} sx={{ scrollMarginTop: 96 }}>
               {columns.map(([label, render]) => (
                 <TableCell key={label} sx={{ fontSize: '0.75rem', verticalAlign: 'top', maxWidth: label === 'Position Description' ? 220 : 170, whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                  {render(line) ?? '—'}
+                  {label === 'Image'
+                    ? <BomLineImageCell bomId={bomId} line={line} onUpload={onImageUpload} onDelete={onImageDelete} onPreview={onImagePreview} actionsDisabled={actionsDisabled} />
+                    : (render(line) ?? '—')}
                 </TableCell>
               ))}
-              <TableCell><Chip size="small" label={(line.attachments || []).length} variant="outlined" /></TableCell>
+              <TableCell><Chip size="small" label={line.attachmentCount ?? (line.attachments || []).length} variant="outlined" /></TableCell>
               <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Add Line Image Or File'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onAttach(line)}><Image fontSize="small" /></IconButton></span></Tooltip>
+                <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Add Line File'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onAttach(line)}><Image fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Edit'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onEdit(line)}><Edit fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Delete'}><span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete(line)}><Delete fontSize="small" /></IconButton></span></Tooltip>
               </TableCell>
@@ -976,10 +1259,14 @@ function LineTable({ rows, productColors = [], onEdit, onDelete, onAttach, empty
 }
 
 export default function BomDetailPage() {
-  const { orderId, bomId } = useParams();
+  const { buyerKey: routeBuyerKey, orderId, bomId } = useParams();
+  const buyerKey = normalizeBuyerKey(routeBuyerKey);
   const canWrite = canManageBom();
+  const llBeanExcelEnabled = buyerKey === 'LLBEAN';
   const writeBlockedMessage = 'BOM permission is required to modify BOM data.';
+  const buyerFormatMessage = 'BOM Excel replacement is currently configured for L.L.BEAN only.';
   const fileRef = useRef(null);
+  const excelUploadTickerRef = useRef(null);
   const scrollRestoreRef = useRef(null);
   const scrollTargetRef = useRef(null);
 
@@ -999,8 +1286,11 @@ export default function BomDetailPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewSavingId, setReviewSavingId] = useState('');
   const [lineFilters, setLineFilters] = useState(emptyLineFilters);
+  const [linePages, setLinePages] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
+  const [imagePreviewLine, setImagePreviewLine] = useState(null);
+  const [excelUploadProgress, setExcelUploadProgress] = useState(initialUploadProgress());
 
   const notify = useCallback((message, severity = 'success') => setNotice({ open: true, severity, message }), []);
 
@@ -1010,28 +1300,80 @@ export default function BomDetailPage() {
     try {
       if (showLoading) setLoading(true);
       const [data, masterResponse, reviews] = await Promise.all([
-        getBom(bomId),
-        listMasterData('productColor', { page: 0, size: 200 }),
+        getBom(bomId, buyerKey),
+        listMasterData('productColor', { buyerKey, page: 0, size: 200 }),
         listBomMprReviews(bomId)
       ]);
 
-      if (scrollY !== null) {
-        scrollRestoreRef.current = scrollY;
-      }
+      const scopes = [
+        { key: '__CORE__', packingId: '' },
+        ...(data?.packings || []).map((packing) => ({ key: packing.id, packingId: packing.id }))
+      ];
+      const pageResults = await Promise.all(scopes.map(async (scope) => {
+        const response = await listBomLines(bomId, { packingId: scope.packingId, page: 0, size: 100 });
+        return [scope.key, response];
+      }));
+      const nextPages = Object.fromEntries(pageResults);
+      const nextBom = {
+        ...data,
+        coreLines: nextPages.__CORE__?.items || [],
+        packings: (data?.packings || []).map((packing) => ({
+          ...packing,
+          lines: nextPages[packing.id]?.items || [],
+          lineCount: nextPages[packing.id]?.totalElements ?? packing.lineCount ?? 0
+        }))
+      };
 
-      setBom(data);
+      if (scrollY !== null) scrollRestoreRef.current = scrollY;
+
+      setBom(nextBom);
+      setLinePages(nextPages);
       setProductColorMasters(Array.isArray(masterResponse) ? masterResponse : (masterResponse?.content || masterResponse?.items || []));
       setMprReviews(Array.isArray(reviews) ? reviews : []);
       setHeaderForm(data?.header || {});
-      return data;
+      return nextBom;
     } catch (error) {
       notify(getApiError(error, 'Unable to load BOM.'), 'error');
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [bomId, notify]);
+  }, [bomId, buyerKey, notify]);
 
   const reloadWithoutJump = useCallback(() => load({ keepScroll: true, showLoading: false }), [load]);
+
+  const replaceLineInState = useCallback((updatedLine) => {
+    if (!updatedLine?.id) return;
+    setBom((current) => current ? ({
+      ...current,
+      coreLines: (current.coreLines || []).map((line) => line.id === updatedLine.id ? updatedLine : line),
+      packings: (current.packings || []).map((packing) => ({
+        ...packing,
+        lines: (packing.lines || []).map((line) => line.id === updatedLine.id ? updatedLine : line)
+      }))
+    }) : current);
+  }, []);
+
+  const loadMoreLines = useCallback(async (packingId = '') => {
+    const key = packingId || '__CORE__';
+    const currentPage = linePages[key];
+    if (!currentPage || currentPage.last) return;
+    try {
+      const nextPage = await listBomLines(bomId, { packingId, page: currentPage.page + 1, size: currentPage.size || 100 });
+      setLinePages((current) => ({ ...current, [key]: nextPage }));
+      setBom((current) => {
+        if (!current) return current;
+        if (!packingId) return { ...current, coreLines: [...(current.coreLines || []), ...(nextPage.items || [])] };
+        return {
+          ...current,
+          packings: (current.packings || []).map((packing) => packing.id === packingId
+            ? { ...packing, lines: [...(packing.lines || []), ...(nextPage.items || [])], lineCount: nextPage.totalElements }
+            : packing)
+        };
+      });
+    } catch (error) {
+      notify(getApiError(error, 'Unable to load more BOM lines.'), 'error');
+    }
+  }, [bomId, linePages, notify]);
 
   const scrollToCreatedTarget = useCallback((selector) => {
     if (selector) scrollTargetRef.current = selector;
@@ -1283,19 +1625,97 @@ export default function BomDetailPage() {
     }
   };
 
-  const uploadExcel = async (event) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  const stopExcelUploadTicker = () => {
+    if (excelUploadTickerRef.current) window.clearInterval(excelUploadTickerRef.current);
+    excelUploadTickerRef.current = null;
+  };
+
+  const executeExcelReplacement = async (file) => {
     if (!file) return;
+    setSaving(true);
+    setExcelUploadProgress(initialUploadProgress(file, 'Preparing BOM Excel replacement...'));
+    stopExcelUploadTicker();
+    excelUploadTickerRef.current = startProcessingTicker(setExcelUploadProgress);
 
     try {
-      setSaving(true);
-      await replaceBomExcel(bomId, file);
+      await replaceBomExcel(bomId, file, {
+        onUploadProgress: (event) => {
+          const nextValue = uploadProgressFromEvent(event);
+          setExcelUploadProgress((current) => ({
+            ...current,
+            open: true,
+            file,
+            progress: Math.max(Number(current.progress || 0), nextValue),
+            status: uploadStage(nextValue),
+            state: 'processing'
+          }));
+        }
+      });
+      stopExcelUploadTicker();
+      setExcelUploadProgress({
+        open: true,
+        file,
+        progress: 100,
+        status: 'BOM Excel replacement completed.',
+        detail: 'Product Colors, Child Colors, materials and packing data were re-imported successfully.',
+        state: 'success'
+      });
       notify('BOM Excel replaced. Product / Style Colors and Child Colors were linked to Product Color Master; materials and packings were re-imported into this BOM.');
       await reloadWithoutJump();
     } catch (error) {
-      notify(getApiError(error, 'Unable to replace BOM Excel.'), 'error');
+      stopExcelUploadTicker();
+      const message = getApiError(error, 'Unable to replace BOM Excel.');
+      setExcelUploadProgress((current) => ({
+        ...current,
+        open: true,
+        file,
+        status: 'BOM Excel replacement failed.',
+        detail: message,
+        state: 'error'
+      }));
+      notify(message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const uploadExcel = async (event) => {
+    if (!canWrite || !llBeanExcelEnabled) {
+      event.target.value = '';
+      notify(!canWrite ? writeBlockedMessage : buyerFormatMessage, 'warning');
+      return;
+    }
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    await executeExcelReplacement(file);
+  };
+
+  const uploadLineImage = async (line, file) => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    try {
+      setSaving(true);
+      const updated = await uploadBomLineImage(bomId, line.id, file);
+      replaceLineInState(updated);
+      setBom((current) => current ? ({ ...current, imageCount: (current.imageCount || 0) + (line.primaryImage ? 0 : 1) }) : current);
+      notify(line.primaryImage ? 'BOM Line Image Replaced.' : 'BOM Line Image Uploaded.');
+    } catch (error) {
+      notify(getApiError(error, 'Unable to upload BOM line image.'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeLineImage = async (line) => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    try {
+      setSaving(true);
+      const updated = await deleteBomLineImage(bomId, line.id);
+      replaceLineInState(updated);
+      setBom((current) => current ? ({ ...current, imageCount: Math.max(0, (current.imageCount || 0) - 1) }) : current);
+      notify('BOM Line Image Deleted.');
+    } catch (error) {
+      notify(getApiError(error, 'Unable to delete BOM line image.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -1427,7 +1847,7 @@ export default function BomDetailPage() {
     <Box sx={{ p: { xs: 1.5, md: 2.5 } }}>
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ mb: 2 }}>
         <Box>
-          <Button component={RouterLink} to={`/orders/${orderId}`} sx={{ px: 0, textTransform: 'none' }}>← Back To Order</Button>
+          <Button component={RouterLink} to={buyerPath(buyerKey, `orders/${orderId}`)} sx={{ px: 0, textTransform: 'none' }}>← Back To Order</Button>
           <Typography sx={{ fontSize: '1.45rem', fontWeight: 950, color: '#103B5C' }}>{bom.bomNo} — {bom.bomName}</Typography>
           <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mt: 0.75 }}>
             <Chip label={bom.status} />
@@ -1457,7 +1877,7 @@ export default function BomDetailPage() {
           >
             Review MPR Changes{pendingMprReviewCount ? ` (${pendingMprReviewCount})` : ''}
           </Button></span></Tooltip>
-          <Tooltip title={!canWrite ? writeBlockedMessage : 'Replace BOM Excel'}><span><Button size="small" variant="outlined" startIcon={<FileUpload />} onClick={() => fileRef.current?.click()} disabled={saving || !canWrite}>
+          <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanExcelEnabled ? buyerFormatMessage : 'Replace BOM Excel')}><span><Button size="small" variant="outlined" startIcon={<FileUpload />} onClick={() => fileRef.current?.click()} disabled={saving || !canWrite || !llBeanExcelEnabled}>
             Replace BOM Excel
           </Button></span></Tooltip>
           <input ref={fileRef} type="file" accept=".xls,.xlsx" hidden onChange={uploadExcel} />
@@ -1466,6 +1886,12 @@ export default function BomDetailPage() {
           </Button></span></Tooltip>
         </Stack>
       </Stack>
+
+      {!llBeanExcelEnabled && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {buyerFormatMessage} Manual BOM maintenance remains available.
+        </Alert>
+      )}
 
       <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2, backgroundColor: '#f8fafc' }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={0.75} sx={{ mb: 1.25 }}>
@@ -1493,7 +1919,7 @@ export default function BomDetailPage() {
             </Typography>
           </Box>
           <Typography sx={{ fontSize: '.78rem', color: 'text.secondary', fontWeight: 700 }}>
-            Showing {matchedBomLineCount} / {totalBomLineCount} line(s)
+            Showing {matchedBomLineCount} / {totalBomLineCount} loaded line(s)
           </Typography>
         </Stack>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 1 }}>
@@ -1553,14 +1979,15 @@ export default function BomDetailPage() {
       <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, overflow: 'hidden', mb: 2 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 1.5, borderBottom: '1px solid #e5e7eb' }}>
           <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Core Materials ({lineFilters.source && lineFilters.source !== '__CORE__' ? 0 : filteredCoreLines.length} / {(bom.coreLines || []).length})</Typography>
-            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Columns A–Q and all product color values are retained from the original BOM Excel.</Typography>
+            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Core Materials ({lineFilters.source && lineFilters.source !== '__CORE__' ? 0 : filteredCoreLines.length} Loaded / {bom.coreLineCount ?? (bom.coreLines || []).length})</Typography>
+            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Columns A–Z, including the dedicated Image column and all Product Color values, are retained from the original BOM Excel.</Typography>
           </Box>
           <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Material'}><span><Button startIcon={<Add />} variant="contained" size="small" disabled={!canWrite} onClick={() => setLineCtx({ record: null, packingId: '' })} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
             Add Material
           </Button></span></Tooltip>
         </Stack>
         <LineTable
+          bomId={bomId}
           rows={lineFilters.source && lineFilters.source !== '__CORE__' ? [] : filteredCoreLines}
           productColors={productColors}
           emptyText="No Core BOM lines match the current filter."
@@ -1574,8 +2001,14 @@ export default function BomDetailPage() {
             warning: 'This will remove only the selected BOM material line.'
           })}
           onAttach={(record) => setAttachmentLineId(record.id) || setAttachmentScope('LINE')}
+          onImageUpload={uploadLineImage}
+          onImageDelete={removeLineImage}
+          onImagePreview={setImagePreviewLine}
           actionsDisabled={!canWrite}
         />
+        {linePages.__CORE__ && !linePages.__CORE__.last && (
+          <Button size="small" onClick={() => loadMoreLines('')} sx={{ mt: 1, textTransform: 'none' }}>Load More Core Lines</Button>
+        )}
       </Paper>
 
       <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
@@ -1604,7 +2037,7 @@ export default function BomDetailPage() {
             <AccordionSummary component="div" expandIcon={<ExpandMore />}>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ width: 1, pr: 1 }}>
                 <Typography sx={{ fontWeight: 900 }}>{packing.packingName}</Typography>
-                <Chip size="small" label={`${filteredPackingLines.length} / ${(packing.lines || []).length} Lines`} />
+                <Chip size="small" label={`${filteredPackingLines.length} Loaded / ${packing.lineCount ?? (packing.lines || []).length} Lines`} />
                 <Chip size="small" label={linkedProductColors.length ? `${linkedProductColors.length} Product Colors` : 'All Product Colors'} variant="outlined" />
                 <Box sx={{ flex: 1 }} />
                 <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Packing'}><span><IconButton size="small" disabled={!canWrite} onClick={(event) => { event.stopPropagation(); setPackingCtx({ record: packing }); }}><Edit fontSize="small" /></IconButton></span></Tooltip>
@@ -1661,6 +2094,7 @@ export default function BomDetailPage() {
               )}
               <Box sx={{ mt: 1.5 }}>
                 <LineTable
+                  bomId={bomId}
                   rows={filteredPackingLines}
                   productColors={productColors}
                   emptyText="No Packing lines match the current filter."
@@ -1674,8 +2108,14 @@ export default function BomDetailPage() {
                     warning: 'This will remove only the selected Packing material line.'
                   })}
                   onAttach={(record) => setAttachmentLineId(record.id) || setAttachmentScope('LINE')}
+                  onImageUpload={uploadLineImage}
+                  onImageDelete={removeLineImage}
+                  onImagePreview={setImagePreviewLine}
                   actionsDisabled={!canWrite}
                 />
+                {linePages[packing.id] && !linePages[packing.id].last && (
+                  <Button size="small" onClick={() => loadMoreLines(packing.id)} sx={{ mt: 1, textTransform: 'none' }}>Load More Lines</Button>
+                )}
               </Box>
             </AccordionDetails>
           </Accordion>
@@ -1754,6 +2194,8 @@ export default function BomDetailPage() {
                       <Typography sx={{ fontWeight: 900, fontSize: '0.8rem' }}>{productColor.colorName}</Typography>
                       <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Pattern Number: {productColor.patternNumber || '—'}</Typography>
                       <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Season: {productColor.season || '—'}</Typography>
+                      <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Style Number: {productColor.styleNumber || '—'}</Typography>
+                      <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Sequence: {productColor.sequence ?? '—'}</Typography>
                     </Box>
                     <Stack spacing={0.25} alignItems="flex-end">
                       <Tooltip title={!canWrite ? writeBlockedMessage : 'Change Product Color Master link'}><span><Button size="small" startIcon={<Edit />} disabled={!canWrite} onClick={() => setProductColorCtx({ record: productColor })} sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
@@ -1776,9 +2218,9 @@ export default function BomDetailPage() {
                   </Box>
                   <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mt: 0.75 }}>
                     <Typography noWrap sx={{ minWidth: 0, flex: 1, fontSize: '0.7rem', color: master ? 'text.secondary' : 'warning.main' }}>
-                      {master ? `Master: ${master.productColor || productColor.colorName}` : 'No linked Product Color Master'}
+                      {master ? `Master: ${productColorMasterLabel(master) || master.productColor || productColor.colorName}` : 'No linked Product Color Master'}
                     </Typography>
-                    <Button component={RouterLink} to="/product-colors" size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
+                    <Button component={RouterLink} to={buyerPath(buyerKey, 'product-colors')} size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
                       Open Master
                     </Button>
                   </Stack>
@@ -1789,6 +2231,25 @@ export default function BomDetailPage() {
         </Box>
       </Paper>
 
+      <ExcelUploadProgressDialog
+        open={excelUploadProgress.open}
+        title="Replacing BOM Excel"
+        file={excelUploadProgress.file}
+        progress={excelUploadProgress.progress}
+        status={excelUploadProgress.status}
+        detail={excelUploadProgress.detail}
+        state={excelUploadProgress.state}
+        onClose={() => setExcelUploadProgress(initialUploadProgress())}
+        onRetry={excelUploadProgress.state === 'error' ? () => executeExcelReplacement(excelUploadProgress.file) : undefined}
+      />
+
+      <BomLineImagePreviewDialog
+        open={Boolean(imagePreviewLine)}
+        bomId={bomId}
+        line={imagePreviewLine}
+        onClose={() => setImagePreviewLine(null)}
+      />
+
       <Dialog open={canWrite && headerOpen} onClose={saving ? undefined : () => setHeaderOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
           Edit BOM Header
@@ -1796,7 +2257,7 @@ export default function BomDetailPage() {
         </DialogTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' }, gap: 1.5 }}>
-            {['buyer', 'revStage', 'season', 'styleNumber', 'styleName', 'factoryProduct', 'patternNumber', 'patternMaker', 'bomMaker', 'size', 'bomDate', 'patternDate', 'patternRevisedDate', 'comments'].map((key) => (
+            {['buyer', 'revStage', 'season', 'styleNumber', 'styleName', 'markerDate', 'markerMaker', 'factoryProduct', 'patternNumber', 'patternMaker', 'bomMaker', 'size', 'bomDate', 'patternDate', 'patternRevisedDate', 'comments'].map((key) => (
               <TextField
                 key={key}
                 label={key.replace(/([A-Z])/g, ' $1').replace(/^./, (value) => value.toUpperCase())}
@@ -1818,7 +2279,7 @@ export default function BomDetailPage() {
 
       <LineDialog open={canWrite && Boolean(lineCtx)} record={lineCtx?.record} productColors={productColors} productColorMasters={productColorMasters} saving={saving} onClose={() => setLineCtx(null)} onSave={saveLine} />
       <PackingDialog open={canWrite && Boolean(packingCtx)} record={packingCtx?.record} productColors={productColors} saving={saving} onClose={() => setPackingCtx(null)} onSave={savePacking} />
-      <ProductColorDialog open={canWrite && Boolean(productColorCtx)} record={productColorCtx?.record} header={bom?.header} productColorMasters={productColorMasters} saving={saving} onClose={() => setProductColorCtx(null)} onSave={saveProductColor} />
+      <ProductColorDialog open={canWrite && Boolean(productColorCtx)} record={productColorCtx?.record} header={bom?.header} productColorMasters={productColorMasters} buyerKey={buyerKey} saving={saving} onClose={() => setProductColorCtx(null)} onSave={saveProductColor} />
 
       <BomMprReviewDialog
         open={canWrite && reviewOpen}

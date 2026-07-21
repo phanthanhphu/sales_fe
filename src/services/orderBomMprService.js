@@ -25,31 +25,34 @@ export const getApiError = (error, fallback = 'Unable to complete the request.')
 };
 
 export const listOrders = (params = {}) => unwrap(apiRawClient.get('/api/orders', withAuth({ params: params || {} })));
-export const getOrder = (id) => unwrap(apiRawClient.get(`/api/orders/${encodeURIComponent(id)}`, withAuth()));
+export const getOrder = (id, buyerKey = '') => unwrap(apiRawClient.get(`/api/orders/${encodeURIComponent(id)}`, withAuth({ params: buyerKey ? { buyerKey } : {} })));
 export const createOrder = (payload) => unwrap(apiRawClient.post('/api/orders', payload, withAuth()));
 export const updateOrder = (id, payload) => unwrap(apiRawClient.put(`/api/orders/${encodeURIComponent(id)}`, payload, withAuth()));
 export const deleteOrder = (id) => unwrap(apiRawClient.delete(`/api/orders/${encodeURIComponent(id)}`, withAuth()));
 
 export const listBoms = (orderId) => unwrap(apiRawClient.get(`/api/orders/${encodeURIComponent(orderId)}/boms`, withAuth()));
-export const getBom = (id) => unwrap(apiRawClient.get(`/api/boms/${encodeURIComponent(id)}`, withAuth()));
+export const getBom = (id, buyerKey = '') => unwrap(apiRawClient.get(`/api/boms/${encodeURIComponent(id)}`, withAuth({ params: buyerKey ? { buyerKey } : {} })));
 export const createBom = (orderId, payload) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/boms`, payload, withAuth()));
 export const updateBom = (id, payload) => unwrap(apiRawClient.put(`/api/boms/${encodeURIComponent(id)}`, payload, withAuth()));
 export const deleteBom = (id) => unwrap(apiRawClient.delete(`/api/boms/${encodeURIComponent(id)}`, withAuth()));
 export const submitBom = (id) => unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(id)}/submit`, {}, withAuth()));
 
-export const uploadBom = (orderId, file, options = {}) => {
-  const { bomNo = '', bomName = '' } = options || {};
-  const formData = new FormData();
-  formData.append('file', file);
-  if (bomNo) formData.append('bomNo', bomNo);
-  if (bomName) formData.append('bomName', bomName);
-  return unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/boms/upload`, formData, withAuth()));
-};
+const excelUploadConfig = (file, onUploadProgress) => withAuth({
+  onUploadProgress,
+  headers: {
+    'X-File-Name': encodeURIComponent(file?.name || 'excel-file'),
+    'X-File-Size': String(file?.size || 0)
+  }
+});
 
-export const replaceBomExcel = (bomId, file) => {
+export const replaceBomExcel = (bomId, file, options = {}) => {
   const formData = new FormData();
   formData.append('file', file);
-  return unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(bomId)}/replace-excel`, formData, withAuth()));
+  return unwrap(apiRawClient.post(
+    `/api/boms/${encodeURIComponent(bomId)}/replace-excel`,
+    formData,
+    excelUploadConfig(file, options?.onUploadProgress)
+  ));
 };
 
 export const addBomProductColor = (bomId, payload) => unwrap(
@@ -69,6 +72,44 @@ export const deletePacking = (bomId, packingId) => unwrap(apiRawClient.delete(`/
 export const addBomLine = (bomId, payload, packingId = '') => unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(bomId)}/lines`, payload, withAuth({ params: packingId ? { packingId } : {} })));
 export const updateBomLine = (bomId, lineId, payload) => unwrap(apiRawClient.put(`/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}`, payload, withAuth()));
 export const deleteBomLine = (bomId, lineId) => unwrap(apiRawClient.delete(`/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}`, withAuth()));
+
+export const listBomLines = (bomId, options = {}) => {
+  const { packingId = '', page = 0, size = 100 } = options || {};
+  return unwrap(apiRawClient.get(
+    `/api/boms/${encodeURIComponent(bomId)}/lines`,
+    withAuth({ params: { ...(packingId ? { packingId } : {}), page, size } })
+  ));
+};
+
+export const uploadBomLineImage = (bomId, lineId, file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return unwrap(apiRawClient.put(
+    `/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}/image`,
+    formData,
+    withAuth()
+  ));
+};
+
+export const deleteBomLineImage = (bomId, lineId) => unwrap(apiRawClient.delete(
+  `/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}/image`,
+  withAuth()
+));
+
+export const getBomLineImageBlob = async (bomId, lineId, variant = 'thumbnail', version = '') => {
+  const response = await apiRawClient.get(
+    `/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}/image/${encodeURIComponent(variant)}`,
+    withAuth({ responseType: 'blob', params: version ? { v: version } : {} })
+  );
+  const contentType = response.headers?.['content-type'] || response.data?.type || 'application/octet-stream';
+  return response.data instanceof Blob && response.data.type
+    ? response.data
+    : new Blob([response.data], { type: contentType });
+};
+
+export const getBomLineImageObjectUrl = async (bomId, lineId, variant = 'thumbnail', version = '') => (
+  URL.createObjectURL(await getBomLineImageBlob(bomId, lineId, variant, version))
+);
 
 export const uploadBomAttachment = (bomId, file, options = {}) => {
   const { scope = 'BOM', productColorId = '', colorKey = '', packingId = '', lineId = '' } = options || {};
@@ -218,15 +259,43 @@ export const deleteMprBatch = (orderId, batchId) => unwrap(
 
 export const getMprExportUrl = (orderId) => `/api/orders/${encodeURIComponent(orderId)}/mpr/export`;
 
-export const downloadWithAuth = async (url, fileName) => {
-  const response = await apiRawClient.get(url, withAuth({ responseType: 'blob' }));
-  const blob = new Blob([response.data]);
+export const downloadWithAuth = async (url, fileName, options = {}) => {
+  const safeOptions = options || {};
+  const response = await apiRawClient.get(
+    url,
+    withAuth({
+      responseType: 'blob',
+      onDownloadProgress: (event) => {
+        if (typeof safeOptions.onDownloadProgress !== 'function') return;
+
+        const loaded = Number(event?.loaded || 0);
+        const total = Number(event?.total || 0);
+        safeOptions.onDownloadProgress({
+          loaded,
+          total,
+          progress: total > 0 ? Math.min(1, loaded / total) : null
+        });
+      }
+    })
+  );
+
+  const contentType = response.headers?.['content-type'] || response.data?.type || 'application/octet-stream';
+  const blob = response.data instanceof Blob && response.data.type
+    ? response.data
+    : new Blob([response.data], { type: contentType });
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
+
   anchor.href = objectUrl;
   anchor.download = fileName || 'download';
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(objectUrl);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+
+  return {
+    fileName: fileName || 'download',
+    sizeBytes: blob.size,
+    contentType
+  };
 };

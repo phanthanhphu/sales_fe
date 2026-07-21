@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import {
   Alert,
   Box,
   Button,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -35,17 +37,24 @@ import {
 } from '../../services/masterDataService';
 import ProductColorImage from '../../components/ProductColorImage';
 import { canManageSales } from 'utils/accessControl';
+import { getBuyerDefinition, normalizeBuyerKey } from 'utils/buyerContext';
 import ConfirmDeleteDialog from '../shared/ConfirmDeleteDialog';
+import { PaginationBar, SortIndicator } from '../shared/MasterDataTable';
+import { formatDateTime } from '../shared/masterDataUtils';
 
 const blankChildColor = () => ({ id: '', childColor: '' });
 const blankForm = () => ({
+  patternNumber: '',
   productColor: '',
+  season: '',
+  styleNumber: '',
   active: 'true',
   childColors: []
 });
 
 const trim = (value) => String(value || '').trim();
 const pageContent = (response) => Array.isArray(response) ? response : (response?.content || response?.items || []);
+const pageTotalElements = (response) => Number(response?.totalElements ?? response?.total ?? pageContent(response).length) || 0;
 const text = (value, fallback = '-') => trim(value) || fallback;
 const sameId = (left, right) => String(left || '') === String(right || '');
 const hasImage = (record = {}) => Boolean(
@@ -61,6 +70,18 @@ const childColorNames = (record = {}) => (
     ? record.childColors.map((item) => trim(item?.childColor || item?.value || item?.name)).filter(Boolean)
     : []
 );
+
+const PRODUCT_COLOR_TABLE_COLUMNS = [
+  { key: 'patternNumber', label: 'Pattern Number', minWidth: 150, sortable: true },
+  { key: 'productColor', label: 'Product / Style Color', minWidth: 190, sortable: true },
+  { key: 'season', label: 'Season', minWidth: 100, sortable: true },
+  { key: 'styleNumber', label: 'Style Number', minWidth: 130, sortable: true },
+  { key: 'childColors', label: 'Child Colors', minWidth: 330, sortable: false },
+  { key: 'image', label: 'Product Image', minWidth: 132, sortable: false },
+  { key: 'active', label: 'Status', minWidth: 95, sortable: false },
+  { key: 'updatedAt', label: 'Updated At', minWidth: 150, sortable: true },
+  { key: 'actions', label: 'Actions', minWidth: 95, sortable: false, align: 'center' }
+];
 
 
 const cssAttributeEscape = (value) => (
@@ -83,7 +104,12 @@ const sameText = (left, right) => trim(left).toUpperCase() === trim(right).toUpp
 const resolveCreatedProductColorMasterId = (created, rows = [], payload = {}) => {
   const directId = responseRecordId(created);
   if (directId) return directId;
-  const matches = rows.filter((row) => sameText(row?.productColor, payload.productColor));
+  const matches = rows.filter((row) => (
+    sameText(row?.patternNumber, payload.patternNumber)
+    && sameText(row?.productColor, payload.productColor)
+    && sameText(row?.season, payload.season)
+    && sameText(row?.styleNumber, payload.styleNumber)
+  ));
   return String((lastOf(matches) || lastOf(rows) || {})?.id || '');
 };
 
@@ -114,7 +140,7 @@ function ChildColorsPreviewDialog({ open, record, onClose }) {
       <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
         Child Colors
         <Typography sx={{ mt: 0.25, fontSize: '.8rem', color: 'text.secondary', fontWeight: 400 }}>
-          {text(record?.productColor, 'Product / Style Color')}
+          {[record?.patternNumber, record?.productColor, record?.season, record?.styleNumber].map(trim).filter(Boolean).join(' · ') || 'Product / Style Color'}
         </Typography>
         <IconButton onClick={onClose} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
       </DialogTitle>
@@ -168,7 +194,10 @@ function ProductColorDialog({
   useEffect(() => {
     if (!open) return;
     setForm({
+      patternNumber: record?.patternNumber || '',
       productColor: record?.productColor || '',
+      season: record?.season || '',
+      styleNumber: record?.styleNumber || '',
       active: record?.active === false ? 'false' : 'true',
       childColors: Array.isArray(record?.childColors)
         ? record.childColors.map((item) => ({ ...blankChildColor(), ...item }))
@@ -199,9 +228,12 @@ function ProductColorDialog({
     }));
   };
 
-  const canSave = trim(form.productColor);
+  const canSave = trim(form.patternNumber) && trim(form.productColor) && trim(form.season) && trim(form.styleNumber);
   const save = () => onSave({
+    patternNumber: trim(form.patternNumber),
     productColor: trim(form.productColor),
+    season: trim(form.season),
+    styleNumber: trim(form.styleNumber),
     active: String(form.active) !== 'false',
     childColors: form.childColors
       .map((item) => ({ id: trim(item.id), childColor: trim(item.childColor) }))
@@ -213,14 +245,17 @@ function ProductColorDialog({
       <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
         {record ? 'Edit Product Color' : 'Add Product Color'}
         <Typography sx={{ mt: 0.25, fontSize: '.8rem', color: 'text.secondary', fontWeight: 400 }}>
-          Product Color Master only stores Product / Style Color, shared Child Colors and one shared image. BOM-specific header information stays in the BOM.
+          A Product Color Master is reused only when Pattern Number, Product / Style Color, Season and Style Number all match.
         </Typography>
         <IconButton onClick={onClose} disabled={saving} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
       </DialogTitle>
       <DialogContent dividers>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 1.25 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+          <TextField required label="Pattern Number" value={form.patternNumber} onChange={set('patternNumber')} placeholder="LLB 352 A" />
           <TextField required label="Product / Style Color" value={form.productColor} onChange={set('productColor')} placeholder="BLACK" />
-          <TextField select label="Status" value={form.active} onChange={set('active')}>
+          <TextField required label="Season" value={form.season} onChange={set('season')} placeholder="F26" />
+          <TextField required label="Style Number" value={form.styleNumber} onChange={set('styleNumber')} placeholder="271893" />
+          <TextField select label="Status" value={form.active} onChange={set('active')} sx={{ gridColumn: { md: 'span 2' } }}>
             <MenuItem value="true">Active</MenuItem>
             <MenuItem value="false">Inactive</MenuItem>
           </TextField>
@@ -326,9 +361,16 @@ function ProductColorDialog({
 }
 
 export default function ProductColorPage() {
+  const { buyerKey: routeBuyerKey } = useParams();
+  const buyerKey = normalizeBuyerKey(routeBuyerKey);
+  const buyer = getBuyerDefinition(buyerKey);
   const [filters, setFilters] = useState({ productColor: '' });
   const [appliedFilters, setAppliedFilters] = useState(filters);
   const [rows, setRows] = useState([]);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalElements, setTotalElements] = useState(0);
+  const [sort, setSort] = useState({ key: 'updatedAt', direction: 'desc' });
   const [loading, setLoading] = useState(false);
   const [formRecord, setFormRecord] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -342,19 +384,34 @@ export default function ProductColorPage() {
   const writeBlockedMessage = 'Sales permission is required to change Product Color master data.';
 
   const notify = (message, severity = 'success') => setNotice({ open: true, severity, message });
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ pageOverride, sizeOverride, filtersOverride, sortOverride } = {}) => {
+    const requestedPage = Number.isInteger(pageOverride) ? Math.max(0, pageOverride) : page;
+    const requestedSize = Number.isInteger(sizeOverride) ? Math.max(1, sizeOverride) : rowsPerPage;
+    const requestedFilters = filtersOverride || appliedFilters;
+    const requestedSort = sortOverride || sort;
+
     setLoading(true);
     try {
-      const response = await listMasterData('productColor', { ...appliedFilters, page: 0, size: 200 });
+      const response = await listMasterData('productColor', {
+        ...requestedFilters,
+        buyerKey,
+        page: requestedPage,
+        size: requestedSize,
+        sortBy: requestedSort?.key || 'updatedAt',
+        sortDir: requestedSort?.direction || 'desc'
+      });
       const nextRows = pageContent(response);
+      const nextTotal = pageTotalElements(response);
       setRows(nextRows);
-      return nextRows;
+      setTotalElements(nextTotal);
+      return { rows: nextRows, totalElements: nextTotal, page: requestedPage };
     } catch (error) {
       setRows([]);
+      setTotalElements(0);
       notify(getMasterDataErrorMessage(error, 'Unable to load Product Color Master.'), 'error');
-      return [];
+      return { rows: [], totalElements: 0, page: requestedPage };
     } finally { setLoading(false); }
-  }, [appliedFilters]);
+  }, [appliedFilters, buyerKey, page, rowsPerPage, sort]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -396,13 +453,15 @@ export default function ProductColorPage() {
     setSaving(true);
     try {
       let savedRecord = null;
-      if (isCreate) savedRecord = await createMasterData('productColor', payload);
-      else await updateMasterData('productColor', formRecord.id, payload);
+      if (isCreate) savedRecord = await createMasterData('productColor', payload, { buyerKey });
+      else await updateMasterData('productColor', formRecord.id, payload, { buyerKey });
       setFormOpen(false);
       notify('Product Color saved. Image can be uploaded or removed from the Edit screen.');
-      const nextRows = await load();
+      const targetPage = isCreate ? 0 : page;
+      if (isCreate && page !== 0) setPage(0);
+      const result = await load({ pageOverride: targetPage });
       if (isCreate) {
-        scrollToCreatedRow(resolveCreatedProductColorMasterId(savedRecord, nextRows, payload));
+        scrollToCreatedRow(resolveCreatedProductColorMasterId(savedRecord, result.rows, payload));
       }
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to save Product Color.'), 'error');
@@ -414,10 +473,14 @@ export default function ProductColorPage() {
     if (!deleteTarget?.id) return;
     setSaving(true);
     try {
-      await deleteMasterData('productColor', deleteTarget.id);
+      await deleteMasterData('productColor', deleteTarget.id, { buyerKey });
       setDeleteTarget(null);
       notify('Product Color deleted.');
-      await load();
+      const remainingAfterDelete = Math.max(0, totalElements - 1);
+      const lastPage = Math.max(0, Math.ceil(remainingAfterDelete / rowsPerPage) - 1);
+      const targetPage = Math.min(page, lastPage);
+      if (targetPage !== page) setPage(targetPage);
+      await load({ pageOverride: targetPage });
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to delete Product Color.'), 'error');
     } finally { setSaving(false); }
@@ -437,8 +500,8 @@ export default function ProductColorPage() {
     try {
       await uploadProductColorImage(row.id, file);
       notify('Product Color image saved. Any BOM linked to this Product Color now uses the same image.');
-      const nextRows = await load();
-      syncOpenRecord(nextRows, row.id);
+      const result = await load();
+      syncOpenRecord(result.rows, row.id);
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to upload Product Color image.'), 'error');
     } finally { setSaving(false); }
@@ -454,29 +517,49 @@ export default function ProductColorPage() {
       await deleteProductColorImage(targetId);
       setImageDeleteTarget(null);
       notify('Product Color image removed. BOM no longer shows this image.');
-      const nextRows = await load();
-      syncOpenRecord(nextRows, targetId);
+      const result = await load();
+      syncOpenRecord(result.rows, targetId);
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to remove Product Color image.'), 'error');
     } finally { setSaving(false); }
   };
 
+  const applySearch = () => {
+    setPage(0);
+    setAppliedFilters({ ...filters });
+  };
+
   const resetFilters = () => {
     const cleared = { productColor: '' };
     setFilters(cleared);
+    setPage(0);
     setAppliedFilters(cleared);
   };
 
-  const summary = useMemo(() => `${rows.length} record(s) shown`, [rows.length]);
+  const changePage = (nextPage) => setPage(Math.max(0, Number(nextPage) || 0));
+  const changeRowsPerPage = (nextSize) => {
+    setRowsPerPage(Number(nextSize) || 25);
+    setPage(0);
+  };
+
+  const changeSort = (column) => {
+    if (!column?.sortable) return;
+    setPage(0);
+    setSort((current) => {
+      if (current.key !== column.key) return { key: column.key, direction: 'asc' };
+      if (current.direction === 'asc') return { key: column.key, direction: 'desc' };
+      return { key: 'updatedAt', direction: 'desc' };
+    });
+  };
 
   return (
     <Box sx={{ p: { xs: 1.25, sm: 1.75, md: 2 } }}>
       <Paper elevation={0} sx={{ p: 2, mb: 2, border: '1px solid #e5e7eb', borderRadius: 2 }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} spacing={1.25} sx={{ mb: 1.5 }}>
           <Box>
-            <Typography variant="subtitle1" fontWeight={700}>Product Color Master</Typography>
+            <Typography variant="subtitle1" fontWeight={700}>{buyer.buyerName} — Product Color Master</Typography>
             <Typography sx={{ fontSize: '.76rem', color: 'text.secondary' }}>
-              Save only shared Product / Style Color, Child Colors and one image here. BOM-specific header information stays in each BOM.
+              Product Colors are reused only when Pattern Number, Color, Season and Style Number all match. Child Colors and image belong to that exact combination.
             </Typography>
           </Box>
           <Tooltip title={!canWrite ? writeBlockedMessage : ''} arrow disableHoverListener={canWrite}>
@@ -509,7 +592,7 @@ export default function ProductColorPage() {
           ))}
           <Button
             variant="contained"
-            onClick={() => setAppliedFilters(filters)}
+            onClick={applySearch}
             disabled={loading}
             sx={{ textTransform: 'none', backgroundColor: '#111827', height: 40, px: 2.2, flexShrink: 0 }}
           >
@@ -526,29 +609,103 @@ export default function ProductColorPage() {
         </Box>
       </Paper>
 
-      <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 1.5, py: 1.1, borderBottom: '1px solid #e5e7eb' }}>
-          <Typography sx={{ fontWeight: 700, fontSize: '.95rem' }}>{loading ? 'Loading...' : summary}</Typography>
-          <Button size="small" startIcon={<Refresh />} onClick={load} disabled={loading || saving} sx={{ textTransform: 'none' }}>Refresh</Button>
+      <Paper elevation={0} sx={{ borderRadius: 2, border: '1px solid #e5e7eb', overflow: 'hidden', backgroundColor: '#fff' }}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          justifyContent="space-between"
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+          spacing={1}
+          sx={{ px: 1.5, py: 1.15, borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff' }}
+        >
+          <Box>
+            <Typography sx={{ fontWeight: 650, fontSize: '0.98rem' }}>Product Color List</Typography>
+            <Typography sx={{ mt: 0.1, fontSize: '0.75rem', color: 'text.secondary' }}>
+              {loading ? 'Loading records…' : `${totalElements || 0} record(s)`}
+            </Typography>
+          </Box>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={loading ? <CircularProgress size={14} /> : <Refresh fontSize="small" />}
+            disabled={loading || saving}
+            onClick={() => load()}
+            sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, textTransform: 'none', borderRadius: 1.2 }}
+          >
+            Refresh
+          </Button>
         </Stack>
-        <TableContainer sx={{ maxHeight: 'calc(100vh - 295px)' }}>
-          <Table stickyHeader size="small" sx={{ minWidth: 920 }}>
-            <TableHead><TableRow>
-              <TableCell sx={{ width: 70, fontWeight: 900, backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>No.</TableCell>
-              {['Product / Style Color', 'Child Colors', 'Product Image', 'Status', 'Actions'].map((title) => <TableCell key={title} sx={{ fontWeight: 900, backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>{title}</TableCell>)}
-            </TableRow></TableHead>
+
+        <TableContainer sx={{ maxHeight: 'calc(100vh - 370px)', minHeight: 290 }}>
+          <Table stickyHeader size="small" sx={{ minWidth: 1370 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell
+                  align="center"
+                  sx={{ width: 54, px: 0.7, py: 0.8, fontWeight: 800, fontSize: '0.75rem', backgroundColor: '#f9fafb', color: '#374151', borderBottom: '1px solid #e5e7eb' }}
+                >
+                  No
+                </TableCell>
+                {PRODUCT_COLOR_TABLE_COLUMNS.map((column) => {
+                  const activeSort = sort.key === column.key;
+                  return (
+                    <TableCell
+                      key={column.key}
+                      align={column.align || 'left'}
+                      onClick={() => changeSort(column)}
+                      sx={{
+                        minWidth: column.minWidth,
+                        px: 0.75,
+                        py: 0.8,
+                        fontWeight: 800,
+                        fontSize: '0.75rem',
+                        whiteSpace: 'nowrap',
+                        backgroundColor: '#f9fafb',
+                        color: '#374151',
+                        borderBottom: '1px solid #e5e7eb',
+                        cursor: column.sortable ? 'pointer' : 'default',
+                        userSelect: 'none',
+                        '&:hover': column.sortable ? { backgroundColor: '#f3f4f6' } : undefined
+                      }}
+                    >
+                      <Stack direction="row" alignItems="center" justifyContent={column.align === 'center' ? 'center' : 'flex-start'} spacing={0.2}>
+                        <Box component="span">{column.label}</Box>
+                        {column.sortable && <SortIndicator active={activeSort} direction={sort.direction} />}
+                      </Stack>
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            </TableHead>
             <TableBody>
-              {rows.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>{loading ? 'Loading...' : 'No Product Color found.'}</TableCell></TableRow>}
-              {rows.map((row, index) => {
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={10} sx={{ py: 5 }}>
+                    <Stack direction="row" justifyContent="center" alignItems="center" spacing={1}>
+                      <CircularProgress size={20} />
+                      <Typography sx={{ fontSize: '0.82rem', color: 'text.secondary' }}>Loading Product Color records…</Typography>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+              ) : rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} align="center" sx={{ py: 5, color: 'text.secondary', fontSize: '0.85rem' }}>
+                    No Product Color Found
+                  </TableCell>
+                </TableRow>
+              ) : rows.map((row, index) => {
                 const colors = childColorNames(row);
                 return (
                   <TableRow key={row.id} hover data-product-color-master-id={row.id} sx={{ scrollMarginTop: 96 }}>
-                    <TableCell sx={{ color: 'text.secondary', fontWeight: 800 }}>{index + 1}</TableCell>
-                    <TableCell sx={{ minWidth: 230 }}>
-                      <Typography sx={{ fontWeight: 900, fontSize: '.82rem' }}>{text(row.productColor)}</Typography>
-
+                    <TableCell align="center" sx={{ py: 0.6, px: 0.7, color: '#6b7280', fontSize: '0.75rem' }}>
+                      {page * rowsPerPage + index + 1}
                     </TableCell>
-                    <TableCell sx={{ minWidth: 330 }}>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 150, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>{text(row.patternNumber)}</TableCell>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 190, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>
+                      <Typography sx={{ fontWeight: 850, fontSize: '0.78rem' }}>{text(row.productColor)}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 100, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>{text(row.season)}</TableCell>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 130, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>{text(row.styleNumber)}</TableCell>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 330, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>
                       <ChildColorChips colors={colors} />
                       <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 0.35 }}>
                         <Typography sx={{ fontSize: '.68rem', color: 'text.secondary' }}>{colors.length} child color(s)</Typography>
@@ -557,17 +714,28 @@ export default function ProductColorPage() {
                         </Button>
                       </Stack>
                     </TableCell>
-                    <TableCell sx={{ minWidth: 132 }}>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 132, verticalAlign: 'top' }}>
                       <ProductColorImage productColor={row} height={62} />
                     </TableCell>
-                    <TableCell>{row.active === false ? 'Inactive' : 'Active'}</TableCell>
-                    <TableCell>
-                      <Stack direction="row" spacing={0.25}>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 95, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>
+                      <Chip
+                        size="small"
+                        label={row.active === false ? 'Inactive' : 'Active'}
+                        color={row.active === false ? 'default' : 'success'}
+                        variant="outlined"
+                        sx={{ height: 23, fontSize: '0.67rem', fontWeight: 750 }}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 150, color: '#374151', fontSize: '0.76rem', verticalAlign: 'top' }}>
+                      {formatDateTime(row.updatedAt)}
+                    </TableCell>
+                    <TableCell align="center" sx={{ py: 0.45, px: 0.7, minWidth: 95 }}>
+                      <Stack direction="row" spacing={0.4} justifyContent="center">
                         <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Product Color / Image / Child Colors'} arrow>
-                          <span><IconButton size="small" color="primary" disabled={!canWrite || saving} onClick={() => { if (canWrite) { setFormRecord(row); setFormOpen(true); } }}><Edit fontSize="small" /></IconButton></span>
+                          <span><IconButton size="small" color="primary" disabled={!canWrite || saving} sx={{ p: 0.25 }} onClick={() => { if (canWrite) { setFormRecord(row); setFormOpen(true); } }}><Edit fontSize="small" /></IconButton></span>
                         </Tooltip>
                         <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete Product Color'} arrow>
-                          <span><IconButton size="small" color="error" disabled={!canWrite || saving} onClick={() => { if (canWrite) setDeleteTarget(row); }}><Delete fontSize="small" /></IconButton></span>
+                          <span><IconButton size="small" color="error" disabled={!canWrite || saving} sx={{ p: 0.25 }} onClick={() => { if (canWrite) setDeleteTarget(row); }}><Delete fontSize="small" /></IconButton></span>
                         </Tooltip>
                       </Stack>
                     </TableCell>
@@ -577,6 +745,17 @@ export default function ProductColorPage() {
             </TableBody>
           </Table>
         </TableContainer>
+
+        <Box sx={{ p: 1, borderTop: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
+          <PaginationBar
+            count={totalElements}
+            page={page}
+            rowsPerPage={rowsPerPage}
+            loading={loading}
+            onPageChange={changePage}
+            onRowsPerPageChange={changeRowsPerPage}
+          />
+        </Box>
       </Paper>
 
       <ProductColorDialog

@@ -2,6 +2,7 @@ import {
   formatCurrency,
   formatDateTime,
   formatNumber,
+  formatVnd,
   toDateInput,
   trimText
 } from '../shared/masterDataUtils';
@@ -15,7 +16,7 @@ const currencyOptionLabel = (item) => {
   const rate = getCurrentRateToVnd(item);
 
   const rateText = Number.isFinite(rate)
-    ? `1 ${code || 'CUR'} = ${formatNumber(rate, 6)} VND`
+    ? `1 ${code || 'CUR'} = ${formatVnd(rate)} VND`
     : 'Current Rate Unavailable';
 
   return [code, name, rateText].filter(Boolean).join(' — ');
@@ -36,7 +37,7 @@ export const matInfoConfig = {
   hideFormSubtitle: true,
 
   importHint:
-    'System Key is auto-generated when creating/importing, starting from MI000001. Expected columns: Flex ID, Material Type, Mat Full Description, Mat Color, Mat Unit, Cur, Mat Price (W/O Tax), Short Name Supplier, Remark, Updated Date, Updated Pic and Style Desc. The importer stops at the first row where all required fields are blank.',
+    'System Key is auto-generated when creating/importing, starting from MI000001. Expected columns: Flex ID, Material Type, Mat Full Description, Mat Color, Mat Unit, Cur, Mat Price (W/O Tax), Short Name Supplier, Remark, Updated Date, Updated Pic and Style Desc. Blank rows are skipped. A row is treated as duplicate and skipped only when Flex ID, Material Type, Mat Full Description, Mat Color, Mat Unit, Cur, Mat Price (W/O Tax), and Short Name Supplier are all the same. A new Short Name Supplier is allowed and automatically creates a pending Vendor Code record. Edited files include Key, Row Version and Action (CREATE/UPDATE/DELETE).',
 
   defaultValues: {
     flexId: '',
@@ -162,7 +163,7 @@ export const matInfoConfig = {
       },
       maxLength: 100,
       grid: 5,
-      placeholder: 'Search Or Enter Vendor Code'
+      placeholder: 'Select or enter a new supplier name'
     },
     {
       name: 'updatedDate',

@@ -9,6 +9,7 @@ import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined';
 import { useTheme } from '@mui/material/styles';
 import { API_BASE_URL } from '../../config';
 import AccessPermissionSelector, { normalizeAccess } from './AccessPermissionSelector';
+import BuyerPermissionSelector, { normalizeBuyerPermissions } from './BuyerPermissionSelector';
 import {
   STABLE_FORM_COLORS, stableCloseButtonSx, stableDialogActionsSx, stableDialogContentSx, stableDialogPaperSx,
   stableDialogTitleSx, stableFieldSx, stableFloatingLabelSx, stableFormGridSx, stableImageFieldSx,
@@ -22,7 +23,7 @@ const imageUrl = (raw) => { if (!raw) return ''; const clean = String(raw).repla
 export default function EditUserDialog({ open, onClose, onUpdate, user, disabled = false }) {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
-  const [form, setForm] = useState({ username: '', email: '', address: '', phone: '', role: 'USER', accessPermissions: ['VIEW_SYSTEM'], isEnabled: true, departmentId: '' });
+  const [form, setForm] = useState({ username: '', email: '', address: '', phone: '', role: 'USER', accessPermissions: ['VIEW_SYSTEM'], buyerKeys: ['LLBEAN'], isEnabled: true, departmentId: '' });
   const [departments, setDepartments] = useState([]);
   const [loadingDepartments, setLoadingDepartments] = useState(false);
   const [image, setImage] = useState(null);
@@ -37,7 +38,7 @@ export default function EditUserDialog({ open, onClose, onUpdate, user, disabled
   useEffect(() => {
     if (!(open && user)) return;
     const role = String(user.role || 'USER').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'USER';
-    setForm({ username: user.username || '', email: user.email || '', address: user.address || '', phone: user.phone || '', role, accessPermissions: normalizeAccess(user.accessPermissions, role), isEnabled: user.enabled ?? user.isEnabled ?? true, departmentId: user.department?.id || user.departmentId || '' });
+    setForm({ username: user.username || '', email: user.email || '', address: user.address || '', phone: user.phone || '', role, accessPermissions: normalizeAccess(user.accessPermissions, role), buyerKeys: normalizeBuyerPermissions(user.buyerKeys, role), isEnabled: user.enabled ?? user.isEnabled ?? true, departmentId: user.department?.id || user.departmentId || '' });
     setImage(null); setPreview(imageUrl(user.profileImageUrl || user.avatar)); setErrors({}); setNotice({ open: false, message: '', severity: 'success' });
   }, [open, user]);
 
@@ -73,6 +74,7 @@ export default function EditUserDialog({ open, onClose, onUpdate, user, disabled
     if (!form.email.trim()) next.email = 'Company email is required.';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) next.email = 'Enter a valid email address.';
     if (!form.departmentId) next.departmentId = 'Department is required.';
+    if (form.role === 'USER' && !(Array.isArray(form.buyerKeys) && form.buyerKeys.length)) next.buyerKeys = 'Select at least one Buyer.';
     setErrors(next); return !Object.keys(next).length;
   };
 
@@ -85,6 +87,7 @@ export default function EditUserDialog({ open, onClose, onUpdate, user, disabled
       payload.append('username', form.username.trim()); payload.append('email', form.email.trim()); payload.append('address', form.address.trim()); payload.append('phone', form.phone.trim());
       payload.append('role', form.role); payload.append('departmentId', form.departmentId); payload.append('isEnabled', String(form.isEnabled));
       payload.append('accessPermissions', normalizeAccess(form.accessPermissions, form.role).join(','));
+      payload.append('buyerKeys', normalizeBuyerPermissions(form.buyerKeys, form.role).join(','));
       if (image) payload.append('profileImage', image);
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/api/users/${user.id}`, { method: 'PUT', headers: { accept: '*/*', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: payload });
@@ -107,6 +110,7 @@ export default function EditUserDialog({ open, onClose, onUpdate, user, disabled
         <FormControl disabled={locked} sx={{ ...stableSelectFieldSx, gridColumn: { xs: 'span 1', sm: 'span 3' } }}><InputLabel>Account Status</InputLabel><Select value={form.isEnabled ? 'true' : 'false'} label="Account Status" onChange={(event) => update('isEnabled', event.target.value === 'true')}><MenuItem value="true">Enabled</MenuItem><MenuItem value="false">Disabled</MenuItem></Select></FormControl>
         <TextField label="Address" value={form.address} onChange={(event) => update('address', event.target.value)} disabled={locked} sx={{ ...stableFieldSx, gridColumn: { xs: 'span 1', sm: 'span 3' } }} />
         <AccessPermissionSelector role={form.role} value={form.accessPermissions} onChange={(value) => update('accessPermissions', value)} disabled={locked} />
+        <BuyerPermissionSelector role={form.role} value={form.buyerKeys} onChange={(value) => update('buyerKeys', value)} disabled={locked} error={errors.buyerKeys} />
         <Box sx={{ gridColumn: { xs: 'span 1', sm: 'span 12' }, ...stableImageFieldSx }}><Typography sx={stableFloatingLabelSx}>Profile Image</Typography><Avatar src={preview || undefined} sx={{ width: 34, height: 34, bgcolor: '#EAF1F8', color: STABLE_FORM_COLORS.navy, fontSize: '0.82rem', fontWeight: 800 }}>{!preview ? (form.username?.[0] || 'U').toUpperCase() : null}</Avatar><Typography noWrap sx={{ flex: 1, minWidth: 0, color: '#64748B', fontSize: '0.82rem' }}>{image?.name || (preview ? 'Current profile image' : 'No image selected')}</Typography>{preview && <IconButton aria-label="Remove profile image" onClick={() => { if (preview?.startsWith('blob:')) URL.revokeObjectURL(preview); setImage(null); setPreview(''); }} disabled={locked} size="small" sx={{ color: '#64748B' }}><DeleteOutlineRoundedIcon fontSize="small" /></IconButton>}<Button component="label" disabled={locked} startIcon={<PhotoCameraOutlinedIcon />} variant="outlined" sx={stableOutlineButtonSx}>Choose Image<input hidden type="file" accept="image/*" onChange={selectImage} /></Button></Box>
       </Box></DialogContent>
       <DialogActions sx={stableDialogActionsSx}><Button onClick={onClose} disabled={locked} sx={stableTextButtonSx}>Cancel</Button><Button onClick={save} disabled={locked} variant="contained" sx={stablePrimaryButtonSx}>{saving ? <CircularProgress size={19} color="inherit" /> : 'Save changes'}</Button></DialogActions>

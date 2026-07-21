@@ -15,11 +15,14 @@ import { Link as RouterLink, useParams } from 'react-router-dom';
 
 import { getApiError, getOrder } from '../../services/orderBomMprService';
 import { statusSx } from '../orders/orderUi';
+import { buyerPath, getBuyerDefinition, normalizeBuyerKey } from 'utils/buyerContext';
 import BomTab from './BomTab';
 import MprTab from './MprTab';
 
 export default function OrderDetailPage() {
-  const { orderId } = useParams();
+  const { buyerKey: routeBuyerKey, orderId } = useParams();
+  const buyerKey = normalizeBuyerKey(routeBuyerKey);
+  const buyer = getBuyerDefinition(buyerKey);
 
   const [order, setOrder] = useState(null);
   const [tab, setTab] = useState(0);
@@ -30,7 +33,7 @@ export default function OrderDetailPage() {
 
     const loadOrder = async () => {
       try {
-        const data = await getOrder(orderId);
+        const data = await getOrder(orderId, buyerKey);
 
         if (alive) {
           setOrder(data);
@@ -48,7 +51,7 @@ export default function OrderDetailPage() {
     return () => {
       alive = false;
     };
-  }, [orderId]);
+  }, [buyerKey, orderId]);
 
   if (error) {
     return (
@@ -84,11 +87,11 @@ export default function OrderDetailPage() {
       >
         <Link
           component={RouterLink}
-          to="/orders"
+          to={buyerPath(buyerKey, 'orders')}
           underline="hover"
           color="inherit"
         >
-          Orders
+          {buyer.buyerName} Orders
         </Link>
 
         <Typography color="text.primary" sx={{ fontSize: '.85rem' }}>
@@ -162,7 +165,7 @@ export default function OrderDetailPage() {
         </Tabs>
 
         <Box sx={{ p: { xs: 1.25, md: 2 } }}>
-          {tab === 0 ? <BomTab order={order} /> : <MprTab order={order} />}
+          {tab === 0 ? <BomTab order={order} buyerKey={buyerKey} /> : <MprTab order={order} buyerKey={buyerKey} />}
         </Box>
       </Paper>
     </Box>

@@ -97,7 +97,7 @@ export default function MasterDataSearchPanel({
                     }
                   }}
                 >
-                  Download Edit Excel
+                  Download {config.menuTitle} Edit Excel
                 </Button>
               </span>
             </Tooltip>
@@ -121,7 +121,7 @@ export default function MasterDataSearchPanel({
                     }
                   }}
                 >
-                  Upload Edited Excel
+                  Upload Edited {config.menuTitle}
                 </Button>
               </span>
             </Tooltip>
@@ -145,7 +145,7 @@ export default function MasterDataSearchPanel({
                 }
               }}
             >
-              Upload New Excel
+              Upload New {config.menuTitle}
             </Button>
               </span>
             </Tooltip>

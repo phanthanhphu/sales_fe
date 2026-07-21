@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -8,7 +8,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   IconButton,
   Paper,
   Snackbar,
@@ -36,6 +35,7 @@ import { API_BASE_URL } from '../../config';
 import AddDepartmentDialog from './AddDepartmentDialog';
 import EditDepartmentDialog from './EditDepartmentDialog';
 import DepartmentSearch from './DepartmentSearch';
+import { PaginationBar } from '../shared/MasterDataTable';
 
 const API_URL = `${API_BASE_URL}/api/departments`;
 const MANAGE_MESSAGE = 'Only Admin or IT department users can add, edit, or delete departments.';
@@ -83,11 +83,6 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 };
 
-const dateValue = (value) => {
-  const timestamp = new Date(value).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-};
-
 const SortIndicator = ({ active, direction }) => {
   if (!active) {
     return (
@@ -117,6 +112,10 @@ export default function DepartmentManagement() {
   const [canManage, setCanManage] = useState(() => canUseDepartmentAdmin(currentUser()));
   const [searchDivision, setSearchDivision] = useState('');
   const [searchDeptName, setSearchDeptName] = useState('');
+  const [appliedFilters, setAppliedFilters] = useState({ division: '', departmentName: '' });
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalRows, setTotalRows] = useState(0);
   const [sortConfig, setSortConfig] = useState({ key: '', direction: '' });
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -126,15 +125,23 @@ export default function DepartmentManagement() {
   const refreshRef = useRef(null);
 
   const fetchDepartments = useCallback(async (filters = {}, options = {}) => {
+    const requestedPage = Number.isInteger(options.page) ? Math.max(0, options.page) : page;
+    const requestedSize = Number.isInteger(options.size) ? Math.max(1, options.size) : rowsPerPage;
+    const requestedSort = options.sort || sortConfig;
     if (!options.silent) setLoading(true);
 
     try {
       const user = currentUser();
       const userId = user.id || user.userId || user._id || localStorage.getItem('userId') || '';
       const params = new URLSearchParams({ skipDepartmentFilter: 'true' });
+      params.set('paged', 'true');
       if (userId) params.set('userId', userId);
       if (filters.departmentName?.trim()) params.set('departmentName', filters.departmentName.trim());
       if (filters.division?.trim()) params.set('division', filters.division.trim());
+      params.set('page', String(requestedPage));
+      params.set('size', String(requestedSize));
+      params.set('sortBy', requestedSort.key || 'updatedAt');
+      params.set('sortDir', requestedSort.direction || 'desc');
 
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/search?${params}`, {
@@ -159,29 +166,31 @@ export default function DepartmentManagement() {
         id: item.id,
         division: item.division || '',
         departmentName: item.departmentName || item.name || '',
-        createdAt: item.createdAt || item.createdDate || ''
+        createdAt: item.createdAt || item.createdDate || '',
+        updatedAt: item.updatedAt || item.updatedDate || ''
       })));
+      setTotalRows(Number(data?.totalElements ?? list.length ?? 0));
 
       const apiUser = data?.currentUser || data?.user || {};
       setCanManage(Boolean(data?.isAdmin) || canUseDepartmentAdmin(user) || canUseDepartmentAdmin(apiUser));
+      return { rows: list, totalElements: Number(data?.totalElements ?? list.length ?? 0) };
     } catch (error) {
       setDepartments([]);
+      setTotalRows(0);
       setNotice({ open: true, message: error.message || 'Unable to load departments.', severity: 'error' });
+      return { rows: [], totalElements: 0 };
     } finally {
       if (!options.silent) setLoading(false);
     }
-  }, []);
+  }, [page, rowsPerPage, sortConfig]);
 
   useEffect(() => {
-    fetchDepartments();
-  }, [fetchDepartments]);
+    fetchDepartments(appliedFilters);
+  }, [appliedFilters, fetchDepartments]);
 
   useEffect(() => {
-    refreshRef.current = () => fetchDepartments(
-      { division: searchDivision, departmentName: searchDeptName },
-      { silent: true }
-    );
-  }, [fetchDepartments, searchDivision, searchDeptName]);
+    refreshRef.current = () => fetchDepartments(appliedFilters, { silent: true });
+  }, [appliedFilters, fetchDepartments]);
 
   useEffect(() => {
     const client = new Client({
@@ -220,14 +229,16 @@ export default function DepartmentManagement() {
     const departmentName = filters?.departmentName || '';
     setSearchDivision(division);
     setSearchDeptName(departmentName);
-    fetchDepartments({ division, departmentName });
+    setPage(0);
+    setAppliedFilters({ division, departmentName });
   };
 
   const reset = () => {
     setSearchDivision('');
     setSearchDeptName('');
     setSortConfig({ key: '', direction: '' });
-    fetchDepartments();
+    setPage(0);
+    setAppliedFilters({ division: '', departmentName: '' });
   };
 
   const deleteDepartment = async () => {
@@ -251,7 +262,11 @@ export default function DepartmentManagement() {
 
       setDeleteOpen(false);
       setSelectedDepartment(null);
-      await fetchDepartments({ division: searchDivision, departmentName: searchDeptName });
+      const remaining = Math.max(0, totalRows - 1);
+      const lastPage = Math.max(0, Math.ceil(remaining / rowsPerPage) - 1);
+      const targetPage = Math.min(page, lastPage);
+      if (targetPage === page) await fetchDepartments(appliedFilters, { page: targetPage });
+      else setPage(targetPage);
       setNotice({ open: true, message: 'Department deleted successfully.', severity: 'success' });
     } catch (error) {
       setNotice({ open: true, message: error.message || 'Unable to delete department.', severity: 'error' });
@@ -260,24 +275,8 @@ export default function DepartmentManagement() {
     }
   };
 
-  const sortedDepartments = useMemo(() => {
-    if (!sortConfig.key || !sortConfig.direction) return departments;
-
-    const multiplier = sortConfig.direction === 'desc' ? -1 : 1;
-    return [...departments].sort((left, right) => {
-      const a = sortConfig.key === 'createdAt'
-        ? dateValue(left.createdAt)
-        : String(left?.[sortConfig.key] || '').toLowerCase();
-      const b = sortConfig.key === 'createdAt'
-        ? dateValue(right.createdAt)
-        : String(right?.[sortConfig.key] || '').toLowerCase();
-
-      if (typeof a === 'number' && typeof b === 'number') return (a - b) * multiplier;
-      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }) * multiplier;
-    });
-  }, [departments, sortConfig]);
-
   const changeSort = (key) => {
+    setPage(0);
     setSortConfig((current) => {
       if (current.key !== key) return { key, direction: 'asc' };
       if (current.direction === 'asc') return { key, direction: 'desc' };
@@ -341,7 +340,7 @@ export default function DepartmentManagement() {
           <Box>
             <Typography sx={{ fontWeight: 650, fontSize: '0.98rem' }}>Department List</Typography>
             <Typography sx={{ mt: 0.1, fontSize: '0.75rem', color: 'text.secondary' }}>
-              {loading ? 'Loading records…' : `${departments.length || 0} record(s)`}
+              {loading ? 'Loading records…' : `${totalRows || 0} record(s)`}
             </Typography>
           </Box>
           <Button
@@ -349,7 +348,7 @@ export default function DepartmentManagement() {
             variant="outlined"
             startIcon={loading ? <CircularProgress size={14} /> : <Refresh fontSize="small" />}
             disabled={loading}
-            onClick={() => fetchDepartments({ division: searchDivision, departmentName: searchDeptName })}
+            onClick={() => fetchDepartments(appliedFilters)}
             sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, textTransform: 'none', borderRadius: 1.2 }}
           >
             Refresh
@@ -383,11 +382,11 @@ export default function DepartmentManagement() {
                     </Stack>
                   </TableCell>
                 </TableRow>
-              ) : sortedDepartments.length > 0 ? (
-                sortedDepartments.map((department, index) => (
+              ) : departments.length > 0 ? (
+                departments.map((department, index) => (
                   <TableRow key={department.id || `${department.division}-${department.departmentName}-${index}`} hover>
                     <TableCell align="center" sx={{ py: 0.6, px: 0.7, color: '#6b7280', fontSize: '0.75rem' }}>
-                      {index + 1}
+                      {page * rowsPerPage + index + 1}
                     </TableCell>
                     <TableCell sx={{ py: 0.6, px: 0.75, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>
                       {department.division || '—'}
@@ -448,13 +447,17 @@ export default function DepartmentManagement() {
           </Table>
         </TableContainer>
 
-        <Divider />
-        <Box sx={{ p: 1, backgroundColor: '#fff' }}>
-          <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>
-            Showing <span style={{ color: '#111827' }}>{departments.length ? 1 : 0}</span>–<span style={{ color: '#111827' }}>{departments.length}</span> of{' '}
-            <span style={{ color: '#111827' }}>{departments.length}</span>
-          </Typography>
-        </Box>
+        <PaginationBar
+          count={totalRows}
+          page={page}
+          rowsPerPage={rowsPerPage}
+          loading={loading}
+          onPageChange={(nextPage) => setPage(Math.max(0, Number(nextPage) || 0))}
+          onRowsPerPageChange={(nextSize) => {
+            setRowsPerPage(Number(nextSize) || 25);
+            setPage(0);
+          }}
+        />
       </Paper>
 
       <AddDepartmentDialog
@@ -462,7 +465,8 @@ export default function DepartmentManagement() {
         onClose={(created) => {
           setAddOpen(false);
           if (created) {
-            fetchDepartments({ division: searchDivision, departmentName: searchDeptName });
+            if (page === 0) fetchDepartments(appliedFilters);
+            else setPage(0);
             setNotice({ open: true, message: 'Department created successfully.', severity: 'success' });
           }
         }}
@@ -473,7 +477,7 @@ export default function DepartmentManagement() {
         onClose={(updated) => {
           setEditOpen(false);
           if (updated) {
-            fetchDepartments({ division: searchDivision, departmentName: searchDeptName });
+            fetchDepartments(appliedFilters);
             setNotice({ open: true, message: 'Department updated successfully.', severity: 'success' });
           }
         }}

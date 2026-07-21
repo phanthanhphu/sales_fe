@@ -44,7 +44,7 @@ const compareValue = (row, column) => {
   return stringValue.toLocaleLowerCase();
 };
 
-const SortIndicator = ({ active, direction }) => {
+export const SortIndicator = ({ active, direction }) => {
   if (!active) {
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', ml: 0.25, lineHeight: 0 }}>
@@ -67,7 +67,7 @@ const SortIndicator = ({ active, direction }) => {
   );
 };
 
-function PaginationBar({ count, page, rowsPerPage, loading, onPageChange, onRowsPerPageChange }) {
+export function PaginationBar({ count, page, rowsPerPage, loading, onPageChange, onRowsPerPageChange }) {
   const totalPages = Math.max(1, Math.ceil((count || 0) / Math.max(rowsPerPage || 1, 1)));
   const from = count === 0 ? 0 : page * rowsPerPage + 1;
   const to = Math.min(count || 0, (page + 1) * rowsPerPage);
