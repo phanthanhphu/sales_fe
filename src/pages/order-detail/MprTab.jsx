@@ -1045,7 +1045,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
           lineCount: lines.length
         };
       })
-      .filter((batch) => batch.lineCount > 0);
+      .filter((batch) => batch.lineCount > 0)
+      .sort((left, right) => {
+        const leftTime = left?.createdAt ? new Date(left.createdAt).getTime() : 0;
+        const rightTime = right?.createdAt ? new Date(right.createdAt).getTime() : 0;
+        if (leftTime !== rightTime) return rightTime - leftTime;
+        return String(right?.batchId || '').localeCompare(String(left?.batchId || ''));
+      });
   }, [mpr]);
 
   const generationBusy = generateProgress.status === 'processing';

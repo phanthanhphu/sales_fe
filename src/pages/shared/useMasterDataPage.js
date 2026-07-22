@@ -69,23 +69,25 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
     setNotification((current) => ({ ...current, open: false }));
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (overrides = {}) => {
+    const requestedPage = Number.isInteger(overrides.page) ? Math.max(0, overrides.page) : page;
+    const requestedSize = Number.isInteger(overrides.size) ? Math.max(1, overrides.size) : rowsPerPage;
     setLoading(true);
 
     try {
       const response = await listMasterData(config.type, {
         ...scopeParams,
         ...cleanFilters(appliedFilters),
-        page,
-        size: rowsPerPage
+        page: requestedPage,
+        size: requestedSize
       });
 
-      const normalized = normalizePageResponse(response, page, rowsPerPage);
+      const normalized = normalizePageResponse(response, requestedPage, requestedSize);
       const nextRows = Array.isArray(normalized.content) ? normalized.content : [];
       setRows(nextRows);
       setTotalElements(Number(normalized.totalElements || 0));
 
-      if (Number.isInteger(normalized.number) && normalized.number !== page && normalized.totalPages > 0) {
+      if (Number.isInteger(normalized.number) && normalized.number !== requestedPage && normalized.totalPages > 0) {
         setPage(normalized.number);
       }
 
@@ -172,8 +174,11 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
     }
 
     notify(message, 'success');
-    await load();
-  }, [config.singular, load, notify]);
+    const isCreate = meta?.mode === 'create';
+    const targetPage = isCreate ? 0 : page;
+    if (isCreate && page !== 0) setPage(0);
+    await load({ page: targetPage });
+  }, [config.singular, load, notify, page]);
 
   const handleImported = useCallback(async (result) => {
     const created = Number(result?.created || 0);
@@ -183,9 +188,9 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
 
     notify(`Import completed: ${created} created, ${updated} updated.${suffix}`, 'success');
     setUploadOpen(false);
-    setPage(0);
-    await load();
-  }, [load, notify]);
+    if (page !== 0) setPage(0);
+    await load({ page: 0 });
+  }, [load, notify, page]);
 
   const confirmDelete = useCallback((record) => {
     setDeleteTarget(record || null);

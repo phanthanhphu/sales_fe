@@ -252,6 +252,25 @@ export default function LoginPage() {
   const [loginError, setLoginError] = useState('');
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    let message = '';
+
+    if (params.get('accountDisabled') === 'true') {
+      message = 'Your account has been disabled. Please contact the system administrator.';
+    } else if (params.get('sessionRevoked') === 'true') {
+      message = 'Your access or password has changed. Please login again.';
+    } else if (params.get('sessionExpired') === 'true') {
+      message = 'Your session has expired. Please login again.';
+    }
+
+    if (message) {
+      setLoginError(message);
+      toast.error(message);
+      window.history.replaceState({}, document.title, '/login');
+    }
+  }, []);
+
+  useEffect(() => {
     const token = localStorage.getItem('token');
 
     if (!token) return;

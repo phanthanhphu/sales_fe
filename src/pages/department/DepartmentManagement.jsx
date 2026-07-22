@@ -116,7 +116,7 @@ export default function DepartmentManagement() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalRows, setTotalRows] = useState(0);
-  const [sortConfig, setSortConfig] = useState({ key: '', direction: '' });
+  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -140,7 +140,7 @@ export default function DepartmentManagement() {
       if (filters.division?.trim()) params.set('division', filters.division.trim());
       params.set('page', String(requestedPage));
       params.set('size', String(requestedSize));
-      params.set('sortBy', requestedSort.key || 'updatedAt');
+      params.set('sortBy', requestedSort.key || 'createdAt');
       params.set('sortDir', requestedSort.direction || 'desc');
 
       const token = localStorage.getItem('token');
@@ -236,7 +236,7 @@ export default function DepartmentManagement() {
   const reset = () => {
     setSearchDivision('');
     setSearchDeptName('');
-    setSortConfig({ key: '', direction: '' });
+    setSortConfig({ key: 'createdAt', direction: 'desc' });
     setPage(0);
     setAppliedFilters({ division: '', departmentName: '' });
   };
@@ -280,7 +280,7 @@ export default function DepartmentManagement() {
     setSortConfig((current) => {
       if (current.key !== key) return { key, direction: 'asc' };
       if (current.direction === 'asc') return { key, direction: 'desc' };
-      return { key: '', direction: '' };
+      return { key: 'createdAt', direction: 'desc' };
     });
   };
 

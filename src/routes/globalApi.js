@@ -14,11 +14,22 @@ const AUTH_KEYS = [
   'role',
   'buyerKeys',
   'accessibleBuyers',
+  'approvePermission',
+  'canApproveNotice',
+  'canApproveDocument',
+  'bookingPermission',
+  'canManageBooking',
+  'departmentId',
+  'departmentName',
+  'division',
   'loginAt',
 ];
 
 export const clearAuthSession = () => {
-  AUTH_KEYS.forEach((key) => localStorage.removeItem(key));
+  AUTH_KEYS.forEach((key) => {
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  });
 };
 
 export const redirectToLogin = (reason = 'sessionExpired') => {
@@ -115,6 +126,14 @@ const applyRequestAuth = (config = {}) => {
 
 const handleRequestError = (error) => Promise.reject(error);
 
+const authRedirectReason = (payload = {}) => {
+  const code = String(payload?.code || '').trim().toUpperCase();
+
+  if (code === 'ACCOUNT_DISABLED' || code === 'ACCOUNT_NOT_FOUND') return 'accountDisabled';
+  if (code === 'SESSION_REVOKED') return 'sessionRevoked';
+  return 'sessionExpired';
+};
+
 const handleResponseError = (error) => {
   const status = error.response?.status;
   const url = error.config?.url || '';
@@ -124,7 +143,7 @@ const handleResponseError = (error) => {
   const isLoginRequest = String(url).includes('/login') || String(url).includes('/api/users/login');
 
   if (status === 401 && !isLoginRequest) {
-    redirectToLogin('sessionExpired');
+    redirectToLogin(authRedirectReason(error.response?.data));
   }
 
   return Promise.reject(error);
@@ -204,7 +223,13 @@ if (!window.__BSL_FETCH_AUTH_INTERCEPTOR_INSTALLED__) {
     const isLoginRequest = String(normalizedUrl).includes('/login') || String(normalizedUrl).includes('/api/users/login');
 
     if (response.status === 401 && !isLoginRequest) {
-      redirectToLogin('sessionExpired');
+      let payload = {};
+      try {
+        payload = await response.clone().json();
+      } catch {
+        payload = {};
+      }
+      redirectToLogin(authRedirectReason(payload));
     }
 
     return response;
@@ -231,7 +256,7 @@ window.addEventListener('unhandledrejection', (event) => {
     const isLoginRequest = String(url).includes('/login') || String(url).includes('/api/users/login');
 
     if (!isLoginRequest) {
-      redirectToLogin('globalError');
+      redirectToLogin(authRedirectReason(err?.response?.data));
     }
   }
 });

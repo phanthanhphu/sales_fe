@@ -65,6 +65,24 @@ const hasImage = (record = {}) => Boolean(
   || record?.imageUpdatedAt
 );
 
+const productColorLinkedBomCount = (record = {}) => Math.max(
+  0,
+  Number(record?.linkedBomCount ?? record?.bomUsageCount ?? 0) || 0
+);
+
+const isProductColorLocked = (record = {}) => Boolean(
+  record?.deleteLocked
+  || record?.inUse
+  || productColorLinkedBomCount(record) > 0
+);
+
+const productColorLockMessage = (record = {}) => {
+  const count = productColorLinkedBomCount(record);
+  return count > 0
+    ? `Locked because this Product Color is linked to ${count} BOM(s). Remove or change every BOM link first.`
+    : 'Locked because this Product Color is currently in use.';
+};
+
 const childColorNames = (record = {}) => (
   Array.isArray(record?.childColors)
     ? record.childColors.map((item) => trim(item?.childColor || item?.value || item?.name)).filter(Boolean)
@@ -78,6 +96,7 @@ const PRODUCT_COLOR_TABLE_COLUMNS = [
   { key: 'styleNumber', label: 'Style Number', minWidth: 130, sortable: true },
   { key: 'childColors', label: 'Child Colors', minWidth: 330, sortable: false },
   { key: 'image', label: 'Product Image', minWidth: 132, sortable: false },
+  { key: 'usage', label: 'Usage', minWidth: 125, sortable: false },
   { key: 'active', label: 'Status', minWidth: 95, sortable: false },
   { key: 'updatedAt', label: 'Updated At', minWidth: 150, sortable: true },
   { key: 'actions', label: 'Actions', minWidth: 95, sortable: false, align: 'center' }
@@ -190,6 +209,7 @@ function ProductColorDialog({
   const [form, setForm] = useState(blankForm());
   const isEdit = Boolean(record?.id);
   const imageExists = hasImage(record);
+  const identityLocked = isEdit && isProductColorLocked(record);
 
   useEffect(() => {
     if (!open) return;
@@ -250,11 +270,16 @@ function ProductColorDialog({
         <IconButton onClick={onClose} disabled={saving} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
       </DialogTitle>
       <DialogContent dividers>
+        {identityLocked && (
+          <Alert severity="warning" sx={{ mb: 1.5 }}>
+            {productColorLockMessage(record)} Pattern Number, Product / Style Color, Season and Style Number are locked. Image and Child Colors can still be updated.
+          </Alert>
+        )}
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
-          <TextField required label="Pattern Number" value={form.patternNumber} onChange={set('patternNumber')} placeholder="LLB 352 A" />
-          <TextField required label="Product / Style Color" value={form.productColor} onChange={set('productColor')} placeholder="BLACK" />
-          <TextField required label="Season" value={form.season} onChange={set('season')} placeholder="F26" />
-          <TextField required label="Style Number" value={form.styleNumber} onChange={set('styleNumber')} placeholder="271893" />
+          <TextField required label="Pattern Number" value={form.patternNumber} onChange={set('patternNumber')} placeholder="LLB 352 A" disabled={identityLocked} />
+          <TextField required label="Product / Style Color" value={form.productColor} onChange={set('productColor')} placeholder="BLACK" disabled={identityLocked} />
+          <TextField required label="Season" value={form.season} onChange={set('season')} placeholder="F26" disabled={identityLocked} />
+          <TextField required label="Style Number" value={form.styleNumber} onChange={set('styleNumber')} placeholder="271893" disabled={identityLocked} />
           <TextField select label="Status" value={form.active} onChange={set('active')} sx={{ gridColumn: { md: 'span 2' } }}>
             <MenuItem value="true">Active</MenuItem>
             <MenuItem value="false">Inactive</MenuItem>
@@ -370,7 +395,7 @@ export default function ProductColorPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalElements, setTotalElements] = useState(0);
-  const [sort, setSort] = useState({ key: 'updatedAt', direction: 'desc' });
+  const [sort, setSort] = useState({ key: 'createdAt', direction: 'desc' });
   const [loading, setLoading] = useState(false);
   const [formRecord, setFormRecord] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -397,7 +422,7 @@ export default function ProductColorPage() {
         buyerKey,
         page: requestedPage,
         size: requestedSize,
-        sortBy: requestedSort?.key || 'updatedAt',
+        sortBy: requestedSort?.key || 'createdAt',
         sortDir: requestedSort?.direction || 'desc'
       });
       const nextRows = pageContent(response);
@@ -471,6 +496,11 @@ export default function ProductColorPage() {
   const remove = async () => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     if (!deleteTarget?.id) return;
+    if (isProductColorLocked(deleteTarget)) {
+      notify(productColorLockMessage(deleteTarget), 'warning');
+      setDeleteTarget(null);
+      return;
+    }
     setSaving(true);
     try {
       await deleteMasterData('productColor', deleteTarget.id, { buyerKey });
@@ -548,7 +578,7 @@ export default function ProductColorPage() {
     setSort((current) => {
       if (current.key !== column.key) return { key: column.key, direction: 'asc' };
       if (current.direction === 'asc') return { key: column.key, direction: 'desc' };
-      return { key: 'updatedAt', direction: 'desc' };
+      return { key: 'createdAt', direction: 'desc' };
     });
   };
 
@@ -679,7 +709,7 @@ export default function ProductColorPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={10} sx={{ py: 5 }}>
+                  <TableCell colSpan={11} sx={{ py: 5 }}>
                     <Stack direction="row" justifyContent="center" alignItems="center" spacing={1}>
                       <CircularProgress size={20} />
                       <Typography sx={{ fontSize: '0.82rem', color: 'text.secondary' }}>Loading Product Color records…</Typography>
@@ -688,7 +718,7 @@ export default function ProductColorPage() {
                 </TableRow>
               ) : rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 5, color: 'text.secondary', fontSize: '0.85rem' }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 5, color: 'text.secondary', fontSize: '0.85rem' }}>
                     No Product Color Found
                   </TableCell>
                 </TableRow>
@@ -717,6 +747,17 @@ export default function ProductColorPage() {
                     <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 132, verticalAlign: 'top' }}>
                       <ProductColorImage productColor={row} height={62} />
                     </TableCell>
+                    <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 125, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>
+                      <Tooltip title={isProductColorLocked(row) ? productColorLockMessage(row) : 'Not linked to any BOM. This Product Color can be deleted.'} arrow>
+                        <Chip
+                          size="small"
+                          label={isProductColorLocked(row) ? `Locked · ${productColorLinkedBomCount(row)} BOM` : 'Available'}
+                          color={isProductColorLocked(row) ? 'warning' : 'default'}
+                          variant="outlined"
+                          sx={{ height: 23, fontSize: '0.67rem', fontWeight: 750 }}
+                        />
+                      </Tooltip>
+                    </TableCell>
                     <TableCell sx={{ py: 0.6, px: 0.75, minWidth: 95, color: '#374151', fontSize: '0.78rem', verticalAlign: 'top' }}>
                       <Chip
                         size="small"
@@ -734,8 +775,18 @@ export default function ProductColorPage() {
                         <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Product Color / Image / Child Colors'} arrow>
                           <span><IconButton size="small" color="primary" disabled={!canWrite || saving} sx={{ p: 0.25 }} onClick={() => { if (canWrite) { setFormRecord(row); setFormOpen(true); } }}><Edit fontSize="small" /></IconButton></span>
                         </Tooltip>
-                        <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete Product Color'} arrow>
-                          <span><IconButton size="small" color="error" disabled={!canWrite || saving} sx={{ p: 0.25 }} onClick={() => { if (canWrite) setDeleteTarget(row); }}><Delete fontSize="small" /></IconButton></span>
+                        <Tooltip title={!canWrite ? writeBlockedMessage : (isProductColorLocked(row) ? productColorLockMessage(row) : 'Delete Product Color')} arrow>
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              disabled={!canWrite || saving || isProductColorLocked(row)}
+                              sx={{ p: 0.25 }}
+                              onClick={() => { if (canWrite && !isProductColorLocked(row)) setDeleteTarget(row); }}
+                            >
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </span>
                         </Tooltip>
                       </Stack>
                     </TableCell>
@@ -796,7 +847,7 @@ export default function ProductColorPage() {
         title="Delete Product Color?"
         subtitle="Please confirm before deleting this Product Color."
         message={<>Delete <b>{deleteTarget?.productColor || 'this Product Color'}</b>, its Child Colors and saved image?</>}
-        warning="This can affect BOM screens linked to this Product Color Master."
+        warning="Only Product Colors that are not linked to any BOM can be deleted."
         deleting={saving}
         onClose={() => setDeleteTarget(null)}
         onConfirm={remove}

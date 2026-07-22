@@ -60,10 +60,11 @@ export default function OrdersPage() {
   const scrollTargetRef = useRef('');
 
   const notify = (message, severity = 'success') => setNotice({ open: true, severity, message });
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
+    const requestedPage = Number.isInteger(options.page) ? Math.max(0, options.page) : page;
     setLoading(true);
     try {
-      const data = await listOrders({ ...applied, buyerKey, page, size: 25 });
+      const data = await listOrders({ ...applied, buyerKey, page: requestedPage, size: 25 });
       const nextRows = Array.isArray(data?.content) ? data.content : Array.isArray(data) ? data : [];
       setRows(nextRows);
       setTotalPages(Math.max(1, data?.totalPages || 1));
@@ -146,7 +147,9 @@ export default function OrdersPage() {
       setFormOpen(false);
       setFormRecord(null);
       notify('Order saved successfully.');
-      const nextRows = await load();
+      const targetPage = isCreate ? 0 : page;
+      if (isCreate && page !== 0) setPage(0);
+      const nextRows = await load({ page: targetPage });
       if (isCreate) {
         scrollToCreatedOrder(resolveCreatedOrderId(savedOrder, nextRows, scopedPayload));
       }

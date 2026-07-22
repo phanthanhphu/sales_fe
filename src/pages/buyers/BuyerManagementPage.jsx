@@ -172,8 +172,8 @@ export default function BuyerManagementPage() {
         paged: true,
         page: requestedPage,
         size: requestedSize,
-        sortBy: 'sequence',
-        sortDir: 'asc'
+        sortBy: 'createdAt',
+        sortDir: 'desc'
       });
       const content = Array.isArray(result)
         ? result

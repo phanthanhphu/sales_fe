@@ -46,6 +46,13 @@ export default function TabContent({ onRequestClose }) {
     profileImage,
     userId,
     createdAt,
+    enabled,
+    accessPermissions,
+    buyerKeys,
+    departmentId,
+    departmentName,
+    division,
+    department,
     error,
     success,
     firstLetter,
@@ -363,7 +370,15 @@ export default function TabContent({ onRequestClose }) {
           phone,
           role,
           profileImageUrl: profileImage,
-          createdAt
+          createdAt,
+          enabled,
+          isEnabled: enabled,
+          accessPermissions,
+          buyerKeys,
+          departmentId,
+          departmentName,
+          division,
+          department
         }}
       />
 
