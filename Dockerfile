@@ -5,19 +5,16 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Copy riêng package trước để Docker cache node_modules
 COPY package.json package-lock.json ./
 
-# Cache npm, lần sau build sẽ nhanh hơn
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline --no-audit --progress=false
 
-# Copy source sau cùng
 COPY . .
 
 ARG VITE_APP_VERSION=v2.1.0
 ARG VITE_APP_BASE_NAME=/
-ARG VITE_API_BASE_URL=http://10.232.132.84:8081
+ARG VITE_API_BASE_URL=http://10.232.132.94:8082
 
 ENV VITE_APP_VERSION=$VITE_APP_VERSION
 ENV VITE_APP_BASE_NAME=$VITE_APP_BASE_NAME
