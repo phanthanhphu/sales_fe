@@ -24,8 +24,8 @@ export default function Header() {
     <Toolbar
       sx={{
         minHeight: HEADER_HEIGHT,
-        px: { xs: 1.5, sm: 2.25, lg: 3 },
-        gap: 1.25,
+        px: { xs: 1, sm: 1.5, lg: 2 },
+        gap: 0.75,
         width: '100%',
         alignItems: 'center'
       }}
@@ -38,8 +38,8 @@ export default function Header() {
         variant="light"
         size="large"
         sx={{
-          width: 40,
-          height: 40,
+          width: 36,
+          height: 36,
           p: 0,
           borderRadius: 2.5,
           color: '#2E5F97',

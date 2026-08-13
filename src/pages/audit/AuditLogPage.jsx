@@ -38,7 +38,7 @@ const emptyFilters = {
   to: ''
 };
 
-const modules = ['USER', 'DEPARTMENT', 'BUYER', 'ORDER', 'BOM', 'MPR', 'CURRENCY', 'VENDOR_CODE', 'MAT_INFO', 'LOSS', 'SHIP_TO', 'PRODUCT_COLOR', 'FILE', 'SYSTEM'];
+const modules = ['USER', 'DEPARTMENT', 'BUYER', 'ORDER', 'BOM', 'MPR', 'CURRENCY', 'VENDOR_CODE', 'MAT_INFO', 'MATERIAL_SHIP_TO', 'LOSS', 'SHIP_TO', 'PRODUCT_COLOR', 'FILE', 'SYSTEM'];
 const actions = ['ADD', 'EDIT', 'DELETE'];
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
@@ -105,7 +105,7 @@ export default function AuditLogPage() {
 
   return (
     <Box>
-      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
+      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: '#103B5C', fontSize: '1.05rem' }}>Add / Edit / Delete Logs</Typography>
@@ -117,7 +117,7 @@ export default function AuditLogPage() {
         </Stack>
       </Paper>
 
-      <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
+      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' }, gap: 1 }}>
           <TextField size="small" label="Keyword" value={filters.keyword} onChange={(event) => updateFilter('keyword', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && apply()} placeholder="Resource ID, endpoint, file..." />
           <TextField size="small" label="User / Email" value={filters.username} onChange={(event) => updateFilter('username', event.target.value)} />

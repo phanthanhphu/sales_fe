@@ -8,7 +8,7 @@ import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
 
 // header style
-const headerSX = { p: 2.5, '& .MuiCardHeader-action': { m: '0px auto', alignSelf: 'center' } };
+const headerSX = { p: 1.75, '& .MuiCardHeader-action': { m: '0px auto', alignSelf: 'center' } };
 
 // ==============================|| CUSTOM - MAIN CARD ||============================== //
 

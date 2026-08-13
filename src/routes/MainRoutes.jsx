@@ -23,6 +23,7 @@ const MatInfoPage = Loadable(lazy(() => import('pages/mat-info/MatInfoPage')));
 const LossPage = Loadable(lazy(() => import('pages/loss/LossPage')));
 const ShipToPage = Loadable(lazy(() => import('pages/ship-to/ShipToPage')));
 const ProductColorPage = Loadable(lazy(() => import('pages/product-color/ProductColorPage')));
+const MaterialShipToPage = Loadable(lazy(() => import('pages/material-ship-to/MaterialShipToPage')));
 const OrdersPage = Loadable(lazy(() => import('pages/orders/OrdersPage')));
 const OrderDetailPage = Loadable(lazy(() => import('pages/order-detail/OrderDetailPage')));
 const BomDetailPage = Loadable(lazy(() => import('pages/bom/BomDetailPage')));
@@ -100,14 +101,16 @@ const MainRoutes = {
             { path: 'currencies', element: <CurrencyPage /> },
             { path: 'vendor-codes', element: <VendorCodePage /> },
             { path: 'vender-codes', element: <Navigate to="/vendor-codes" replace /> },
-            { path: 'loss', element: <LossPage /> },
+            { path: 'loss', element: <LegacyBuyerRedirect child="loss" /> },
             { path: 'ship-tos', element: <ShipToPage /> },
 
             { path: 'buyers/:buyerKey/orders', element: <BuyerRoute><OrdersPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/orders/:orderId', element: <BuyerRoute><OrderDetailPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/orders/:orderId/boms/:bomId', element: <BuyerRoute><BomDetailPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/mat-info', element: <BuyerRoute><MatInfoPage /></BuyerRoute> },
+            { path: 'buyers/:buyerKey/loss', element: <BuyerRoute><LossPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/product-colors', element: <BuyerRoute><ProductColorPage /></BuyerRoute> },
+            { path: 'buyers/:buyerKey/material-ship-to', element: <BuyerRoute><MaterialShipToPage /></BuyerRoute> },
 
             { path: 'orders', element: <LegacyBuyerRedirect child="orders" /> },
             { path: 'orders/:orderId', element: <LegacyBuyerRedirect child="orders" /> },
@@ -121,7 +124,7 @@ const MainRoutes = {
             { path: 'master-data/suppliers', element: <Navigate to="/vendor-codes" replace /> },
             { path: 'master-data/vendor-codes', element: <Navigate to="/vendor-codes" replace /> },
             { path: 'master-data/mat-infos', element: <LegacyBuyerRedirect child="mat-info" /> },
-            { path: 'master-data/loss', element: <Navigate to="/loss" replace /> },
+            { path: 'master-data/loss', element: <LegacyBuyerRedirect child="loss" /> },
             { path: 'master-data/ship-tos', element: <Navigate to="/ship-tos" replace /> },
             { path: 'master-data/product-colors', element: <LegacyBuyerRedirect child="product-colors" /> },
             { path: '*', element: <DefaultAuthorizedRoute /> }

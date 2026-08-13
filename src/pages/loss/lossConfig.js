@@ -21,7 +21,7 @@ export const lossConfig = {
   minTableWidth: 1360,
   allowEditWorkbook: true,
   excelSheetName: 'LOSS',
-  importHint: 'Rows with the same Material Group and all four Loss values are skipped. A repeated Material Group with different Loss values is reported as conflicting data.',
+  importHint: 'Loss is scoped to the current Buyer. Rows with the same Material Group and all four Loss values are skipped; a repeated Material Group with different Loss values is reported as conflicting data.',
 
   defaultValues: {
     materialGroup: '',

@@ -9,6 +9,7 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  Portal,
   Snackbar,
   TextField,
   Typography,
@@ -43,7 +44,7 @@ export default function ChangePasswordDialog({ open, onClose, onUpdate, user }) 
     setSaving(false);
     setErrors({});
     setNotice({ open: false, message: '', severity: 'success' });
-  }, [open, user]);
+  }, [open, user?.email]);
 
   const update = (field, value) => {
     setFormData((previous) => ({ ...previous, [field]: value }));
@@ -55,7 +56,7 @@ export default function ChangePasswordDialog({ open, onClose, onUpdate, user }) 
     if (!formData.email.trim()) next.email = 'User email is missing.';
     if (!formData.oldPassword) next.oldPassword = 'Current password is required.';
     if (!formData.newPassword) next.newPassword = 'New password is required.';
-    else if (formData.newPassword.length < 6) next.newPassword = 'Password must contain at least 6 characters.';
+    else if (formData.newPassword.length < 8) next.newPassword = 'New password must be at least 8 characters long.';
     if (!formData.confirmNewPassword) next.confirmNewPassword = 'Confirm the new password.';
     else if (formData.newPassword !== formData.confirmNewPassword) next.confirmNewPassword = 'Passwords do not match.';
     setErrors(next);
@@ -83,13 +84,30 @@ export default function ChangePasswordDialog({ open, onClose, onUpdate, user }) 
       });
       if (!response.ok) {
         const raw = await response.text();
-        let message = `Password change failed (${response.status}).`;
+        let payload = {};
+
         try {
-          message = JSON.parse(raw)?.message || message;
+          payload = raw ? JSON.parse(raw) : {};
         } catch {
-          message = raw || message;
+          payload = { message: raw };
         }
-        throw new Error(message);
+
+        const responseFieldErrors =
+          payload?.fieldErrors && typeof payload.fieldErrors === 'object'
+            ? payload.fieldErrors
+            : {};
+        const fieldMessages = Object.values(responseFieldErrors).filter(Boolean);
+        const message =
+          fieldMessages.join(' • ') ||
+          payload?.message ||
+          `Password change failed (${response.status}).`;
+
+        if (Object.keys(responseFieldErrors).length > 0) {
+          setErrors((previous) => ({ ...previous, ...responseFieldErrors }));
+        }
+
+        setNotice({ open: true, message, severity: 'error' });
+        return;
       }
 
       const data = await response.json();
@@ -136,9 +154,24 @@ export default function ChangePasswordDialog({ open, onClose, onUpdate, user }) 
           <Button onClick={save} disabled={saving} variant="contained" sx={stablePrimaryButtonSx}>{saving ? <CircularProgress size={19} color="inherit" /> : 'Save changes'}</Button>
         </DialogActions>
       </Dialog>
-      <Snackbar open={notice.open} autoHideDuration={4500} onClose={() => setNotice((previous) => ({ ...previous, open: false }))} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
-        <Alert severity={notice.severity} onClose={() => setNotice((previous) => ({ ...previous, open: false }))}>{notice.message}</Alert>
-      </Snackbar>
+      <Portal>
+        <Snackbar
+          open={notice.open}
+          autoHideDuration={5000}
+          onClose={() => setNotice((previous) => ({ ...previous, open: false }))}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+          sx={{ zIndex: (muiTheme) => muiTheme.zIndex.modal + 5000 }}
+        >
+          <Alert
+            severity={notice.severity}
+            variant="filled"
+            onClose={() => setNotice((previous) => ({ ...previous, open: false }))}
+            sx={{ width: '100%' }}
+          >
+            {notice.message}
+          </Alert>
+        </Snackbar>
+      </Portal>
     </>
   );
 }

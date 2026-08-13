@@ -183,10 +183,11 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
   const handleImported = useCallback(async (result) => {
     const created = Number(result?.created || 0);
     const updated = Number(result?.updated || 0);
+    const deleted = Number(result?.deleted || 0);
     const skipped = Number(result?.skipped || 0);
     const suffix = skipped > 0 ? ` ${skipped} skipped.` : '';
 
-    notify(`Import completed: ${created} created, ${updated} updated.${suffix}`, 'success');
+    notify(`Import completed: ${created} created, ${updated} updated, ${deleted} deleted.${suffix}`, 'success');
     setUploadOpen(false);
     if (page !== 0) setPage(0);
     await load({ page: 0 });

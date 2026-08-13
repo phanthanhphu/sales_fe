@@ -36,9 +36,11 @@ export default function MasterDataSearchPanel({
   onReset,
   onAdd,
   onUpload,
+  onDownloadTemplate,
   onDownloadEdit,
   onUploadEdit,
   showUpload = true,
+  showTemplate = false,
   showEditWorkbook = false,
   disabled = false,
   actionsDisabled = false
@@ -59,8 +61,8 @@ export default function MasterDataSearchPanel({
     <Paper
       elevation={0}
       sx={{
-        p: 2,
-        mb: 2,
+        p: 1.25,
+        mb: 1.25,
         borderRadius: 2,
         border: '1px solid #e5e7eb',
         backgroundColor: '#fff',
@@ -79,6 +81,30 @@ export default function MasterDataSearchPanel({
         </Typography>
 
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {showTemplate && (
+            <Tooltip title={actionsDisabled ? noWriteMessage : 'Download a clean upload template with Ship To reference data'} arrow>
+              <span>
+                <Button
+                  variant="outlined"
+                  startIcon={<CloudDownload fontSize="small" />}
+                  onClick={onDownloadTemplate}
+                  disabled={writeDisabled}
+                  sx={{
+                    ...actionButtonSx,
+                    borderColor: '#7c3aed',
+                    color: '#7c3aed',
+                    '&:hover': {
+                      borderColor: '#6d28d9',
+                      backgroundColor: 'rgba(124,58,237,0.05)'
+                    }
+                  }}
+                >
+                  Download Template
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+
           {showEditWorkbook && (
             <Tooltip title={actionsDisabled ? noWriteMessage : 'Download current data to edit in Excel'} arrow>
               <span>

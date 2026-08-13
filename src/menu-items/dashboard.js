@@ -37,11 +37,27 @@ const buyerMenu = (buyer) => ({
       breadcrumbs: false
     },
     {
+      id: `${buyer.buyerKey}-loss`,
+      title: 'Loss',
+      type: 'item',
+      url: buyerPath(buyer.buyerKey, 'loss'),
+      icon: PercentOutlined,
+      breadcrumbs: false
+    },
+    {
       id: `${buyer.buyerKey}-product-colors`,
       title: 'Product Color',
       type: 'item',
       url: buyerPath(buyer.buyerKey, 'product-colors'),
       icon: CategoryOutlined,
+      breadcrumbs: false
+    },
+    {
+      id: `${buyer.buyerKey}-material-ship-to`,
+      title: 'Material Ship To',
+      type: 'item',
+      url: buyerPath(buyer.buyerKey, 'material-ship-to'),
+      icon: LocalShippingOutlined,
       breadcrumbs: false
     }
   ]
@@ -60,7 +76,6 @@ const getDashboardMenu = (buyers = getAccessibleBuyers()) => ({
           { id: 'audit-logs', title: 'Audit Logs', type: 'item', url: '/audit-logs', icon: HistoryOutlined, breadcrumbs: false }
         ]
       : []),
-    { id: 'loss', title: 'Loss', type: 'item', url: '/loss', icon: PercentOutlined, breadcrumbs: false },
     { id: 'currencies', title: 'Currency', type: 'item', url: '/currencies', icon: CurrencyExchangeOutlined, breadcrumbs: false },
     { id: 'vendor-codes', title: 'Vendor Code', type: 'item', url: '/vendor-codes', icon: StoreOutlined, breadcrumbs: false },
     { id: 'ship-tos', title: 'Ship To', type: 'item', url: '/ship-tos', icon: LocalShippingOutlined, breadcrumbs: false },

@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Autocomplete,
   Box,
@@ -14,6 +17,7 @@ import {
   FormControlLabel,
   LinearProgress,
   IconButton,
+  InputAdornment,
   MenuItem,
   Paper,
   Snackbar,
@@ -24,11 +28,14 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
+  Tab,
+  Tabs,
   TextField,
   Tooltip,
   Typography
 } from '@mui/material';
-import { CheckCircle, Delete, Download, Edit, ErrorOutline, Preview, Refresh, RestartAlt, Save } from '@mui/icons-material';
+import { CheckCircle, Delete, Download, Edit, ErrorOutline, ExpandMore, FileUpload, Preview, Refresh, RestartAlt, Save, Search as SearchIcon } from '@mui/icons-material';
 import {
   deleteMpr,
   deleteMprBatch,
@@ -41,7 +48,8 @@ import {
   listBoms,
   previewMpr,
   updateMprBatch,
-  updateMprLine
+  updateMprLine,
+  uploadMprExcel
 } from '../../services/orderBomMprService';
 import MprLineEditDialog from './MprLineEditDialog';
 import { formatDateTime, statusSx } from '../orders/orderUi';
@@ -54,7 +62,8 @@ const emptyBomSelection = () => ({
   colors: [],
   packingIds: [],
   poQtyByColor: {},
-  shipToIdsByColor: {}
+  shipToIdsByColor: {},
+  shipToQtyByColor: {}
 });
 
 const initialSelection = (boms = []) => Object.fromEntries(
@@ -83,10 +92,115 @@ const productColorLabel = (item = {}) => {
   ].filter(Boolean).join(' · ');
 };
 
+const normalizedColorKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+
+const downloadDate = () => {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+};
+
+const downloadFilePart = (value, fallback) => {
+  const safe = String(value || fallback || '').trim()
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return safe || fallback;
+};
+
+
+const productColorKey = (item = {}) => item.id || item.colorName || '';
+
+const savedColorForOption = (savedColors = [], option = {}) => (
+  (savedColors || []).find((color) => (
+    normalizedColorKey(color) === normalizedColorKey(productColorKey(option))
+      || normalizedColorKey(color) === normalizedColorKey(option.colorName)
+  )) || ''
+);
+
+const mappedColorValue = (values = {}, option = {}, fallback = undefined) => {
+  const keys = [productColorKey(option), option.colorName].filter(Boolean);
+  const entry = Object.entries(values || {}).find(([key]) => (
+    keys.some((candidate) => normalizedColorKey(candidate) === normalizedColorKey(key))
+  ));
+  return entry ? entry[1] : fallback;
+};
+
 const numberValue = (value) => {
   if (value === '' || value === null || value === undefined) return '';
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : '';
+};
+
+const sumShipToQty = (shipToQty = {}, shipToIds = []) => (shipToIds || []).reduce((total, shipToId) => {
+  const value = numberValue(shipToQty?.[shipToId]);
+  return value === '' ? total : total + value;
+}, 0);
+
+const shipToDisplayLabel = (shipTo = {}) => [shipTo.shipToCode, shipTo.shipToName].filter(Boolean).join(' · ');
+
+const legacyAwareShipToQty = (savedQty = {}, shipToIds = [], legacyTotal = '') => {
+  const selectedIds = (shipToIds || []).filter(Boolean);
+  const current = savedQty && typeof savedQty === 'object' ? savedQty : {};
+  if (Object.keys(current).length) {
+    return Object.fromEntries(selectedIds.map((id) => [id, current?.[id] ?? '']));
+  }
+  if (selectedIds.length === 1 && legacyTotal !== '' && legacyTotal !== null && legacyTotal !== undefined) {
+    return { [selectedIds[0]]: legacyTotal };
+  }
+  return Object.fromEntries(selectedIds.map((id) => [id, '']));
+};
+
+const mprActionButtonSx = {
+  minHeight: 36,
+  px: 1.5,
+  borderRadius: 1.25,
+  textTransform: 'none',
+  fontSize: '.78rem',
+  fontWeight: 750,
+  lineHeight: 1.2,
+  whiteSpace: 'nowrap',
+  boxShadow: 'none',
+  '& .MuiButton-startIcon': {
+    mr: 0.75
+  },
+  '& .MuiSvgIcon-root': {
+    fontSize: 17
+  }
+};
+
+const mprNeutralActionButtonSx = {
+  ...mprActionButtonSx,
+  color: '#334155',
+  borderColor: '#cbd5e1',
+  backgroundColor: '#ffffff',
+  '&:hover': {
+    borderColor: '#94a3b8',
+    backgroundColor: '#f8fafc',
+    boxShadow: 'none'
+  }
+};
+
+const mprPreviewActionButtonSx = {
+  ...mprActionButtonSx,
+  color: '#2563eb',
+  borderColor: '#93c5fd',
+  backgroundColor: '#ffffff',
+  '&:hover': {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+    boxShadow: 'none'
+  }
+};
+
+const mprPrimaryActionButtonSx = {
+  ...mprActionButtonSx,
+  color: '#ffffff',
+  backgroundColor: '#103B5C',
+  '&:hover': {
+    backgroundColor: '#0b2f4a',
+    boxShadow: 'none'
+  }
 };
 
 const formatValue = (value, maximumFractionDigits = 6) => {
@@ -98,6 +212,13 @@ const formatValue = (value, maximumFractionDigits = 6) => {
     minimumFractionDigits: 0
   });
 };
+
+const sumMprColumn = (lines = [], field) => (
+  (Array.isArray(lines) ? lines : []).reduce((total, line) => {
+    const numeric = Number(line?.[field]);
+    return Number.isFinite(numeric) ? total + numeric : total;
+  }, 0)
+);
 
 const textValue = (value) => {
   if (value === null || value === undefined || value === '') return '';
@@ -138,13 +259,22 @@ const MPR_TEXT_FIELDS = new Set([
   'matDueDate'
 ]);
 
+const MPR_NUMERIC_FIELDS = new Set([
+  'bomLineNo', 'yield', 'lossFactor', 'totalYield', 'poQuantity',
+  'matRequiredQuantity', 'sampleQuantity', 'matSampleQuantity',
+  'mcdStock', 'cmcdStock', 'sapStockQuantity', 'nonSapStockQuantity',
+  'purchaseQuantity', 'matPriceWithoutTax', 'exchangeRate', 'matPriceUsd',
+  'matAmountUsd', 'totalMatAmountPerStyle'
+]);
+
 const renderMprCellValue = (field, value, row = {}) => {
   if (field === 'vendorCode') return vendorCodeValue(value);
   if (MPR_TEXT_FIELDS.has(field)) return textValue(value);
+  const safeValue = MPR_NUMERIC_FIELDS.has(field) && (value === null || value === undefined || value === '') ? 0 : value;
   if (field === 'matPriceWithoutTax' && String(row?.currency || '').trim().toUpperCase() === 'VND') {
-    return formatValue(value, 0).replace(/,/g, '.');
+    return formatValue(safeValue, 0).replace(/,/g, '.');
   }
-  return formatValue(value);
+  return formatValue(safeValue);
 };
 
 const latestBomReview = (line = {}) => {
@@ -167,7 +297,6 @@ const reviewChip = (review) => {
   return null;
 };
 
-const emptySalesBomFilter = { keyword: '' };
 const emptyMprFilters = {
   keyword: '',
   productColor: '',
@@ -194,6 +323,46 @@ const mprLineSourceLabel = (line = {}) => {
     : (safeLine.packingName || `Packing ${safeLine.packingId || ''}`.trim());
 };
 
+const mprLineSourceTraces = (line = {}) => {
+  const traces = Array.isArray(line?.sourceTraces) ? line.sourceTraces.filter(Boolean) : [];
+  if (traces.length) return traces;
+  return [{
+    generationBatchId: line?.generationBatchId,
+    sourceLineId: line?.sourceLineId,
+    sourceRowNumber: line?.sourceRowNumber,
+    packingId: line?.packingId,
+    packingName: line?.packingName,
+    section: line?.section,
+    sourceLabel: mprLineSourceLabel(line)
+  }];
+};
+
+const mprLineHasBatch = (line = {}, batchId = '') => (
+  Boolean(batchId) && mprLineSourceTraces(line).some((trace) => trace?.generationBatchId === batchId)
+);
+
+const mprPhysicalSourceCount = (lines = []) => (
+  (Array.isArray(lines) ? lines : []).reduce((total, line) => total + Math.max(1, mprLineSourceTraces(line).length), 0)
+);
+
+const mprRemovedDuplicateCount = (lines = []) => (
+  (Array.isArray(lines) ? lines : []).reduce((total, line) => {
+    const explicit = Number(line?.removedDuplicateCount);
+    return total + (Number.isFinite(explicit) ? Math.max(0, explicit) : Math.max(0, mprLineSourceTraces(line).length - 1));
+  }, 0)
+);
+
+const MPR_BOM_GROUP_STYLES = [
+  { backgroundColor: '#f1f5f9', borderColor: '#94a3b8', color: '#0f172a' }
+];
+
+const MPR_LEGEND_ITEMS = [
+  { label: 'BOM group', color: '#64748b' },
+  { label: 'Product color', color: '#94a3b8' },
+  { label: 'Source', color: '#cbd5e1' },
+  { label: 'Duplicates merged', color: '#d4a72c' }
+];
+
 const mprLineReviewStatus = (line = {}) => latestBomReview(line)?.status || 'NO_REVIEW';
 
 const mprLineMatchesFilters = (line = {}, filters = emptyMprFilters) => {
@@ -219,6 +388,9 @@ const mprLineMatchesFilters = (line = {}, filters = emptyMprFilters) => {
       safeLine.vendorCode,
       safeLine.vendorName,
       safeLine.matCharger,
+      safeLine.bomNo,
+      safeLine.bomName,
+      safeLine.duplicateNote,
       mprLineSourceLabel(safeLine)
     ];
     if (!searchable.some((value) => includesText(value, keyword))) return false;
@@ -230,23 +402,6 @@ const mprLineMatchesFilters = (line = {}, filters = emptyMprFilters) => {
   if (safeFilters.reviewStatus && reviewStatus !== safeFilters.reviewStatus) return false;
 
   return true;
-};
-
-const salesBomMatchesKeyword = (bom = {}, keyword = '') => {
-  const safeBom = bom || {};
-  const needle = String(keyword || '').trim();
-  if (!needle) return true;
-  const productColors = productColorsForBom(safeBom).map((item) => item?.colorName);
-  const packings = (safeBom.packings || []).map((packing) => packing?.packingName);
-  return [
-    safeBom.bomNo,
-    safeBom.bomName,
-    safeBom.header?.styleNumber,
-    safeBom.header?.styleName,
-    safeBom.header?.season,
-    ...productColors,
-    ...packings
-  ].some((value) => includesText(value, needle));
 };
 
 const MPR_COLUMNS = [
@@ -295,6 +450,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
   const [boms, setBoms] = useState([]);
   const [selection, setSelection] = useState({});
   const [mpr, setMpr] = useState(null);
+  const mprDownloadName = (mprDoc = mpr) => `MPR_${downloadFilePart(buyerKey, 'BUYER')}_${downloadFilePart(mprDoc?.mprNo, 'MPR')}_${downloadDate()}.xlsx`;
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState({ open: false, severity: 'success', message: '' });
@@ -307,10 +463,21 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
   const [shipTos, setShipTos] = useState([]);
   const [productColorMasters, setProductColorMasters] = useState([]);
   const [batchEditTarget, setBatchEditTarget] = useState(null);
-  const [batchEditForm, setBatchEditForm] = useState({ poQtyByColor: {}, shipToIdsByColor: {} });
+  const [batchEditForm, setBatchEditForm] = useState({ colors: [], packingIds: [], poQtyByColor: {}, shipToIdsByColor: {}, shipToQtyByColor: {} });
   const [batchSaving, setBatchSaving] = useState(false);
-  const [salesBomFilter, setSalesBomFilter] = useState(emptySalesBomFilter);
   const [mprFilters, setMprFilters] = useState(emptyMprFilters);
+  const [mprUploading, setMprUploading] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState('sources');
+  const [bomSearch, setBomSearch] = useState('');
+  const [bomStatusFilter, setBomStatusFilter] = useState('ALL');
+  const [bomPage, setBomPage] = useState(0);
+  const [bomRowsPerPage, setBomRowsPerPage] = useState(20);
+  const [expandedBomId, setExpandedBomId] = useState(null);
+  const [batchSearch, setBatchSearch] = useState('');
+  const [batchPage, setBatchPage] = useState(0);
+  const [batchRowsPerPage, setBatchRowsPerPage] = useState(10);
+  const [expandedBatchId, setExpandedBatchId] = useState(null);
+  const mprUploadRef = useRef(null);
   const progressTimerRef = useRef(null);
   const exportProgressTimerRef = useRef(null);
   const [generateProgress, setGenerateProgress] = useState({
@@ -324,6 +491,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     totalColors: 0,
     completedColors: 0,
     addedRows: 0,
+    duplicateRows: 0,
+    finalRows: 0,
     errorMessage: ''
   });
   const [exportProgress, setExportProgress] = useState({
@@ -366,10 +535,12 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
         return next;
       });
       try {
-        setMpr(await getMpr(order.id));
+        const currentMpr = await getMpr(order.id);
+        setMpr(currentMpr);
       } catch (error) {
-        if (error?.response?.status === 404) setMpr(null);
-        else throw error;
+        if (error?.response?.status === 404) {
+          setMpr(null);
+        } else throw error;
       }
     } catch (error) {
       notify(getApiError(error, 'Unable to load MPR data.'), 'error');
@@ -396,6 +567,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
         selected: checked
       }
     }));
+    if (checked) setExpandedBomId(bomId);
+    else if (expandedBomId === bomId) setExpandedBomId(null);
   };
 
   const toggleColor = (bomId, colorId) => {
@@ -405,15 +578,18 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
       const selectedColors = new Set(item.colors || []);
       const poQtyByColor = { ...(item.poQtyByColor || {}) };
       const shipToIdsByColor = { ...(item.shipToIdsByColor || {}) };
+      const shipToQtyByColor = { ...(item.shipToQtyByColor || {}) };
 
       if (selectedColors.has(colorId)) {
         selectedColors.delete(colorId);
         delete poQtyByColor[colorId];
         delete shipToIdsByColor[colorId];
+        delete shipToQtyByColor[colorId];
       } else {
         selectedColors.add(colorId);
         poQtyByColor[colorId] = '';
         shipToIdsByColor[colorId] = [];
+        shipToQtyByColor[colorId] = {};
       }
 
       return {
@@ -422,24 +598,25 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
           ...item,
           colors: Array.from(selectedColors),
           poQtyByColor,
-          shipToIdsByColor
+          shipToIdsByColor,
+          shipToQtyByColor
         }
       };
     });
   };
 
-  const changePoQty = (bomId, colorId, value) => {
+  const changeShipToQty = (bomId, colorId, shipToId, value) => {
     if (!canWrite) return;
     setSelection((current) => {
       const item = current[bomId] || emptyBomSelection();
+      const selectedIds = item.shipToIdsByColor?.[colorId] || [];
+      const nextColorQty = { ...(item.shipToQtyByColor?.[colorId] || {}), [shipToId]: value };
       return {
         ...current,
         [bomId]: {
           ...item,
-          poQtyByColor: {
-            ...(item.poQtyByColor || {}),
-            [colorId]: value
-          }
+          shipToQtyByColor: { ...(item.shipToQtyByColor || {}), [colorId]: nextColorQty },
+          poQtyByColor: { ...(item.poQtyByColor || {}), [colorId]: sumShipToQty(nextColorQty, selectedIds) }
         }
       };
     });
@@ -449,14 +626,16 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     if (!canWrite) return;
     setSelection((current) => {
       const item = current[bomId] || emptyBomSelection();
+      const selectedIds = (selected || []).map((shipTo) => shipTo.id).filter(Boolean);
+      const previousQty = item.shipToQtyByColor?.[colorId] || {};
+      const nextColorQty = Object.fromEntries(selectedIds.map((id) => [id, previousQty?.[id] ?? '']));
       return {
         ...current,
         [bomId]: {
           ...item,
-          shipToIdsByColor: {
-            ...(item.shipToIdsByColor || {}),
-            [colorId]: (selected || []).map((shipTo) => shipTo.id).filter(Boolean)
-          }
+          shipToIdsByColor: { ...(item.shipToIdsByColor || {}), [colorId]: selectedIds },
+          shipToQtyByColor: { ...(item.shipToQtyByColor || {}), [colorId]: nextColorQty },
+          poQtyByColor: { ...(item.poQtyByColor || {}), [colorId]: sumShipToQty(nextColorQty, selectedIds) }
         }
       };
     });
@@ -481,7 +660,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
 
   const payload = useMemo(() => ({
     mprNo: `MPR-${order?.orderNo || ''}`,
-    // Retained for backward compatibility. Phase 1 takes PO Qty per Product Color below.
+    // Sample Qty is no longer entered from the MPR toolbar; keep it at zero for compatibility.
     poQuantity: 0,
     sampleQuantity: 0,
     selections: boms
@@ -493,15 +672,20 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
           colors: state.colors || [],
           packingIds: state.packingIds || [],
           poQtyByColor: Object.fromEntries(
-            (state.colors || []).map((colorId) => [
-              colorId,
-              numberValue(state.poQtyByColor?.[colorId])
-            ])
+            (state.colors || []).map((colorId) => {
+              const ids = state.shipToIdsByColor?.[colorId] || [];
+              return [colorId, sumShipToQty(state.shipToQtyByColor?.[colorId] || {}, ids)];
+            })
           ),
           shipToIdsByColor: Object.fromEntries(
+            (state.colors || []).map((colorId) => [colorId, state.shipToIdsByColor?.[colorId] || []])
+          ),
+          shipToQtyByColor: Object.fromEntries(
             (state.colors || []).map((colorId) => [
               colorId,
-              state.shipToIdsByColor?.[colorId] || []
+              Object.fromEntries((state.shipToIdsByColor?.[colorId] || []).map((shipToId) => [
+                shipToId, numberValue(state.shipToQtyByColor?.[colorId]?.[shipToId])
+              ]))
             ])
           )
         };
@@ -565,6 +749,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
       totalColors: generationPlan.totalColors,
       completedColors: 0,
       addedRows: 0,
+      duplicateRows: 0,
+      finalRows: 0,
       errorMessage: ''
     });
 
@@ -594,7 +780,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     }, 350);
   };
 
-  const finishGenerateProgress = (addedRows) => {
+  const finishGenerateProgress = ({ sourceRows = 0, duplicateRows = 0, finalRows = 0 } = {}) => {
     stopProgressTimer();
     setGenerateProgress((current) => ({
       ...current,
@@ -605,7 +791,9 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
       currentColor: '',
       processedRows: current.estimatedRows,
       completedColors: current.totalColors,
-      addedRows: Number(addedRows || 0),
+      addedRows: Number(sourceRows || 0),
+      duplicateRows: Number(duplicateRows || 0),
+      finalRows: Number(finalRows || 0),
       errorMessage: ''
     }));
   };
@@ -645,7 +833,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
       downloadedBytes: 0,
       totalBytes: 0,
       fileSizeBytes: 0,
-      fileName: `${mpr?.mprNo || 'MPR'}.xlsx`,
+      fileName: mprDownloadName(),
       errorMessage: ''
     });
 
@@ -728,14 +916,17 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
         return false;
       }
       for (const colorId of selectedBom.colors) {
-        const quantity = selectedBom.poQtyByColor?.[colorId];
-        if (quantity === '' || quantity === null || quantity === undefined || Number(quantity) < 0) {
-          notify('Enter a valid PO Qty for every selected Product Color.', 'error');
-          return false;
-        }
-        if (!(selectedBom.shipToIdsByColor?.[colorId] || []).length) {
+        const selectedShipToIds = selectedBom.shipToIdsByColor?.[colorId] || [];
+        if (!selectedShipToIds.length) {
           notify('Select at least one Ship To for every selected Product Color.', 'error');
           return false;
+        }
+        for (const shipToId of selectedShipToIds) {
+          const quantity = selectedBom.shipToQtyByColor?.[colorId]?.[shipToId];
+          if (quantity === '' || quantity === null || quantity === undefined || !Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
+            notify('Enter a valid PO Qty for every selected Ship To.', 'error');
+            return false;
+          }
         }
       }
     }
@@ -744,6 +935,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
 
   const resetSelection = () => {
     setSelection(initialSelection(boms));
+    setExpandedBomId(null);
   };
 
   const previewMprAction = async () => {
@@ -754,14 +946,16 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     if (!validateSelection()) return;
     try {
       const result = await previewMpr(order.id, payload);
-      const currentCount = mpr?.lines?.length || 0;
-      const addedCount = Math.max(0, (result?.lines?.length || 0) - currentCount);
+      const currentLines = mpr?.lines || [];
+      const resultLines = result?.lines || [];
+      const currentSourceRows = mprPhysicalSourceCount(currentLines);
+      const resultSourceRows = mprPhysicalSourceCount(resultLines);
+      const addedSourceRows = Math.max(0, resultSourceRows - currentSourceRows);
+      const addedDuplicateRows = Math.max(0, mprRemovedDuplicateCount(resultLines) - mprRemovedDuplicateCount(currentLines));
       setPreview(result);
 
       notify(
-        currentCount
-          ? `MPR preview: ${currentCount} saved line(s) + ${addedCount} new line(s).`
-          : `MPR preview generated: ${result?.lines?.length || 0} line(s).`
+        `MPR preview: ${addedSourceRows} new source row(s), ${addedDuplicateRows} duplicate row(s) consolidated, ${resultLines.length} final MPR row(s).`
       );
     } catch (error) {
       notify(getApiError(error, 'Unable to preview MPR.'), 'error');
@@ -779,20 +973,24 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     startGenerateProgress();
 
     try {
-      const previousCount = mpr?.lines?.length || 0;
+      const previousLines = mpr?.lines || [];
       const result = await generateMpr(order.id, payload);
-      const addedCount = Math.max(0, (result?.lines?.length || 0) - previousCount);
+      const resultLines = result?.lines || [];
+      const addedSourceRows = Math.max(0, mprPhysicalSourceCount(resultLines) - mprPhysicalSourceCount(previousLines));
+      const addedDuplicateRows = Math.max(0, mprRemovedDuplicateCount(resultLines) - mprRemovedDuplicateCount(previousLines));
 
       setMpr(result);
       setPreview(null);
       resetSelection();
-      finishGenerateProgress(addedCount);
+      setExpandedBomId(null);
+      setWorkspaceTab('batches');
+      finishGenerateProgress({
+        sourceRows: addedSourceRows,
+        duplicateRows: addedDuplicateRows,
+        finalRows: resultLines.length
+      });
 
-      notify(
-        previousCount
-          ? `${addedCount} new MPR line(s) added. Existing MPR lines were kept.`
-          : 'MPR generated and saved successfully.'
-      );
+      notify(`${addedSourceRows} source row(s) accepted; ${addedDuplicateRows} duplicate row(s) consolidated; ${resultLines.length} MPR row(s) saved.`);
     } catch (error) {
       const message = getApiError(error, 'Unable to add MPR lines.');
       failGenerateProgress(message);
@@ -807,7 +1005,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     }
     if (generateProgress.status === 'processing' || exportProgress.status === 'processing') return;
 
-    const fileName = `${mpr.mprNo || 'MPR'}.xlsx`;
+    const fileName = mprDownloadName(mpr);
     startExportProgress();
 
     try {
@@ -825,6 +1023,29 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     }
   };
 
+  const uploadEditedMprExcel = async (event) => {
+    const file = event?.target?.files?.[0];
+    if (event?.target) event.target.value = '';
+    if (!file) return;
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!mpr?.id || !order?.id) {
+      notify('Create MPR and download the current MPR file before uploading changes.', 'warning');
+      return;
+    }
+
+    setMprUploading(true);
+    try {
+      const result = await uploadMprExcel(order.id, file);
+      setMpr(result);
+      setPreview(null);
+      notify(`MPR updated from ${file.name}. SAMPLE QTY and stock inputs were saved; calculated columns were recalculated by the system.`);
+    } catch (error) {
+      notify(getApiError(error, 'Unable to update MPR from Excel.'), 'error');
+    } finally {
+      setMprUploading(false);
+    }
+  };
+
   const remove = async () => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     try {
@@ -832,6 +1053,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
       setMpr(null);
       setPreview(null);
       setDeleteOpen(false);
+      setWorkspaceTab('sources');
+      setExpandedBatchId(null);
       notify('MPR deleted.');
     } catch (error) {
       notify(getApiError(error, 'Unable to delete MPR.'), 'error');
@@ -850,13 +1073,15 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
 
       setPreview(null);
       setBatchDeleteTarget(null);
+      setExpandedBatchId(null);
 
       if (result?.mprDeleted || !result?.mpr) {
         setMpr(null);
-        notify(`Batch deleted. ${removed} MPR line(s) removed. The MPR is now empty.`);
+        setWorkspaceTab('sources');
+        notify(`Batch deleted. ${removed} source row(s) removed. The MPR is now empty.`);
       } else {
         setMpr(result.mpr);
-        notify(`Batch deleted. ${removed} MPR line(s) removed. ${remaining} line(s) remain.`);
+        notify(`Batch deleted. ${removed} source row(s) removed. ${remaining} final MPR row(s) remain.`);
       }
     } catch (error) {
       notify(getApiError(error, 'Unable to delete this MPR batch.'), 'error');
@@ -867,58 +1092,146 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
 
   const openBatchEdit = (batch) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    const bom = boms.find((item) => item.id === batch.bomId);
+    if (!bom) {
+      notify('The source BOM is no longer available for editing.', 'error');
+      return;
+    }
+
+    const options = productColorsForBom(bom);
+    const selectedOptions = options.filter((option) => savedColorForOption(batch.colors, option));
+    const colorKeys = selectedOptions.map(productColorKey).filter(Boolean);
+
+    const shipToIdsByColor = Object.fromEntries(selectedOptions.map((option) => [
+      productColorKey(option),
+      mappedColorValue(batch.shipToIdsByColor, option, []) || []
+    ]));
+    const shipToQtyByColor = Object.fromEntries(selectedOptions.map((option) => {
+      const colorKey = productColorKey(option);
+      const ids = shipToIdsByColor[colorKey] || [];
+      return [colorKey, legacyAwareShipToQty(
+        mappedColorValue(batch.shipToQtyByColor, option, {}),
+        ids,
+        mappedColorValue(batch.poQtyByColor, option, '')
+      )];
+    }));
+
     setBatchEditTarget(batch);
     setBatchEditForm({
-      poQtyByColor: Object.fromEntries((batch.colors || []).map((color) => [color, batch.poQtyByColor?.[color] ?? ''])),
-      shipToIdsByColor: Object.fromEntries((batch.colors || []).map((color) => [color, batch.shipToIdsByColor?.[color] || []]))
+      colors: colorKeys,
+      packingIds: [...(batch.packingIds || [])],
+      poQtyByColor: Object.fromEntries(selectedOptions.map((option) => {
+        const colorKey = productColorKey(option);
+        return [colorKey, sumShipToQty(shipToQtyByColor[colorKey] || {}, shipToIdsByColor[colorKey] || [])];
+      })),
+      shipToIdsByColor,
+      shipToQtyByColor
     });
   };
 
-  const changeBatchPoQty = (color, value) => {
+  const toggleBatchColor = (colorId) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
-    setBatchEditForm((current) => ({
-      ...current,
-      poQtyByColor: { ...current.poQtyByColor, [color]: value }
-    }));
+    setBatchEditForm((current) => {
+      const colors = new Set(current.colors || []);
+      const poQtyByColor = { ...(current.poQtyByColor || {}) };
+      const shipToIdsByColor = { ...(current.shipToIdsByColor || {}) };
+      const shipToQtyByColor = { ...(current.shipToQtyByColor || {}) };
+      if (colors.has(colorId)) {
+        colors.delete(colorId);
+        delete poQtyByColor[colorId];
+        delete shipToIdsByColor[colorId];
+        delete shipToQtyByColor[colorId];
+      } else {
+        colors.add(colorId);
+        poQtyByColor[colorId] = '';
+        shipToIdsByColor[colorId] = [];
+        shipToQtyByColor[colorId] = {};
+      }
+      return { ...current, colors: Array.from(colors), poQtyByColor, shipToIdsByColor, shipToQtyByColor };
+    });
+  };
+
+  const toggleBatchPacking = (packingId) => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    setBatchEditForm((current) => {
+      const packingIds = new Set(current.packingIds || []);
+      if (packingIds.has(packingId)) packingIds.delete(packingId);
+      else packingIds.add(packingId);
+      return { ...current, packingIds: Array.from(packingIds) };
+    });
+  };
+
+  const changeBatchShipToQty = (color, shipToId, value) => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    setBatchEditForm((current) => {
+      const ids = current.shipToIdsByColor?.[color] || [];
+      const nextColorQty = { ...(current.shipToQtyByColor?.[color] || {}), [shipToId]: value };
+      return {
+        ...current,
+        shipToQtyByColor: { ...current.shipToQtyByColor, [color]: nextColorQty },
+        poQtyByColor: { ...current.poQtyByColor, [color]: sumShipToQty(nextColorQty, ids) }
+      };
+    });
   };
 
   const changeBatchShipTos = (color, selected) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
-    setBatchEditForm((current) => ({
-      ...current,
-      shipToIdsByColor: {
-        ...current.shipToIdsByColor,
-        [color]: (selected || []).map((item) => item.id).filter(Boolean)
-      }
-    }));
+    setBatchEditForm((current) => {
+      const selectedIds = (selected || []).map((item) => item.id).filter(Boolean);
+      const previousQty = current.shipToQtyByColor?.[color] || {};
+      const nextColorQty = Object.fromEntries(selectedIds.map((id) => [id, previousQty?.[id] ?? '']));
+      return {
+        ...current,
+        shipToIdsByColor: { ...current.shipToIdsByColor, [color]: selectedIds },
+        shipToQtyByColor: { ...current.shipToQtyByColor, [color]: nextColorQty },
+        poQtyByColor: { ...current.poQtyByColor, [color]: sumShipToQty(nextColorQty, selectedIds) }
+      };
+    });
   };
 
   const saveBatchEdit = async () => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     if (!batchEditTarget?.batchId) return;
-    const colors = batchEditTarget.colors || [];
+    const colors = batchEditForm.colors || [];
+    if (!colors.length) {
+      notify('Select at least one Product Color.', 'error');
+      return;
+    }
     for (const color of colors) {
-      const quantity = numberValue(batchEditForm.poQtyByColor?.[color]);
-      if (quantity === '' || Number(quantity) < 0) {
-        notify(`Enter a valid PO Qty for Product Color ${color}.`, 'error');
+      const selectedShipToIds = batchEditForm.shipToIdsByColor?.[color] || [];
+      if (!selectedShipToIds.length) {
+        notify('Select at least one Ship To for every selected Product Color.', 'error');
         return;
       }
-      if (!(batchEditForm.shipToIdsByColor?.[color] || []).length) {
-        notify(`Select at least one Ship To for Product Color ${color}.`, 'error');
-        return;
+      for (const shipToId of selectedShipToIds) {
+        const quantity = batchEditForm.shipToQtyByColor?.[color]?.[shipToId];
+        if (quantity === '' || quantity === null || quantity === undefined || !Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
+          notify('Enter a valid PO Qty for every selected Ship To.', 'error');
+          return;
+        }
       }
     }
 
     setBatchSaving(true);
     try {
       const result = await updateMprBatch(order.id, batchEditTarget.batchId, {
-        poQtyByColor: Object.fromEntries(colors.map((color) => [color, numberValue(batchEditForm.poQtyByColor?.[color])])),
-        shipToIdsByColor: Object.fromEntries(colors.map((color) => [color, batchEditForm.shipToIdsByColor?.[color] || []]))
+        colors,
+        packingIds: batchEditForm.packingIds || [],
+        poQtyByColor: Object.fromEntries(colors.map((color) => [
+          color, sumShipToQty(batchEditForm.shipToQtyByColor?.[color] || {}, batchEditForm.shipToIdsByColor?.[color] || [])
+        ])),
+        shipToIdsByColor: Object.fromEntries(colors.map((color) => [color, batchEditForm.shipToIdsByColor?.[color] || []])),
+        shipToQtyByColor: Object.fromEntries(colors.map((color) => [
+          color,
+          Object.fromEntries((batchEditForm.shipToIdsByColor?.[color] || []).map((shipToId) => [
+            shipToId, numberValue(batchEditForm.shipToQtyByColor?.[color]?.[shipToId])
+          ]))
+        ]))
       });
       setMpr(result);
       setPreview(null);
       setBatchEditTarget(null);
-      notify('PO Qty and Ship To were updated for every packing line in this batch.');
+      notify('Product Color, Packing and PO Qty by Ship To were updated for this MPR batch.');
     } catch (error) {
       notify(getApiError(error, 'Unable to update this MPR batch.'), 'error');
     } finally {
@@ -968,10 +1281,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
 
   const displayedMpr = preview || mpr;
   const unfilteredVisibleLines = displayedMpr?.lines || [];
-  const salesFilteredBoms = useMemo(
-    () => boms.filter((bom) => salesBomMatchesKeyword(bom, salesBomFilter.keyword)),
-    [boms, salesBomFilter.keyword]
-  );
   const mprFilterOptions = useMemo(() => {
     const productColors = new Map();
     const sources = new Map();
@@ -1000,94 +1309,278 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     () => unfilteredVisibleLines.filter((line) => mprLineMatchesFilters(line, mprFilters)),
     [unfilteredVisibleLines, mprFilters]
   );
+  const mprColumnTotals = useMemo(() => ({
+    poQuantity: sumMprColumn(visibleLines, 'poQuantity'),
+    matRequiredQuantity: sumMprColumn(visibleLines, 'matRequiredQuantity'),
+    purchaseQuantity: sumMprColumn(visibleLines, 'purchaseQuantity')
+  }), [visibleLines]);
   const subtotalMatAmountUsd = useMemo(
-    () => visibleLines.reduce((total, line) => {
-      const value = Number(line?.matAmountUsd);
-      return Number.isFinite(value) ? total + value : total;
-    }, 0),
+    () => sumMprColumn(visibleLines, 'matAmountUsd'),
     [visibleLines]
   );
   const canEditLines = Boolean(canWrite && mpr?.id && (!preview || preview?.id === mpr.id));
   const canManageBatches = Boolean(canWrite && mpr?.id && (!preview || preview?.id === mpr.id));
 
-  const batchSummaries = useMemo(() => {
-    const linesByBatch = new Map();
-
-    (mpr?.lines || []).forEach((line) => {
-      const batchId = line?.generationBatchId;
-      if (!batchId) return;
-
-      if (!linesByBatch.has(batchId)) linesByBatch.set(batchId, []);
-      linesByBatch.get(batchId).push(line);
-    });
-
-    return (mpr?.selections || [])
+  const batchSummaries = useMemo(() => (
+    (mpr?.selections || [])
       .filter((selectionItem) => selectionItem?.batchId)
       .map((selectionItem) => {
-        const lines = linesByBatch.get(selectionItem.batchId) || [];
+        const representedLines = (mpr?.lines || []).filter((line) => mprLineHasBatch(line, selectionItem.batchId));
+        const batchTraces = representedLines.flatMap((line) => (
+          mprLineSourceTraces(line).filter((trace) => trace?.generationBatchId === selectionItem.batchId)
+        ));
         const packingNames = Array.from(new Set(
-          lines
-            .map((line) => line?.packingName || line?.packingId || 'Core BOM (No Packing)')
-            .filter(Boolean)
+          batchTraces.map((trace) => (
+            String(trace?.section || '').toUpperCase() === 'PACKING'
+              ? (trace?.packingName || trace?.packingId || 'Packing')
+              : 'Core BOM (No Packing)'
+          )).filter(Boolean)
         ));
 
         return {
           batchId: selectionItem.batchId,
+          bomId: selectionItem.bomId || '',
           bomNo: selectionItem.bomNo || '',
           bomName: selectionItem.bomName || '',
           colors: selectionItem.colors || [],
+          packingIds: selectionItem.packingIds || [],
           packingNames,
           createdAt: selectionItem.createdAt,
           createdBy: selectionItem.createdBy,
           poQtyByColor: selectionItem.poQtyByColor || {},
           shipToIdsByColor: selectionItem.shipToIdsByColor || {},
+          shipToQtyByColor: selectionItem.shipToQtyByColor || {},
           shipToByColor: selectionItem.shipToByColor || {},
-          lineCount: lines.length
+          sourceLineCount: batchTraces.length,
+          lineCount: representedLines.length
         };
       })
-      .filter((batch) => batch.lineCount > 0)
+      .filter((batch) => batch.sourceLineCount > 0)
       .sort((left, right) => {
         const leftTime = left?.createdAt ? new Date(left.createdAt).getTime() : 0;
         const rightTime = right?.createdAt ? new Date(right.createdAt).getTime() : 0;
         if (leftTime !== rightTime) return rightTime - leftTime;
         return String(right?.batchId || '').localeCompare(String(left?.batchId || ''));
-      });
-  }, [mpr]);
+      })
+  ), [mpr]);
+
+  const bomBatchCountById = useMemo(() => {
+    const counts = new Map();
+    batchSummaries.forEach((batch) => {
+      if (!batch?.bomId) return;
+      counts.set(batch.bomId, (counts.get(batch.bomId) || 0) + 1);
+    });
+    return counts;
+  }, [batchSummaries]);
+
+  const selectedBomCount = useMemo(
+    () => boms.reduce((count, bom) => count + (selection[bom.id]?.selected ? 1 : 0), 0),
+    [boms, selection]
+  );
+
+  const filteredBoms = useMemo(() => boms.filter((bom) => {
+    const batchCount = bomBatchCountById.get(bom.id) || 0;
+    const isSelected = Boolean(selection[bom.id]?.selected);
+    const searchable = [
+      bom.bomNo,
+      bom.bomName,
+      bom.header?.styleNo,
+      bom.header?.styleNumber,
+      bom.header?.patternNumber,
+      bom.header?.season
+    ].filter(Boolean).join(' ');
+    const matchesKeyword = !bomSearch.trim() || includesText(searchable, bomSearch);
+    const matchesStatus = bomStatusFilter === 'ALL'
+      || (bomStatusFilter === 'ADDED' && batchCount > 0)
+      || (bomStatusFilter === 'NOT_ADDED' && batchCount === 0)
+      || (bomStatusFilter === 'SELECTED' && isSelected);
+    return matchesKeyword && matchesStatus;
+  }), [boms, bomBatchCountById, bomSearch, bomStatusFilter, selection]);
+
+  const pagedBoms = useMemo(() => {
+    const start = bomPage * bomRowsPerPage;
+    return filteredBoms.slice(start, start + bomRowsPerPage);
+  }, [filteredBoms, bomPage, bomRowsPerPage]);
+
+  const filteredBatches = useMemo(() => batchSummaries.filter((batch) => {
+    const searchable = [
+      batch.bomNo,
+      batch.bomName,
+      ...(batch.colors || []),
+      ...(batch.packingNames || []),
+      batch.createdBy
+    ].filter(Boolean).join(' ');
+    return !batchSearch.trim() || includesText(searchable, batchSearch);
+  }), [batchSummaries, batchSearch]);
+
+  const pagedBatches = useMemo(() => {
+    const start = batchPage * batchRowsPerPage;
+    return filteredBatches.slice(start, start + batchRowsPerPage);
+  }, [filteredBatches, batchPage, batchRowsPerPage]);
+
+  useEffect(() => {
+    setBomPage(0);
+  }, [bomSearch, bomStatusFilter, bomRowsPerPage]);
+
+  useEffect(() => {
+    setBatchPage(0);
+  }, [batchSearch, batchRowsPerPage]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(filteredBoms.length / bomRowsPerPage) - 1);
+    if (bomPage > maxPage) setBomPage(maxPage);
+  }, [filteredBoms.length, bomPage, bomRowsPerPage]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(filteredBatches.length / batchRowsPerPage) - 1);
+    if (batchPage > maxPage) setBatchPage(maxPage);
+  }, [filteredBatches.length, batchPage, batchRowsPerPage]);
+
+  const openBomConfiguration = (bom) => {
+    if (!canWrite || !bom?.id) return;
+    setSelection((current) => ({
+      ...current,
+      [bom.id]: {
+        ...(current[bom.id] || emptyBomSelection()),
+        selected: true
+      }
+    }));
+    setExpandedBomId((current) => current === bom.id ? null : bom.id);
+  };
+
+  const batchEditBom = useMemo(
+    () => boms.find((bom) => bom.id === batchEditTarget?.bomId) || null,
+    [boms, batchEditTarget?.bomId]
+  );
+  const batchEditProductColors = useMemo(
+    () => productColorsForBom(batchEditBom),
+    [batchEditBom]
+  );
 
   const generationBusy = generateProgress.status === 'processing';
   const exportBusy = exportProgress.status === 'processing';
-  const operationBusy = generationBusy || exportBusy;
+  const operationBusy = generationBusy || exportBusy || mprUploading;
 
   return (
     <Box>
-      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
-        <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" spacing={2}>
-          <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Sales / MPR</Typography>
+      <Paper elevation={0} sx={{ px: 1.4, py: 1.15, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
+        <Stack direction={{ xs: 'column', xl: 'row' }} justifyContent="space-between" spacing={1} alignItems={{ xl: 'center' }}>
+          <Box sx={{ minWidth: 220 }}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography sx={{ fontWeight: 900, color: '#103B5C', fontSize: '1rem' }}>Sales / MPR</Typography>
+              {mpr && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={`${mpr?.lines?.length || 0} MPR line(s)`}
+                  sx={{ height: 24, fontWeight: 800, color: '#475569', borderColor: '#cbd5e1' }}
+                />
+              )}
+            </Stack>
+            <Typography sx={{ mt: 0.35, fontSize: '.76rem', color: 'text.secondary' }}>
+              Select submitted BOMs, configure Product Color and Ship To, then add them to the MPR.
+            </Typography>
           </Box>
-          <Stack direction="row" flexWrap="wrap" spacing={1}>
-            <Button startIcon={<Refresh />} onClick={load} disabled={loading || operationBusy} sx={{ textTransform: 'none' }}>Refresh</Button>
+
+          <Stack direction="row" flexWrap="wrap" useFlexGap spacing={0.75} alignItems="center" justifyContent={{ xs: 'flex-start', xl: 'flex-end' }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Refresh />}
+              onClick={load}
+              disabled={loading || operationBusy}
+              sx={mprNeutralActionButtonSx}
+            >
+              Refresh
+            </Button>
             {mpr && (
               <>
                 <Button
+                  size="small"
+                  variant="outlined"
                   startIcon={<Download />}
                   onClick={exportMprExcel}
                   disabled={loading || operationBusy}
-                  sx={{ textTransform: 'none' }}
+                  sx={{ ...mprNeutralActionButtonSx, minWidth: 116 }}
                 >
-                  {exportBusy ? 'Exporting Excel...' : 'Export MPR'}
+                  {exportBusy ? 'Exporting...' : 'Export MPR'}
                 </Button>
-                <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete MPR'}><span><Button color="error" startIcon={<Delete />} onClick={() => setDeleteOpen(true)} disabled={!canWrite || operationBusy} sx={{ textTransform: 'none' }}>
-                  Delete MPR
-                </Button></span></Tooltip>
+                <Tooltip title={!canWrite ? writeBlockedMessage : 'Upload edited SAMPLE QTY, MCD STOCK, CMCD STOCK and NON SAP STOCK QTY values'}>
+                  <span>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<FileUpload />}
+                      onClick={() => mprUploadRef.current?.click()}
+                      disabled={loading || operationBusy || !canWrite}
+                      sx={{ ...mprNeutralActionButtonSx, minWidth: 118 }}
+                    >
+                      {mprUploading ? 'Uploading...' : 'Upload MPR'}
+                    </Button>
+                  </span>
+                </Tooltip>
+                <input
+                  ref={mprUploadRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  hidden
+                  onChange={uploadEditedMprExcel}
+                />
               </>
             )}
-            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : 'Preview MPR')}><span><Button variant="outlined" startIcon={<Preview />} onClick={previewMprAction} disabled={loading || operationBusy || !canWrite || !llBeanMprEnabled} sx={{ textTransform: 'none' }}>
-              Preview MPR
-            </Button></span></Tooltip>
-            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : (mpr ? 'Add To MPR' : 'Create MPR'))}><span><Button variant="contained" startIcon={<Save />} onClick={generate} disabled={loading || operationBusy || !canWrite || !llBeanMprEnabled} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
-              {generationBusy ? 'Creating MPR...' : (mpr ? 'Add To MPR' : 'Create MPR')}
-            </Button></span></Tooltip>
+
+            <Box sx={{ display: { xs: 'none', md: 'block' }, height: 28, borderLeft: '1px solid #e2e8f0', mx: 0.25 }} />
+
+            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : (selectedBomCount ? 'Preview selected BOM configuration' : 'Select at least one BOM first'))}>
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<Preview />}
+                  onClick={previewMprAction}
+                  disabled={loading || operationBusy || !canWrite || !llBeanMprEnabled || selectedBomCount === 0}
+                  sx={mprPreviewActionButtonSx}
+                >
+                  Preview{selectedBomCount > 0 ? ` (${selectedBomCount})` : ''}
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : (selectedBomCount ? (mpr ? 'Add selected BOMs to MPR' : 'Create MPR from selected BOMs') : 'Select at least one BOM first'))}>
+              <span>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<Save />}
+                  onClick={generate}
+                  disabled={loading || operationBusy || !canWrite || !llBeanMprEnabled || selectedBomCount === 0}
+                  sx={{ ...mprPrimaryActionButtonSx, minWidth: 126 }}
+                >
+                  {generationBusy ? 'Creating...' : `${mpr ? 'Add To MPR' : 'Create MPR'}${selectedBomCount > 0 ? ` (${selectedBomCount})` : ''}`}
+                </Button>
+              </span>
+            </Tooltip>
+
+            {mpr && (
+              <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete the entire MPR'}>
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    startIcon={<Delete />}
+                    onClick={() => setDeleteOpen(true)}
+                    disabled={!canWrite || operationBusy}
+                    sx={{
+                      ...mprActionButtonSx,
+                      backgroundColor: '#ffffff',
+                      '&:hover': { backgroundColor: '#fff7f7', boxShadow: 'none' }
+                    }}
+                  >
+                    Delete MPR
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
           </Stack>
         </Stack>
       </Paper>
@@ -1098,215 +1591,509 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
         </Alert>
       )}
 
-      <Stack spacing={1.5}>
-        {boms.length === 0 && (
-          <Paper elevation={0} sx={{ p: 3, textAlign: 'center', border: '1px solid #e5e7eb', borderRadius: 2, color: 'text.secondary' }}>
-            No submitted BOM is available. BOM/Admin must submit a BOM first.
-          </Paper>
+      <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
+        <Box sx={{ px: 1.5, borderBottom: '1px solid #e5e7eb', backgroundColor: '#ffffff' }}>
+          <Tabs
+            value={workspaceTab}
+            onChange={(_, value) => setWorkspaceTab(value)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ minHeight: 40, '& .MuiTab-root': { minHeight: 40, py: 0.75, textTransform: 'none', fontWeight: 850, fontSize: '.8rem' } }}
+          >
+            <Tab value="sources" label={`BOM Sources (${boms.length})`} />
+            <Tab value="batches" label={`Generation Batches (${batchSummaries.length})`} />
+          </Tabs>
+        </Box>
+
+        {workspaceTab === 'sources' && (
+          <Box>
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={1}
+              justifyContent="space-between"
+              alignItems={{ md: 'center' }}
+              sx={{ px: 1.25, py: 1, backgroundColor: '#fbfdff', borderBottom: '1px solid #e5e7eb' }}
+            >
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ flex: 1, maxWidth: 760 }}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  value={bomSearch}
+                  onChange={(event) => setBomSearch(event.target.value)}
+                  placeholder="Search BOM no., BOM name, style, pattern or season..."
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon sx={{ fontSize: 18, color: '#64748b' }} />
+                      </InputAdornment>
+                    )
+                  }}
+                />
+                <TextField
+                  select
+                  size="small"
+                  label="Status"
+                  value={bomStatusFilter}
+                  onChange={(event) => setBomStatusFilter(event.target.value)}
+                  sx={{ minWidth: { xs: '100%', sm: 160 } }}
+                >
+                  <MenuItem value="ALL">All BOMs</MenuItem>
+                  <MenuItem value="NOT_ADDED">Not Added</MenuItem>
+                  <MenuItem value="ADDED">Added to MPR</MenuItem>
+                  <MenuItem value="SELECTED">Selected</MenuItem>
+                </TextField>
+              </Stack>
+
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+                <Chip size="small" variant="outlined" label={`${filteredBoms.length} BOM(s)`} sx={{ fontWeight: 800 }} />
+                <Chip
+                  size="small"
+                  label={`${selectedBomCount} selected`}
+                  sx={{ fontWeight: 850, color: selectedBomCount ? '#1d4ed8' : '#64748b', backgroundColor: selectedBomCount ? '#eff6ff' : '#f8fafc' }}
+                />
+                {selectedBomCount > 0 && canWrite && (
+                  <Button size="small" onClick={resetSelection} sx={{ textTransform: 'none', fontWeight: 800 }}>
+                    Clear selection
+                  </Button>
+                )}
+              </Stack>
+            </Stack>
+
+            {boms.length === 0 ? (
+              <Box sx={{ p: 4, textAlign: 'center' }}>
+                <Typography sx={{ fontWeight: 850, color: '#475569' }}>No submitted BOM is available.</Typography>
+                <Typography sx={{ mt: 0.4, fontSize: '.8rem', color: 'text.secondary' }}>BOM/Admin must submit a BOM first.</Typography>
+              </Box>
+            ) : (
+              <>
+                <TableContainer sx={{ maxHeight: 660 }}>
+                  <Table stickyHeader size="small" sx={{ minWidth: 900 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell padding="checkbox" sx={{ width: 44, backgroundColor: '#f8fafc' }} />
+                        <TableCell sx={{ fontWeight: 900, backgroundColor: '#f8fafc' }}>BOM</TableCell>
+                        <TableCell align="right" sx={{ width: 90, fontWeight: 900, backgroundColor: '#f8fafc' }}>Core</TableCell>
+                        <TableCell align="right" sx={{ width: 90, fontWeight: 900, backgroundColor: '#f8fafc' }}>Total</TableCell>
+                        <TableCell align="right" sx={{ width: 100, fontWeight: 900, backgroundColor: '#f8fafc' }}>Packings</TableCell>
+                        <TableCell sx={{ width: 150, fontWeight: 900, backgroundColor: '#f8fafc' }}>MPR Status</TableCell>
+                        <TableCell align="right" sx={{ width: 185, fontWeight: 900, backgroundColor: '#f8fafc' }}>Action</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {pagedBoms.map((bom) => {
+                        const state = selection[bom.id] || emptyBomSelection();
+                        const productColors = productColorsForBom(bom);
+                        const coreSourceRows = Number(bom.coreLineCount ?? (bom.coreLines || []).length) || 0;
+                        const totalSourceRows = Number(bom.lineCount ?? ((bom.coreLines || []).length + (bom.packings || []).reduce((total, packing) => total + (packing.lineCount ?? (packing.lines || []).length), 0))) || 0;
+                        const batchCount = bomBatchCountById.get(bom.id) || 0;
+                        const isExpanded = expandedBomId === bom.id && state.selected;
+                        const selectedPackingDetails = (bom.packings || [])
+                          .filter((packing) => (state.packingIds || []).includes(packing.id))
+                          .map((packing) => ({
+                            name: packing.packingName || 'Packing',
+                            count: Number(packing.lineCount ?? (packing.lines || []).length) || 0
+                          }));
+                        const selectedPackingSourceRows = selectedPackingDetails.reduce((total, item) => total + item.count, 0);
+                        const sourceRowsPerColor = coreSourceRows + selectedPackingSourceRows;
+                        const selectedColorCount = (state.colors || []).length;
+
+                        return (
+                          <Fragment key={bom.id}>
+                            <TableRow
+                              hover
+                              selected={Boolean(state.selected)}
+                              sx={{
+                                '&.Mui-selected': { backgroundColor: '#f5f9ff' },
+                                '&.Mui-selected:hover': { backgroundColor: '#eef6ff' }
+                              }}
+                            >
+                              <TableCell padding="checkbox">
+                                <Checkbox
+                                  size="small"
+                                  checked={Boolean(state.selected)}
+                                  disabled={!canWrite}
+                                  onChange={(event) => toggleBom(bom.id, event.target.checked)}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Typography sx={{ fontWeight: 900, color: '#0f172a', fontSize: '.83rem' }}>
+                                  {bom.bomNo || '-'}{bom.bomName ? ` — ${bom.bomName}` : ''}
+                                </Typography>
+                                <Typography sx={{ mt: 0.15, fontSize: '.72rem', color: 'text.secondary' }}>
+                                  {[bom.header?.patternNumber, bom.header?.season].filter(Boolean).join(' · ') || 'Submitted BOM'}
+                                </Typography>
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 750 }}>{coreSourceRows}</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 750 }}>{totalSourceRows}</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 750 }}>{(bom.packings || []).length}</TableCell>
+                              <TableCell>
+                                {batchCount > 0 ? (
+                                  <Chip
+                                    size="small"
+                                    label={`${batchCount} batch${batchCount > 1 ? 'es' : ''}`}
+                                    sx={{ height: 24, fontWeight: 850, color: '#166534', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}
+                                  />
+                                ) : (
+                                  <Chip
+                                    size="small"
+                                    variant="outlined"
+                                    label="Not added"
+                                    sx={{ height: 24, fontWeight: 800, color: '#64748b', borderColor: '#cbd5e1' }}
+                                  />
+                                )}
+                              </TableCell>
+                              <TableCell align="right">
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={<Edit sx={{ fontSize: '16px !important' }} />}
+                                  disabled={!canWrite}
+                                  onClick={() => openBomConfiguration(bom)}
+                                  sx={{
+                                    minWidth: 148,
+                                    px: 1.4,
+                                    py: 0.55,
+                                    borderRadius: 1.5,
+                                    textTransform: 'none',
+                                    whiteSpace: 'nowrap',
+                                    fontWeight: 850,
+                                    color: isExpanded ? '#475569' : '#2563eb',
+                                    borderColor: isExpanded ? '#cbd5e1' : '#bfdbfe',
+                                    backgroundColor: isExpanded ? '#f8fafc' : '#ffffff',
+                                    '&:hover': {
+                                      borderColor: isExpanded ? '#94a3b8' : '#60a5fa',
+                                      backgroundColor: isExpanded ? '#f1f5f9' : '#eff6ff'
+                                    }
+                                  }}
+                                >
+                                  {!state.selected ? 'Select & Configure' : isExpanded ? 'Close Setup' : 'Configure'}
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+
+                            {isExpanded && (
+                              <TableRow>
+                                <TableCell colSpan={7} sx={{ p: 0, borderBottom: '1px solid #cbd5e1' }}>
+                                  <Box sx={{ p: { xs: 1, md: 1.25 }, backgroundColor: '#fbfdff', borderTop: '1px solid #dbeafe' }}>
+                                    <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 1.25 }}>
+                                      <Box>
+                                        <Typography sx={{ fontWeight: 900, color: '#103B5C', fontSize: '.86rem' }}>
+                                          Configure {bom.bomNo || 'BOM'}
+                                        </Typography>
+                                        <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>
+                                          Select Product Color, Ship To quantities and optional Packing sources.
+                                        </Typography>
+                                      </Box>
+                                      <Chip
+                                        size="small"
+                                        variant="outlined"
+                                        label={`${selectedColorCount} color(s) selected`}
+                                        sx={{ alignSelf: { xs: 'flex-start', md: 'center' }, fontWeight: 800 }}
+                                      />
+                                    </Stack>
+
+                                    <Typography sx={{ fontSize: '.78rem', fontWeight: 900, mb: 0.75 }}>
+                                      1. Product Color / Ship To / PO Qty
+                                    </Typography>
+                                    <Stack spacing={0.85}>
+                                      {productColors.map((productColor) => {
+                                        const colorId = productColor.id || productColor.colorName;
+                                        const checked = (state.colors || []).includes(colorId);
+                                        const selectedShipToIds = state.shipToIdsByColor?.[colorId] || [];
+                                        const selectedShipTos = shipTos.filter((item) => selectedShipToIds.includes(item.id));
+                                        return (
+                                          <Box
+                                            key={colorId}
+                                            sx={{
+                                              p: 1,
+                                              border: `1px solid ${checked ? '#bfdbfe' : '#e5e7eb'}`,
+                                              borderRadius: 1.25,
+                                              backgroundColor: checked ? '#ffffff' : '#f8fafc'
+                                            }}
+                                          >
+                                            <Stack direction={{ xs: 'column', md: 'row' }} alignItems={{ md: 'flex-start' }} spacing={1.25}>
+                                              <FormControlLabel
+                                                sx={{ flex: '0 0 260px', mr: 0, mt: 0.15 }}
+                                                control={<Checkbox size="small" checked={checked} disabled={!canWrite} onChange={() => toggleColor(bom.id, colorId)} />}
+                                                label={<Typography sx={{ fontSize: '.8rem', fontWeight: checked ? 800 : 600 }}>{productColorLabel(productColor)}</Typography>}
+                                              />
+                                              {checked && (
+                                                <Box sx={{ flex: 1, minWidth: 0 }}>
+                                                  <Autocomplete
+                                                    multiple
+                                                    size="small"
+                                                    disabled={!canWrite}
+                                                    options={shipTos}
+                                                    value={selectedShipTos}
+                                                    onChange={(_, selected) => changeShipTos(bom.id, colorId, selected)}
+                                                    getOptionLabel={shipToDisplayLabel}
+                                                    isOptionEqualToValue={(option, value) => option.id === value.id}
+                                                    renderInput={(params) => <TextField {...params} required label="Ship To" placeholder="Select one or more" />}
+                                                    sx={{ width: '100%' }}
+                                                  />
+                                                  {selectedShipTos.length > 0 && (
+                                                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                                                      {selectedShipTos.map((shipTo) => (
+                                                        <TextField
+                                                          key={shipTo.id}
+                                                          label={`PO Qty · ${shipTo.shipToCode || shipTo.shipToName || 'Ship To'}`}
+                                                          type="number"
+                                                          required
+                                                          size="small"
+                                                          value={state.shipToQtyByColor?.[colorId]?.[shipTo.id] ?? ''}
+                                                          onChange={(event) => changeShipToQty(bom.id, colorId, shipTo.id, event.target.value)}
+                                                          inputProps={{ min: 0, step: 'any' }}
+                                                          disabled={!canWrite}
+                                                          helperText={shipTo.shipToCode && shipTo.shipToName ? shipTo.shipToName : ''}
+                                                          sx={{ width: { xs: '100%', sm: 190 } }}
+                                                        />
+                                                      ))}
+                                                      <Chip
+                                                        variant="outlined"
+                                                        label={`Total PO Qty: ${formatValue(sumShipToQty(state.shipToQtyByColor?.[colorId] || {}, selectedShipToIds))}`}
+                                                        sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, fontWeight: 850 }}
+                                                      />
+                                                    </Stack>
+                                                  )}
+                                                </Box>
+                                              )}
+                                            </Stack>
+                                          </Box>
+                                        );
+                                      })}
+                                    </Stack>
+
+                                    <Typography sx={{ fontSize: '.78rem', fontWeight: 900, mt: 1.5, mb: 0.35 }}>
+                                      2. Packing Sources (Optional)
+                                    </Typography>
+                                    {(bom.packings || []).length > 0 ? (
+                                      <Stack direction="row" flexWrap="wrap" useFlexGap spacing={0.25}>
+                                        {(bom.packings || []).map((packing) => (
+                                          <FormControlLabel
+                                            key={packing.id}
+                                            sx={{ mr: 1.25 }}
+                                            control={<Checkbox size="small" checked={(state.packingIds || []).includes(packing.id)} disabled={!canWrite} onChange={() => togglePacking(bom.id, packing.id)} />}
+                                            label={<Typography sx={{ fontSize: '.78rem' }}>{packing.packingName} ({Number(packing.lineCount ?? (packing.lines || []).length) || 0})</Typography>}
+                                          />
+                                        ))}
+                                      </Stack>
+                                    ) : (
+                                      <Typography sx={{ fontSize: '.76rem', color: 'text.secondary' }}>No packing source is available for this BOM.</Typography>
+                                    )}
+
+                                    <Alert severity="info" sx={{ mt: 1.25, py: 0.25 }}>
+                                      <Typography sx={{ fontSize: '.76rem', fontWeight: 800 }}>
+                                        Per color: {coreSourceRows} Core
+                                        {selectedPackingDetails.map((item) => ` + ${item.count} ${item.name}`).join('')}
+                                        {' = '}{sourceRowsPerColor} source row(s)
+                                        {selectedColorCount > 0 ? ` · Estimated total: ${sourceRowsPerColor * selectedColorCount} row(s) before consolidation.` : ''}
+                                      </Typography>
+                                    </Alert>
+                                  </Box>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                      {pagedBoms.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                            <Typography sx={{ fontWeight: 800, color: '#64748b' }}>No BOM matches the current search/filter.</Typography>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                <TablePagination
+                  component="div"
+                  count={filteredBoms.length}
+                  page={bomPage}
+                  onPageChange={(_, nextPage) => setBomPage(nextPage)}
+                  rowsPerPage={bomRowsPerPage}
+                  onRowsPerPageChange={(event) => setBomRowsPerPage(Number(event.target.value))}
+                  rowsPerPageOptions={[10, 20, 50, 100]}
+                  labelRowsPerPage="BOMs per page"
+                  sx={{ borderTop: '1px solid #e5e7eb' }}
+                />
+              </>
+            )}
+          </Box>
         )}
 
-        {boms.length > 0 && (
-          <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2 }}>
-            <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={0.75} alignItems={{ md: 'center' }}>
-              <Box>
-                <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Sales BOM Search</Typography>
-              </Box>
-              <Typography sx={{ fontSize: '.78rem', color: 'text.secondary', fontWeight: 700 }}>
-                Showing {salesFilteredBoms.length} / {boms.length} BOM(s)
-              </Typography>
-            </Stack>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+        {workspaceTab === 'batches' && (
+          <Box>
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={1}
+              justifyContent="space-between"
+              alignItems={{ md: 'center' }}
+              sx={{ px: 1.25, py: 1, backgroundColor: '#fbfdff', borderBottom: '1px solid #e5e7eb' }}
+            >
               <TextField
                 size="small"
-                label="Keyword"
-                value={salesBomFilter.keyword}
-                onChange={(event) => setSalesBomFilter({ keyword: event.target.value })}
-                placeholder="BOM No, Product Color, Packing..."
-                sx={{ minWidth: { xs: '100%', sm: 340 }, flex: 1 }}
-              />
-              <Button
-                variant="outlined"
-                startIcon={<RestartAlt />}
-                onClick={() => setSalesBomFilter(emptySalesBomFilter)}
-                sx={{ textTransform: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}
-              >
-                Reset
-              </Button>
-            </Stack>
-          </Paper>
-        )}
-
-        {boms.length > 0 && salesFilteredBoms.length === 0 && (
-          <Paper elevation={0} sx={{ p: 2.5, textAlign: 'center', border: '1px solid #e5e7eb', borderRadius: 2, color: 'text.secondary' }}>
-            No submitted BOM matches the current Sales search.
-          </Paper>
-        )}
-
-        {salesFilteredBoms.map((bom) => {
-          const state = selection[bom.id] || emptyBomSelection();
-          const productColors = productColorsForBom(bom);
-
-          return (
-            <Paper key={bom.id} elevation={0} sx={{ p: 2, border: `1px solid ${state.selected ? '#93c5fd' : '#e5e7eb'}`, borderRadius: 2 }}>
-              <FormControlLabel
-                control={<Checkbox checked={Boolean(state.selected)} disabled={!canWrite} onChange={(event) => toggleBom(bom.id, event.target.checked)} />}
-                label={(
-                  <Box>
-                    <Typography sx={{ fontWeight: 900 }}>{bom.bomNo} — {bom.bomName}</Typography>
-                    <Typography sx={{ fontSize: '.78rem', color: 'text.secondary' }}>
-                      {bom.coreLineCount ?? (bom.coreLines || []).length} core lines · {bom.lineCount ?? ((bom.coreLines || []).length + (bom.packings || []).reduce((total, packing) => total + (packing.lineCount ?? (packing.lines || []).length), 0))} total lines · {(bom.packings || []).length} packings
-                    </Typography>
-                  </Box>
-                )}
-              />
-
-              {state.selected && (
-                <Box sx={{ ml: { sm: 4 }, mt: 1 }}>
-                  <Divider sx={{ mb: 1.25 }} />
-                  <Typography sx={{ fontSize: '.8rem', fontWeight: 900, mb: 0.75 }}>
-                    1. Select Product Color, Enter PO Qty And Ship To
-                  </Typography>
-
-                  <Stack spacing={0.75}>
-                    {productColors.map((productColor) => {
-                      const colorId = productColor.id || productColor.colorName;
-                      const checked = (state.colors || []).includes(colorId);
-                      return (
-                        <Stack key={colorId} direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} spacing={1} sx={{ maxWidth: 980 }}>
-                          <FormControlLabel
-                            sx={{ flex: 1, mr: 0 }}
-                            control={<Checkbox size="small" checked={checked} disabled={!canWrite} onChange={() => toggleColor(bom.id, colorId)} />}
-                            label={<Typography sx={{ fontSize: '.82rem' }}>{productColorLabel(productColor)}</Typography>}
-                          />
-                          {checked && (
-                            <>
-                              <TextField
-                                label="PO Qty"
-                                type="number"
-                                required
-                                size="small"
-                                value={state.poQtyByColor?.[colorId] ?? ''}
-                                onChange={(event) => changePoQty(bom.id, colorId, event.target.value)}
-                                inputProps={{ min: 0, step: 'any' }}
-                                disabled={!canWrite}
-                                sx={{ width: { xs: '100%', sm: 150 } }}
-                              />
-                              <Autocomplete
-                                multiple
-                                size="small"
-                                disabled={!canWrite}
-                                options={shipTos}
-                                value={shipTos.filter((item) => (state.shipToIdsByColor?.[colorId] || []).includes(item.id))}
-                                onChange={(_, selected) => changeShipTos(bom.id, colorId, selected)}
-                                getOptionLabel={(item) => [item.shipToCode, item.shipToName].filter(Boolean).join(' · ')}
-                                isOptionEqualToValue={(option, value) => option.id === value.id}
-                                renderInput={(params) => <TextField {...params} required label="Ship To" placeholder="Select one or more" />}
-                                sx={{ width: { xs: '100%', sm: 360 } }}
-                              />
-                            </>
-                          )}
-                        </Stack>
-                      );
-                    })}
-                  </Stack>
-
-                  <Typography sx={{ fontSize: '.8rem', fontWeight: 900, mt: 1.5, mb: 0.2 }}>
-                    2. Add Packing (Optional)
-                  </Typography>
-                  <Stack direction="row" flexWrap="wrap">
-                    {(bom.packings || []).map((packing) => (
-                      <FormControlLabel
-                        key={packing.id}
-                        control={<Checkbox size="small" checked={(state.packingIds || []).includes(packing.id)} disabled={!canWrite} onChange={() => togglePacking(bom.id, packing.id)} />}
-                        label={<Typography sx={{ fontSize: '.8rem' }}>{packing.packingName}</Typography>}
-                      />
-                    ))}
-                  </Stack>
-                </Box>
-              )}
-            </Paper>
-          );
-        })}
-      </Stack>
-
-      {mpr && batchSummaries.length > 0 && (
-        <Paper elevation={0} sx={{ mt: 2, p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 1.25 }}>
-            <Box>
-              <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>MPR Generation Batches</Typography>
-            </Box>
-          </Stack>
-
-          <Stack spacing={1}>
-            {batchSummaries.map((batch, index) => (
-              <Box
-                key={batch.batchId}
-                sx={{
-                  p: 1.25,
-                  border: '1px solid #dbe3ef',
-                  borderRadius: 1.5,
-                  backgroundColor: '#fbfdff'
+                value={batchSearch}
+                onChange={(event) => setBatchSearch(event.target.value)}
+                placeholder="Search batch by BOM, Product Color, Packing or user..."
+                sx={{ width: { xs: '100%', md: 520 } }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon sx={{ fontSize: 18, color: '#64748b' }} />
+                    </InputAdornment>
+                  )
                 }}
-              >
-                <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.25}>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>
-                      Batch {index + 1} · {batch.bomNo || 'BOM'}{batch.bomName ? ` — ${batch.bomName}` : ''}
-                    </Typography>
-                    <Typography sx={{ mt: 0.35, fontSize: '.8rem' }}>
-                      Product Color: {batch.colors.length ? batch.colors.join(', ') : '-'}
-                    </Typography>
-                    <Typography sx={{ mt: 0.2, fontSize: '.8rem' }}>
-                      Sources: {batch.packingNames.length ? batch.packingNames.join(', ') : '-'}
-                    </Typography>
-                    {(batch.colors || []).map((color) => (
-                      <Typography key={color} sx={{ mt: 0.2, fontSize: '.76rem', color: 'text.secondary' }}>
-                        {color}: PO Qty {formatValue(batch.poQtyByColor?.[color] ?? 0)} · Ship To {batch.shipToByColor?.[color] || '-'}
-                      </Typography>
-                    ))}
-                    <Typography sx={{ mt: 0.2, fontSize: '.76rem', color: 'text.secondary' }}>
-                      {batch.lineCount} MPR Line(s)
-                      {batch.createdAt ? ` · Created ${formatDateTime(batch.createdAt)}` : ''}
-                      {batch.createdBy ? ` · ${batch.createdBy}` : ''}
-                    </Typography>
-                  </Box>
+              />
+              <Chip size="small" variant="outlined" label={`${filteredBatches.length} batch(es)`} sx={{ fontWeight: 800 }} />
+            </Stack>
 
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ alignSelf: { xs: 'flex-start', md: 'center' } }}>
-                    <Button
-                      variant="outlined"
-                      startIcon={<Edit />}
-                      disabled={!canManageBatches || batchSaving}
-                      onClick={() => openBatchEdit(batch)}
-                      sx={{ textTransform: 'none' }}
-                    >
-                      Update Qty / Ship To
-                    </Button>
-                    <Button
-                      color="error"
-                      variant="outlined"
-                      startIcon={<Delete />}
-                      disabled={!canManageBatches || batchDeleting || batchSaving}
-                      onClick={() => setBatchDeleteTarget(batch)}
-                      sx={{ textTransform: 'none' }}
-                    >
-                      Delete Batch
-                    </Button>
-                  </Stack>
-                </Stack>
+            {!mpr || batchSummaries.length === 0 ? (
+              <Box sx={{ p: 4, textAlign: 'center' }}>
+                <Typography sx={{ fontWeight: 850, color: '#475569' }}>No generation batch is available yet.</Typography>
+                <Typography sx={{ mt: 0.4, fontSize: '.8rem', color: 'text.secondary' }}>Select BOM Sources and add them to the MPR to create the first batch.</Typography>
+                <Button size="small" onClick={() => setWorkspaceTab('sources')} sx={{ mt: 1, textTransform: 'none', fontWeight: 850 }}>
+                  Go to BOM Sources
+                </Button>
               </Box>
-            ))}
-          </Stack>
-        </Paper>
-      )}
+            ) : (
+              <>
+                <Box sx={{ p: 1.25 }}>
+                  {pagedBatches.map((batch, index) => {
+                    const batchNumber = (batchPage * batchRowsPerPage) + index + 1;
+                    const totalPoQty = (batch.colors || []).reduce((total, color) => total + (Number(batch.poQtyByColor?.[color]) || 0), 0);
+                    return (
+                      <Accordion
+                        key={batch.batchId}
+                        disableGutters
+                        expanded={expandedBatchId === batch.batchId}
+                        onChange={(_, expanded) => setExpandedBatchId(expanded ? batch.batchId : null)}
+                        elevation={0}
+                        sx={{
+                          mb: 1,
+                          border: '1px solid #dbe3ef',
+                          borderRadius: '10px !important',
+                          overflow: 'hidden',
+                          '&:before': { display: 'none' }
+                        }}
+                      >
+                        <AccordionSummary
+                          expandIcon={<ExpandMore />}
+                          sx={{
+                            minHeight: 58,
+                            backgroundColor: expandedBatchId === batch.batchId ? '#f8fbff' : '#ffffff',
+                            '& .MuiAccordionSummary-content': { my: 1 }
+                          }}
+                        >
+                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 0.5, md: 1.5 }} alignItems={{ md: 'center' }} sx={{ width: '100%', minWidth: 0, pr: 1 }}>
+                            <Chip size="small" label={`Batch ${batchNumber}`} sx={{ fontWeight: 850, color: '#103B5C', backgroundColor: '#eef6ff' }} />
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Typography noWrap sx={{ fontWeight: 900, color: '#0f172a', fontSize: '.83rem' }}>
+                                {batch.bomNo || 'BOM'}{batch.bomName ? ` — ${batch.bomName}` : ''}
+                              </Typography>
+                              <Typography noWrap sx={{ mt: 0.1, fontSize: '.72rem', color: 'text.secondary' }}>
+                                {(batch.colors || []).length} color(s) · {batch.sourceLineCount} source row(s) → {batch.lineCount} final line(s)
+                                {batch.createdAt ? ` · ${formatDateTime(batch.createdAt)}` : ''}
+                              </Typography>
+                            </Box>
+                            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                              <Chip size="small" variant="outlined" label={`${formatValue(totalPoQty)} PO Qty`} sx={{ fontWeight: 800 }} />
+                              <Chip size="small" variant="outlined" label={`${(batch.packingNames || []).length} source group(s)`} sx={{ fontWeight: 800 }} />
+                            </Stack>
+                          </Stack>
+                        </AccordionSummary>
+                        <AccordionDetails sx={{ pt: 0, pb: 1.5, px: 1.5, backgroundColor: '#fbfdff', borderTop: '1px solid #e5e7eb' }}>
+                          <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ pt: 1.25 }}>
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Typography sx={{ fontSize: '.78rem' }}>
+                                <strong>Product Color:</strong> {batch.colors.length ? batch.colors.join(', ') : '-'}
+                              </Typography>
+                              <Typography sx={{ mt: 0.3, fontSize: '.78rem' }}>
+                                <strong>Sources:</strong> {batch.packingNames.length ? batch.packingNames.join(', ') : '-'}
+                              </Typography>
+                              {(batch.colors || []).map((color) => {
+                                const selectedIds = batch.shipToIdsByColor?.[color] || [];
+                                const qtyMap = batch.shipToQtyByColor?.[color] || {};
+                                const details = selectedIds.map((shipToId) => {
+                                  const shipTo = shipTos.find((item) => item.id === shipToId);
+                                  const label = shipTo ? shipToDisplayLabel(shipTo) : shipToId;
+                                  const qty = qtyMap?.[shipToId];
+                                  return qty === undefined || qty === null || qty === '' ? label : `${label}: ${formatValue(qty)}`;
+                                }).join(' | ');
+                                return (
+                                  <Box key={color} sx={{ mt: 0.65, p: 0.85, border: '1px solid #e2e8f0', borderRadius: 1, backgroundColor: '#ffffff' }}>
+                                    <Typography sx={{ fontSize: '.75rem', fontWeight: 850, color: '#334155' }}>
+                                      {color} · Total PO Qty {formatValue(batch.poQtyByColor?.[color] ?? 0)}
+                                    </Typography>
+                                    <Typography sx={{ mt: 0.15, fontSize: '.73rem', color: 'text.secondary' }}>
+                                      Ship To: {details || batch.shipToByColor?.[color] || '-'}
+                                    </Typography>
+                                  </Box>
+                                );
+                              })}
+                              <Typography sx={{ mt: 0.75, fontSize: '.72rem', color: 'text.secondary' }}>
+                                {batch.sourceLineCount} Source Row(s) represented by {batch.lineCount} final MPR Line(s)
+                                {batch.createdBy ? ` · Created by ${batch.createdBy}` : ''}
+                              </Typography>
+                            </Box>
+
+                            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ alignSelf: { xs: 'flex-start', lg: 'flex-start' } }}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<Edit />}
+                                disabled={!canManageBatches || batchSaving}
+                                onClick={() => openBatchEdit(batch)}
+                                sx={{ textTransform: 'none', fontWeight: 800 }}
+                              >
+                                Edit Color / Packing
+                              </Button>
+                              <Button
+                                size="small"
+                                color="error"
+                                variant="outlined"
+                                startIcon={<Delete />}
+                                disabled={!canManageBatches || batchDeleting || batchSaving}
+                                onClick={() => setBatchDeleteTarget(batch)}
+                                sx={{ textTransform: 'none', fontWeight: 800 }}
+                              >
+                                Delete Batch
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        </AccordionDetails>
+                      </Accordion>
+                    );
+                  })}
+                  {pagedBatches.length === 0 && (
+                    <Box sx={{ p: 4, textAlign: 'center' }}>
+                      <Typography sx={{ fontWeight: 800, color: '#64748b' }}>No batch matches the current search.</Typography>
+                    </Box>
+                  )}
+                </Box>
+                <TablePagination
+                  component="div"
+                  count={filteredBatches.length}
+                  page={batchPage}
+                  onPageChange={(_, nextPage) => setBatchPage(nextPage)}
+                  rowsPerPage={batchRowsPerPage}
+                  onRowsPerPageChange={(event) => setBatchRowsPerPage(Number(event.target.value))}
+                  rowsPerPageOptions={[5, 10, 20, 50]}
+                  labelRowsPerPage="Batches per page"
+                  sx={{ borderTop: '1px solid #e5e7eb' }}
+                />
+              </>
+            )}
+          </Box>
+        )}
+      </Paper>
 
       {(preview || mpr) && (
         <Paper elevation={0} sx={{ mt: 2, border: '1px solid #e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
           <Box sx={{ p: 1.5, borderBottom: '1px solid #e5e7eb' }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={0.5}>
               <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>
-                {preview && mpr
-                  ? `MPR Preview (${visibleLines.length} / ${unfilteredVisibleLines.length} Filtered Line(s): ${mpr?.lines?.length || 0} Saved + ${Math.max(0, unfilteredVisibleLines.length - (mpr?.lines?.length || 0))} New)`
-                  : `MPR Preview (${visibleLines.length} / ${unfilteredVisibleLines.length} Filtered Line(s))`}
+                MPR Preview ({visibleLines.length} / {unfilteredVisibleLines.length} Final Line(s) Shown · {mprPhysicalSourceCount(unfilteredVisibleLines)} Source Row(s) · {mprRemovedDuplicateCount(unfilteredVisibleLines)} Duplicate Row(s) Consolidated)
               </Typography>
               {mpr && (
                 <Stack direction="row" spacing={1} alignItems="center">
@@ -1357,10 +2144,52 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
             </Box>
           </Box>
 
-          <Box sx={{ px: 1.5, py: 0.9, display: 'flex', justifyContent: 'flex-end', borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C', fontSize: '.82rem' }}>
-              =SUBTOTAL MAT AMOUNT in USD: {formatValue(subtotalMatAmountUsd, 2)}
-            </Typography>
+          <Box sx={{ px: 1.5, py: 0.9, borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
+            <Stack
+              direction={{ xs: 'column', lg: 'row' }}
+              spacing={0.9}
+              alignItems={{ lg: 'center' }}
+              justifyContent="space-between"
+            >
+              <Stack direction="row" spacing={1.4} useFlexGap flexWrap="wrap" alignItems="center">
+                <Typography sx={{ fontWeight: 800, color: '#334155', fontSize: '.78rem' }}>Table guide</Typography>
+                {MPR_LEGEND_ITEMS.map((item) => (
+                  <Stack key={item.label} direction="row" spacing={0.55} alignItems="center">
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: item.color, flex: '0 0 auto' }} />
+                    <Typography sx={{ fontSize: '.75rem', color: '#475569' }}>{item.label}</Typography>
+                  </Stack>
+                ))}
+              </Stack>
+              <Typography sx={{ fontSize: '.72rem', color: '#94a3b8' }}>
+                Duplicate key: MTR + POSITION + CONS. + NET/MK + UNIT · Hover “Removed” to view details.
+              </Typography>
+            </Stack>
+          </Box>
+
+          <Box sx={{ px: 1.5, py: 0.9, borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff' }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={0.75} alignItems={{ sm: 'center' }} justifyContent="flex-end" useFlexGap flexWrap="wrap">
+              <Typography sx={{ fontWeight: 900, color: '#103B5C', fontSize: '.78rem', mr: 0.25 }}>
+                TOTAL (shown rows)
+              </Typography>
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`PO QTY: ${formatValue(mprColumnTotals.poQuantity)}`}
+                sx={{ fontWeight: 800, backgroundColor: '#f8fafc' }}
+              />
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`MAT REQUIRED Q'TY: ${formatValue(mprColumnTotals.matRequiredQuantity)}`}
+                sx={{ fontWeight: 800, backgroundColor: '#f8fafc' }}
+              />
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`PURCHASE QTY: ${formatValue(mprColumnTotals.purchaseQuantity)}`}
+                sx={{ fontWeight: 800, backgroundColor: '#f8fafc' }}
+              />
+            </Stack>
           </Box>
 
           <TableContainer sx={{ maxHeight: 540 }}>
@@ -1382,25 +2211,45 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
               </TableHead>
               <TableBody>
                 {(() => {
-                  const colorGroups = [];
-                  const groupByColor = new Map();
+                  const selectionByBom = new Map(
+                    (displayedMpr?.selections || []).filter(Boolean).map((item) => [String(item.bomId || ''), item])
+                  );
+                  const bomGroups = [];
+                  const bomByKey = new Map();
 
                   visibleLines.forEach((line) => {
-                    const color = line?.styleColor || 'No Product Color';
-                    if (!groupByColor.has(color)) {
-                      const group = { color, packingGroups: [], packingByKey: new Map(), lineCount: 0 };
-                      groupByColor.set(color, group);
-                      colorGroups.push(group);
+                    const fallbackSelection = selectionByBom.get(String(line?.bomId || '')) || {};
+                    const bomKey = String(line?.bomId || line?.bomNo || line?.bomName || 'UNKNOWN_BOM');
+                    if (!bomByKey.has(bomKey)) {
+                      const group = {
+                        key: bomKey,
+                        bomNo: line?.bomNo || fallbackSelection.bomNo || '',
+                        bomName: line?.bomName || fallbackSelection.bomName || '',
+                        colorGroups: [],
+                        colorByKey: new Map(),
+                        lines: [],
+                        lineCount: 0
+                      };
+                      bomByKey.set(bomKey, group);
+                      bomGroups.push(group);
                     }
 
-                    const colorGroup = groupByColor.get(color);
-                    const lineWithRowNo = { ...line, __displayNo: colorGroup.lineCount + 1 };
-                    const isCoreLine = !lineWithRowNo.packingId && !lineWithRowNo.packingName;
-                    const packingKey = lineWithRowNo.packingId || lineWithRowNo.packingName || 'CORE_BOM';
+                    const bomGroup = bomByKey.get(bomKey);
+                    const color = line?.styleColor || 'No Product Color';
+                    const colorKey = normalizeText(color) || 'NO_COLOR';
+                    if (!bomGroup.colorByKey.has(colorKey)) {
+                      const colorGroup = { key: colorKey, color, packingGroups: [], packingByKey: new Map(), lines: [] };
+                      bomGroup.colorByKey.set(colorKey, colorGroup);
+                      bomGroup.colorGroups.push(colorGroup);
+                    }
+
+                    const colorGroup = bomGroup.colorByKey.get(colorKey);
+                    const lineWithRowNo = { ...line, __displayNo: bomGroup.lineCount + 1 };
+                    const packingKey = mprLineSourceKey(lineWithRowNo);
                     if (!colorGroup.packingByKey.has(packingKey)) {
                       const packingGroup = {
                         key: packingKey,
-                        name: isCoreLine ? 'Core BOM (No Packing)' : (lineWithRowNo.packingName || `Packing ${lineWithRowNo.packingId}`),
+                        name: mprLineSourceLabel(lineWithRowNo),
                         lines: []
                       };
                       colorGroup.packingByKey.set(packingKey, packingGroup);
@@ -1408,78 +2257,142 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
                     }
 
                     colorGroup.packingByKey.get(packingKey).lines.push(lineWithRowNo);
-                    colorGroup.lineCount += 1;
+                    colorGroup.lines.push(lineWithRowNo);
+                    bomGroup.lines.push(lineWithRowNo);
+                    bomGroup.lineCount += 1;
                   });
 
-                  return colorGroups.flatMap((colorGroup) => ([
-                    <TableRow key={`color-group-${colorGroup.color}`}>
-                      <TableCell
-                        colSpan={MPR_COLUMNS.length + 2}
-                        sx={{
-                          py: 0.9,
-                          fontWeight: 900,
-                          color: '#103B5C',
-                          backgroundColor: '#eef6ff',
-                          borderTop: '2px solid #93c5fd'
-                        }}
-                      >
-                        Product Color: {colorGroup.color} — {colorGroup.lineCount} Line(s)
-                      </TableCell>
-                    </TableRow>,
-                    ...colorGroup.packingGroups.flatMap((packingGroup) => ([
-                      <TableRow key={`packing-group-${colorGroup.color}-${packingGroup.key}`}>
+                  return bomGroups.flatMap((bomGroup, bomIndex) => {
+                    const bomStyle = MPR_BOM_GROUP_STYLES[bomIndex % MPR_BOM_GROUP_STYLES.length];
+                    const bomSourceRows = mprPhysicalSourceCount(bomGroup.lines);
+                    const bomDuplicates = mprRemovedDuplicateCount(bomGroup.lines);
+                    return [
+                      <TableRow key={`bom-group-${bomGroup.key}`}>
                         <TableCell
                           colSpan={MPR_COLUMNS.length + 2}
                           sx={{
-                            py: 0.65,
-                            pl: 3,
-                            fontWeight: 800,
-                            color: '#334155',
-                            backgroundColor: '#f8fafc'
+                            py: 1.05,
+                            fontWeight: 950,
+                            color: bomStyle.color,
+                            backgroundColor: bomStyle.backgroundColor,
+                            borderTop: `3px solid ${bomStyle.borderColor}`,
+                            borderBottom: `1px solid ${bomStyle.borderColor}`
                           }}
                         >
-                          Source: {packingGroup.name} — {packingGroup.lines.length} Line(s)
+                          BOM {bomIndex + 1}: {bomGroup.bomNo || 'BOM'}{bomGroup.bomName ? ` — ${bomGroup.bomName}` : ''}
+                          {' · '}{bomSourceRows} Source Row(s) → {bomGroup.lineCount} Final MPR Row(s)
+                          {bomDuplicates > 0 ? ` · ${bomDuplicates} Duplicate Row(s) Removed` : ' · No Duplicate'}
                         </TableCell>
                       </TableRow>,
-                      ...packingGroup.lines.map((line) => (
-                        <TableRow key={line.id} hover>
-                          <TableCell sx={{ whiteSpace: 'nowrap', verticalAlign: 'top', fontWeight: 700 }}>
-                            {line.__displayNo}
-                          </TableCell>
-                          {MPR_COLUMNS.map(([field, header]) => (
-                            <TableCell key={header} sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
-                              {renderMprCellValue(field, line[field], line)}
+                      ...bomGroup.colorGroups.flatMap((colorGroup) => {
+                        const colorSourceRows = mprPhysicalSourceCount(colorGroup.lines);
+                        const colorDuplicates = mprRemovedDuplicateCount(colorGroup.lines);
+                        return [
+                          <TableRow key={`color-group-${bomGroup.key}-${colorGroup.key}`}>
+                            <TableCell
+                              colSpan={MPR_COLUMNS.length + 2}
+                              sx={{
+                                py: 0.85,
+                                pl: 2.25,
+                                fontWeight: 900,
+                                color: '#334155',
+                                backgroundColor: '#f8fafc',
+                                borderTop: '1px solid #cbd5e1'
+                              }}
+                            >
+                              Product Color: {colorGroup.color} · {colorSourceRows} Source Row(s) → {colorGroup.lines.length} Final Row(s)
+                              {colorDuplicates > 0 ? ` · ${colorDuplicates} Duplicate Removed` : ''}
                             </TableCell>
-                          ))}
-                          <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                            {(() => {
-                              const review = latestBomReview(line);
-                              const chip = reviewChip(review);
-                              return chip ? (
-                                <Tooltip title={review.reviewComment || 'Sales correction is tracked in BOM review.'}>
-                                  <Chip size="small" color={chip.color} label={chip.label} sx={{ mr: 0.5, mb: 0.35 }} />
-                                </Tooltip>
-                              ) : null;
-                            })()}
-                            <Tooltip title={canEditLines ? 'Edit MPR Item' : (!canWrite ? writeBlockedMessage : 'Create MPR First')}>
-                              <span>
-                                <IconButton size="small" disabled={!canEditLines} onClick={() => setEditingLine(line)}>
-                                  <Edit fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                            <Tooltip title={canEditLines ? 'Delete MPR Item' : (!canWrite ? writeBlockedMessage : 'Create MPR First')}>
-                              <span>
-                                <IconButton size="small" color="error" disabled={!canEditLines} onClick={() => setLineDeleteTarget(line)}>
-                                  <Delete fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ]))
-                  ]));
+                          </TableRow>,
+                          ...colorGroup.packingGroups.flatMap((packingGroup) => ([
+                            <TableRow key={`packing-group-${bomGroup.key}-${colorGroup.key}-${packingGroup.key}`}>
+                              <TableCell
+                                colSpan={MPR_COLUMNS.length + 2}
+                                sx={{
+                                  py: 0.65,
+                                  pl: 4,
+                                  fontWeight: 850,
+                                  color: '#64748b',
+                                  backgroundColor: '#ffffff',
+                                  borderTop: '1px solid #e2e8f0'
+                                }}
+                              >
+                                Source: {packingGroup.name} — {mprPhysicalSourceCount(packingGroup.lines)} Source Row(s) represented by {packingGroup.lines.length} Final Row(s)
+                              </TableCell>
+                            </TableRow>,
+                            ...packingGroup.lines.map((line) => {
+                              const duplicateCount = Number(line?.removedDuplicateCount || 0);
+                              const duplicate = Boolean(line?.duplicateHighlighted || duplicateCount > 0);
+                              const duplicateNote = line?.duplicateNote || `Removed ${duplicateCount} duplicate row(s).`;
+                              return (
+                                <TableRow
+                                  key={line.id}
+                                  hover
+                                  sx={{
+                                    backgroundColor: duplicate ? '#fffbeb' : 'inherit',
+                                    '&:hover': { backgroundColor: duplicate ? '#fef3c7 !important' : undefined }
+                                  }}
+                                >
+                                  <TableCell sx={{ whiteSpace: 'nowrap', verticalAlign: 'top', fontWeight: 700 }}>
+                                    <Stack spacing={0.45} alignItems="flex-start">
+                                      <span>{line.__displayNo}</span>
+                                      {duplicate && (
+                                        <Tooltip title={duplicateNote} arrow>
+                                          <Chip
+                                            size="small"
+                                            variant="outlined"
+                                            label={`Removed ${duplicateCount}`}
+                                            sx={{
+                                              height: 20,
+                                              color: '#854d0e',
+                                              backgroundColor: '#fffdf7',
+                                              borderColor: '#d4a72c',
+                                              fontWeight: 800,
+                                              '& .MuiChip-label': { px: 0.7, fontSize: '.68rem' }
+                                            }}
+                                          />
+                                        </Tooltip>
+                                      )}
+                                    </Stack>
+                                  </TableCell>
+                                  {MPR_COLUMNS.map(([field, header]) => (
+                                    <TableCell key={header} sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                                      {renderMprCellValue(field, line[field], line)}
+                                    </TableCell>
+                                  ))}
+                                  <TableCell sx={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                                    {(() => {
+                                      const review = latestBomReview(line);
+                                      const chip = reviewChip(review);
+                                      return chip ? (
+                                        <Tooltip title={review.reviewComment || 'Sales correction is tracked in BOM review.'}>
+                                          <Chip size="small" color={chip.color} label={chip.label} sx={{ mr: 0.5, mb: 0.35 }} />
+                                        </Tooltip>
+                                      ) : null;
+                                    })()}
+                                    <Tooltip title={canEditLines ? 'Edit MPR Item' : (!canWrite ? writeBlockedMessage : 'Create MPR First')}>
+                                      <span>
+                                        <IconButton size="small" disabled={!canEditLines} onClick={() => setEditingLine(line)}>
+                                          <Edit fontSize="small" />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                    <Tooltip title={canEditLines ? 'Delete MPR Item' : (!canWrite ? writeBlockedMessage : 'Create MPR First')}>
+                                      <span>
+                                        <IconButton size="small" color="error" disabled={!canEditLines} onClick={() => setLineDeleteTarget(line)}>
+                                          <Delete fontSize="small" />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })
+                          ]))
+                        ];
+                      })
+                    ];
+                  });
                 })()}
                 {!visibleLines.length && (
                   <TableRow>
@@ -1542,7 +2455,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
                   </Typography>
                 </Box>
                 <Box>
-                  <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>ESTIMATED MPR LINES</Typography>
+                  <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>ESTIMATED SOURCE ROWS</Typography>
                   <Typography sx={{ fontWeight: 900 }}>
                     {generateProgress.estimatedRows > 0
                       ? `${Math.min(generateProgress.processedRows, generateProgress.estimatedRows)} / ${generateProgress.estimatedRows}`
@@ -1550,10 +2463,20 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
                   </Typography>
                 </Box>
                 {generateProgress.status === 'success' && (
-                  <Box>
-                    <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>NEW LINES ADDED</Typography>
-                    <Typography sx={{ fontWeight: 900 }}>{generateProgress.addedRows}</Typography>
-                  </Box>
+                  <>
+                    <Box>
+                      <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>SOURCE ROWS ACCEPTED</Typography>
+                      <Typography sx={{ fontWeight: 900 }}>{generateProgress.addedRows}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>DUPLICATES CONSOLIDATED</Typography>
+                      <Typography sx={{ fontWeight: 900 }}>{generateProgress.duplicateRows}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontSize: '.74rem', color: 'text.secondary' }}>FINAL MPR ROWS</Typography>
+                      <Typography sx={{ fontWeight: 900 }}>{generateProgress.finalRows}</Typography>
+                    </Box>
+                  </>
                 )}
               </Stack>
             </Paper>
@@ -1705,50 +2628,114 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
         maxWidth="md"
       >
         <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
-          Update PO Qty And Ship To
+          Edit MPR Selection
           <Typography sx={{ mt: 0.25, fontSize: '.8rem', color: 'text.secondary', fontWeight: 400 }}>
-            The values are applied to every Core and selected Packing MPR material line under this Product Color in the batch.
+            Change Product Color, Packing, Ship To and PO Qty for each Ship To. Unchanged material lines keep their saved MPR values.
           </Typography>
           <IconButton onClick={() => setBatchEditTarget(null)} disabled={batchSaving} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          <Stack spacing={1.25}>
-            {(batchEditTarget?.colors || []).map((color) => (
-              <Paper key={color} elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ md: 'center' }}>
-                  <Typography sx={{ minWidth: 190, fontWeight: 900, color: '#103B5C' }}>{color}</Typography>
-                  <TextField
-                    label="PO Qty"
-                    type="number"
-                    required
-                    size="small"
-                    value={batchEditForm.poQtyByColor?.[color] ?? ''}
-                    onChange={(event) => changeBatchPoQty(color, event.target.value)}
-                    inputProps={{ min: 0, step: 'any' }}
-                    disabled={!canWrite}
-                    sx={{ width: { xs: '100%', md: 160 } }}
-                  />
-                  <Autocomplete
-                    multiple
-                    size="small"
-                    disabled={!canWrite}
-                    options={shipTos}
-                    value={shipTos.filter((item) => (batchEditForm.shipToIdsByColor?.[color] || []).includes(item.id))}
-                    onChange={(_, selected) => changeBatchShipTos(color, selected)}
-                    getOptionLabel={(item) => [item.shipToCode, item.shipToName].filter(Boolean).join(' · ')}
-                    isOptionEqualToValue={(option, value) => option.id === value.id}
-                    renderInput={(params) => <TextField {...params} required label="Ship To" placeholder="Select one or more" />}
-                    sx={{ flex: 1, minWidth: { xs: '100%', md: 300 } }}
-                  />
+          <Stack spacing={2}>
+            <Box>
+              <Typography sx={{ mb: 0.75, fontWeight: 900, color: '#103B5C' }}>Product Color</Typography>
+              <Stack spacing={0.75}>
+                {batchEditProductColors.map((productColor) => {
+                  const colorId = productColorKey(productColor);
+                  const checked = (batchEditForm.colors || []).includes(colorId);
+                  const selectedShipToIds = batchEditForm.shipToIdsByColor?.[colorId] || [];
+                  const selectedShipTos = shipTos.filter((item) => selectedShipToIds.includes(item.id));
+                  return (
+                    <Paper key={colorId} elevation={0} sx={{ p: 1.15, border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
+                      <FormControlLabel
+                        sx={{ m: 0 }}
+                        control={<Checkbox size="small" checked={checked} disabled={batchSaving} onChange={() => toggleBatchColor(colorId)} />}
+                        label={<Typography sx={{ fontSize: '.84rem', fontWeight: 800 }}>{productColorLabel(productColor)}</Typography>}
+                      />
+                      {checked && (
+                        <Box sx={{ mt: 1, ml: { sm: 4 } }}>
+                          <Autocomplete
+                            multiple
+                            size="small"
+                            disabled={batchSaving}
+                            options={shipTos}
+                            value={selectedShipTos}
+                            onChange={(_, selected) => changeBatchShipTos(colorId, selected)}
+                            getOptionLabel={shipToDisplayLabel}
+                            isOptionEqualToValue={(option, value) => option.id === value.id}
+                            renderInput={(params) => <TextField {...params} required label="Ship To" placeholder="Select one or more" />}
+                            sx={{ maxWidth: 560 }}
+                          />
+                          {selectedShipTos.length > 0 && (
+                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                              {selectedShipTos.map((shipTo) => (
+                                <TextField
+                                  key={shipTo.id}
+                                  label={`PO Qty · ${shipTo.shipToCode || shipTo.shipToName || 'Ship To'}`}
+                                  type="number"
+                                  required
+                                  size="small"
+                                  value={batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id] ?? ''}
+                                  onChange={(event) => changeBatchShipToQty(colorId, shipTo.id, event.target.value)}
+                                  inputProps={{ min: 0, step: 'any' }}
+                                  disabled={batchSaving}
+                                  helperText={shipTo.shipToCode && shipTo.shipToName ? shipTo.shipToName : ''}
+                                  sx={{ width: { xs: '100%', sm: 195 } }}
+                                />
+                              ))}
+                              <Chip
+                                variant="outlined"
+                                label={`Total PO Qty: ${formatValue(sumShipToQty(batchEditForm.shipToQtyByColor?.[colorId] || {}, selectedShipToIds))}`}
+                                sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, fontWeight: 800 }}
+                              />
+                            </Stack>
+                          )}
+                        </Box>
+                      )}
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            </Box>
+
+            <Divider />
+
+            <Box>
+              <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Packing</Typography>
+              <Typography sx={{ mb: 0.75, fontSize: '.78rem', color: 'text.secondary' }}>
+                Core BOM is always included. Select the additional Packing sources required for this batch.
+              </Typography>
+              {(batchEditBom?.packings || []).length ? (
+                <Stack direction={{ xs: 'column', sm: 'row' }} flexWrap="wrap" useFlexGap spacing={0.5}>
+                  {(batchEditBom?.packings || []).map((packing) => (
+                    <FormControlLabel
+                      key={packing.id}
+                      sx={{ minWidth: { sm: 240 }, mr: 1 }}
+                      control={(
+                        <Checkbox
+                          size="small"
+                          checked={(batchEditForm.packingIds || []).includes(packing.id)}
+                          disabled={batchSaving}
+                          onChange={() => toggleBatchPacking(packing.id)}
+                        />
+                      )}
+                      label={(
+                        <Typography sx={{ fontSize: '.82rem' }}>
+                          {packing.packingName || 'Packing'} ({packing.lineCount ?? (packing.lines || []).length} lines)
+                        </Typography>
+                      )}
+                    />
+                  ))}
                 </Stack>
-              </Paper>
-            ))}
+              ) : (
+                <Typography sx={{ fontSize: '.82rem', color: 'text.secondary' }}>This BOM has no additional Packing source.</Typography>
+              )}
+            </Box>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setBatchEditTarget(null)} disabled={batchSaving} sx={{ textTransform: 'none' }}>Cancel</Button>
           <Button variant="contained" onClick={saveBatchEdit} disabled={batchSaving} sx={{ textTransform: 'none', fontWeight: 800, backgroundColor: '#103B5C' }}>
-            {batchSaving ? 'Updating...' : 'Apply To All MPR Lines'}
+            {batchSaving ? 'Saving...' : 'Save MPR Selection'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1762,7 +2749,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
         <DialogTitle>Delete This MPR Batch?</DialogTitle>
         <DialogContent>
           <Typography>
-            Delete all <strong>{batchDeleteTarget?.lineCount || 0}</strong> MPR line(s) created in this batch?
+            Delete all <strong>{batchDeleteTarget?.sourceLineCount || 0}</strong> physical source row(s) created in this batch?
           </Typography>
           <Typography sx={{ mt: 1, fontSize: '.86rem', color: 'text.secondary' }}>
             Product Color: {batchDeleteTarget?.colors?.join(', ') || '-'}

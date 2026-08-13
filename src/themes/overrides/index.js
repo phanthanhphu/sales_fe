@@ -21,6 +21,7 @@ import LoadingButton from './LoadingButton';
 import OutlinedInput from './OutlinedInput';
 import Tab from './Tab';
 import Tabs from './Tabs';
+import TableCell from './TableCell';
 import ToggleButton from './ToggleButton';
 import Tooltip from './Tooltip';
 import Typography from './Typography';
@@ -48,6 +49,7 @@ export default function ComponentsOverrides(theme) {
     OutlinedInput(theme),
     Tab(theme),
     Tabs(),
+    TableCell(),
     ToggleButton(theme),
     Tooltip(theme),
     Typography()

@@ -10,3 +10,23 @@
 * {
   -webkit-tap-highlight-color: transparent;
 }
+
+
+/* Compact enterprise workspace density. Keeps forms readable while reducing unused space. */
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+.MuiTablePagination-root .MuiToolbar-root {
+  min-height: 44px;
+}
+
+.MuiTablePagination-root .MuiTablePagination-selectLabel,
+.MuiTablePagination-root .MuiTablePagination-displayedRows {
+  margin-top: 0;
+  margin-bottom: 0;
+}

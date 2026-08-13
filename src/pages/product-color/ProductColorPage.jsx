@@ -30,6 +30,7 @@ import {
   createMasterData,
   deleteMasterData,
   deleteProductColorImage,
+  getMasterDataById,
   getMasterDataErrorMessage,
   listMasterData,
   updateMasterData,
@@ -82,6 +83,24 @@ const productColorLockMessage = (record = {}) => {
     ? `Locked because this Product Color is linked to ${count} BOM(s). Remove or change every BOM link first.`
     : 'Locked because this Product Color is currently in use.';
 };
+
+const childColorUsageCount = (item = {}) => Math.max(
+  0,
+  Number(item?.usageCount ?? item?.materialLineUsageCount ?? 0) || 0
+);
+
+const isChildColorLocked = (item = {}) => Boolean(
+  item?.deleteLocked
+  || item?.inUse
+  || childColorUsageCount(item) > 0
+);
+
+const childColorLockMessage = (item = {}) => (
+  trim(item?.usageMessage)
+  || (childColorUsageCount(item) > 0
+    ? `This Child Color is used by ${childColorUsageCount(item)} material line(s). Change those lines to another Child Color before deleting it.`
+    : 'This Child Color is already in use and cannot be deleted.')
+);
 
 const childColorNames = (record = {}) => (
   Array.isArray(record?.childColors)
@@ -204,15 +223,18 @@ function ProductColorDialog({
   onClose,
   onSave,
   onUploadImage,
-  onRequestRemoveImage
+  onRequestRemoveImage,
+  onBlockedDelete
 }) {
   const [form, setForm] = useState(blankForm());
+  const [childColorDeleteTarget, setChildColorDeleteTarget] = useState(null);
   const isEdit = Boolean(record?.id);
   const imageExists = hasImage(record);
   const identityLocked = isEdit && isProductColorLocked(record);
 
   useEffect(() => {
     if (!open) return;
+    setChildColorDeleteTarget(null);
     setForm({
       patternNumber: record?.patternNumber || '',
       productColor: record?.productColor || '',
@@ -236,16 +258,31 @@ function ProductColorDialog({
   };
   const removeChildColor = (index) => {
     const item = form.childColors[index];
-    const label = trim(item?.childColor) || 'this Child Color';
-    const confirmed = typeof window === 'undefined'
-      || !trim(item?.childColor)
-      || window.confirm(`Remove ${label} from this Product Color?`);
-    if (!confirmed) return;
+    if (isChildColorLocked(item)) {
+      onBlockedDelete?.(childColorLockMessage(item));
+      return;
+    }
 
+    const label = trim(item?.childColor);
+    if (!label) {
+      setForm((current) => ({
+        ...current,
+        childColors: current.childColors.filter((_, itemIndex) => itemIndex !== index)
+      }));
+      return;
+    }
+
+    setChildColorDeleteTarget({ index, label });
+  };
+
+  const confirmRemoveChildColor = () => {
+    const targetIndex = childColorDeleteTarget?.index;
+    if (!Number.isInteger(targetIndex)) return;
     setForm((current) => ({
       ...current,
-      childColors: current.childColors.filter((_, itemIndex) => itemIndex !== index)
+      childColors: current.childColors.filter((_, itemIndex) => itemIndex !== targetIndex)
     }));
+    setChildColorDeleteTarget(null);
   };
 
   const canSave = trim(form.patternNumber) && trim(form.productColor) && trim(form.season) && trim(form.styleNumber);
@@ -261,7 +298,8 @@ function ProductColorDialog({
   });
 
   return (
-    <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="lg">
+    <>
+      <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="lg">
       <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
         {record ? 'Edit Product Color' : 'Add Product Color'}
         <Typography sx={{ mt: 0.25, fontSize: '.8rem', color: 'text.secondary', fontWeight: 400 }}>
@@ -353,6 +391,12 @@ function ProductColorDialog({
           </Button>
         </Stack>
 
+        {form.childColors.some(isChildColorLocked) && (
+          <Alert severity="info" sx={{ mb: 1, py: 0.45 }}>
+            Child Colors already used by BOM material lines are locked and cannot be deleted. Rename is still allowed.
+          </Alert>
+        )}
+
         <TableContainer sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
           <Table size="small" sx={{ minWidth: 620 }}>
             <TableHead><TableRow>
@@ -368,7 +412,20 @@ function ProductColorDialog({
                 <TableRow key={item.id || `child-${index}`}>
                   <TableCell sx={{ color: 'text.secondary', fontWeight: 700 }}>{index + 1}</TableCell>
                   <TableCell><TextField size="small" required value={item.childColor} onChange={(event) => changeChildColor(index, event.target.value)} placeholder="MINERAL GREY YKK#181" fullWidth /></TableCell>
-                  <TableCell align="center"><IconButton color="error" size="small" onClick={() => removeChildColor(index)}><Delete fontSize="small" /></IconButton></TableCell>
+                  <TableCell align="center">
+                    <Tooltip title={isChildColorLocked(item) ? childColorLockMessage(item) : 'Delete Child Color'} arrow>
+                      <span>
+                        <IconButton
+                          color="error"
+                          size="small"
+                          onClick={() => removeChildColor(index)}
+                          disabled={saving || isChildColorLocked(item)}
+                        >
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -381,7 +438,21 @@ function ProductColorDialog({
           {saving ? 'Saving...' : 'Save Product Color'}
         </Button>
       </DialogActions>
-    </Dialog>
+      </Dialog>
+
+      <ConfirmDeleteDialog
+        open={Boolean(childColorDeleteTarget)}
+        title="Remove Child Color"
+        subtitle="Please confirm before removing this Child Color from the Product Color."
+        message={<>Remove <b>{childColorDeleteTarget?.label}</b> from this Product Color?</>}
+        warning="The change is applied when you save the Product Color. Child Colors already used by BOM material lines remain protected and cannot be removed."
+        itemName="Child Color"
+        confirmText="Remove"
+        deleting={saving}
+        onClose={() => setChildColorDeleteTarget(null)}
+        onConfirm={confirmRemoveChildColor}
+      />
+    </>
   );
 }
 
@@ -440,12 +511,6 @@ export default function ProductColorPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const syncOpenRecord = (nextRows = [], id = '') => {
-    if (!id) return;
-    const updated = nextRows.find((item) => sameId(item?.id, id));
-    if (updated) setFormRecord(updated);
-  };
-
   const scrollToCreatedRow = useCallback((id) => {
     if (id) scrollTargetRef.current = `[data-product-color-master-id="${cssAttributeEscape(id)}"]`;
   }, []);
@@ -470,6 +535,21 @@ export default function ProductColorPage() {
       });
     });
   }, [loading, rows]);
+
+  const openEdit = async (row) => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!row?.id) return;
+    setSaving(true);
+    try {
+      const detail = await getMasterDataById('productColor', row.id);
+      setFormRecord(detail || row);
+      setFormOpen(true);
+    } catch (error) {
+      notify(getMasterDataErrorMessage(error, 'Unable to load Product Color usage details.'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const save = async (payload) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
@@ -530,8 +610,9 @@ export default function ProductColorPage() {
     try {
       await uploadProductColorImage(row.id, file);
       notify('Product Color image saved. Any BOM linked to this Product Color now uses the same image.');
-      const result = await load();
-      syncOpenRecord(result.rows, row.id);
+      await load();
+      const detail = await getMasterDataById('productColor', row.id);
+      setFormRecord(detail || row);
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to upload Product Color image.'), 'error');
     } finally { setSaving(false); }
@@ -547,8 +628,9 @@ export default function ProductColorPage() {
       await deleteProductColorImage(targetId);
       setImageDeleteTarget(null);
       notify('Product Color image removed. BOM no longer shows this image.');
-      const result = await load();
-      syncOpenRecord(result.rows, targetId);
+      await load();
+      const detail = await getMasterDataById('productColor', targetId);
+      setFormRecord(detail || imageDeleteTarget);
     } catch (error) {
       notify(getMasterDataErrorMessage(error, 'Unable to remove Product Color image.'), 'error');
     } finally { setSaving(false); }
@@ -583,8 +665,8 @@ export default function ProductColorPage() {
   };
 
   return (
-    <Box sx={{ p: { xs: 1.25, sm: 1.75, md: 2 } }}>
-      <Paper elevation={0} sx={{ p: 2, mb: 2, border: '1px solid #e5e7eb', borderRadius: 2 }}>
+    <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
+      <Paper elevation={0} sx={{ p: 1.25, mb: 1.25, border: '1px solid #e5e7eb', borderRadius: 2 }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} spacing={1.25} sx={{ mb: 1.5 }}>
           <Box>
             <Typography variant="subtitle1" fontWeight={700}>{buyer.buyerName} — Product Color Master</Typography>
@@ -773,7 +855,7 @@ export default function ProductColorPage() {
                     <TableCell align="center" sx={{ py: 0.45, px: 0.7, minWidth: 95 }}>
                       <Stack direction="row" spacing={0.4} justifyContent="center">
                         <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Product Color / Image / Child Colors'} arrow>
-                          <span><IconButton size="small" color="primary" disabled={!canWrite || saving} sx={{ p: 0.25 }} onClick={() => { if (canWrite) { setFormRecord(row); setFormOpen(true); } }}><Edit fontSize="small" /></IconButton></span>
+                          <span><IconButton size="small" color="primary" disabled={!canWrite || saving} sx={{ p: 0.25 }} onClick={() => { if (canWrite) openEdit(row); }}><Edit fontSize="small" /></IconButton></span>
                         </Tooltip>
                         <Tooltip title={!canWrite ? writeBlockedMessage : (isProductColorLocked(row) ? productColorLockMessage(row) : 'Delete Product Color')} arrow>
                           <span>
@@ -818,6 +900,7 @@ export default function ProductColorPage() {
         onSave={save}
         onUploadImage={uploadImage}
         onRequestRemoveImage={setImageDeleteTarget}
+        onBlockedDelete={(message) => notify(message, 'warning')}
       />
 
       <ChildColorsPreviewDialog

@@ -8,7 +8,8 @@ export const MASTER_DATA_ENDPOINTS = {
   matInfo: `${MASTER_DATA_ROOT}/mat-infos`,
   loss: `${MASTER_DATA_ROOT}/loss`,
   shipTo: `${MASTER_DATA_ROOT}/ship-tos`,
-  productColor: `${MASTER_DATA_ROOT}/product-colors`
+  productColor: `${MASTER_DATA_ROOT}/product-colors`,
+  materialShipTo: `${MASTER_DATA_ROOT}/material-ship-to-mappings`
 };
 
 const getEndpoint = (type) => {
@@ -108,6 +109,10 @@ export const downloadMasterDataEditWorkbook = (type, params = {}) => (
   apiRawClient.get(`${getEndpoint(type)}/export-edit`, { responseType: 'blob', params: cleanParams(params) })
 );
 
+export const downloadMasterDataTemplate = (type, params = {}) => (
+  apiRawClient.get(`${getEndpoint(type)}/template`, { responseType: 'blob', params: cleanParams(params) })
+);
+
 export const listActiveShipTos = () => apiClient.get(`${MASTER_DATA_ENDPOINTS.shipTo}/active`);
 
 
@@ -145,9 +150,9 @@ export const resolveMatInfo = (checking) => {
   });
 };
 
-export const resolveLoss = (materialType, totalQuantity) => {
+export const resolveLoss = (materialType, totalQuantity, buyerKey = 'LLBEAN') => {
   return apiClient.get(`${MASTER_DATA_ENDPOINTS.loss}/resolve`, {
-    params: { materialType, totalQuantity }
+    params: { buyerKey, materialType, totalQuantity }
   });
 };
 

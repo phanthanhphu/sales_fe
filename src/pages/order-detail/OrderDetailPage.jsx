@@ -76,13 +76,13 @@ export default function OrderDetailPage() {
   }
 
   return (
-    <Box sx={{ p: { xs: 1.5, md: 2.5 } }}>
+    <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
       {/* Keep breadcrumb only. No large order title is rendered below. */}
       <Breadcrumbs
         aria-label="breadcrumb"
         sx={{
-          mb: 1.5,
-          fontSize: '.85rem'
+          mb: 0.75,
+          fontSize: '.82rem'
         }}
       >
         <Link
@@ -103,8 +103,9 @@ export default function OrderDetailPage() {
       <Paper
         elevation={0}
         sx={{
-          p: 2,
-          mb: 2,
+          px: 1.5,
+          py: 1.15,
+          mb: 1.25,
           border: '1px solid #e5e7eb',
           borderRadius: 2
         }}
@@ -143,7 +144,8 @@ export default function OrderDetailPage() {
           value={tab}
           onChange={(_, nextTab) => setTab(nextTab)}
           sx={{
-            px: 1,
+            px: 0.75,
+            minHeight: 40,
             borderBottom: '1px solid #e5e7eb'
           }}
         >
@@ -164,7 +166,7 @@ export default function OrderDetailPage() {
           />
         </Tabs>
 
-        <Box sx={{ p: { xs: 1.25, md: 2 } }}>
+        <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
           {tab === 0 ? <BomTab order={order} buyerKey={buyerKey} /> : <MprTab order={order} buyerKey={buyerKey} />}
         </Box>
       </Paper>

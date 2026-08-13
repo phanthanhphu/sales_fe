@@ -36,17 +36,17 @@ export default function MainLayout() {
         sx={{
           width: `calc(100% - ${drawerOpen ? DRAWER_WIDTH : MINI_DRAWER_WIDTH}px)`,
           flexGrow: 1,
-          p: { xs: 1, sm: 3 },
+          p: { xs: 0.5, sm: 1, md: 1.25 },
           bgcolor: '#F4F7FB',
           transition: 'width .2s ease'
         }}
       >
-        <Toolbar sx={{ mt: 'inherit', mb: 'inherit' }} />
+        <Toolbar sx={{ minHeight: '60px !important', p: 0 }} />
         <Box
           sx={{
-            px: { xs: 0, sm: 3 },
+            px: 0,
             position: 'relative',
-            minHeight: 'calc(100vh - 124px)',
+            minHeight: 'calc(100vh - 84px)',
             display: 'flex',
             flexDirection: 'column'
           }}

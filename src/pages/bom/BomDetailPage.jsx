@@ -48,7 +48,6 @@ import {
   addBomLine,
   addBomProductColor,
   addPacking,
-  applyBomMprReview,
   deleteBomAttachment,
   deleteBomLine,
   deleteBomLineImage,
@@ -61,10 +60,9 @@ import {
   getBomLineImageObjectUrl,
   getBom,
   listBomLines,
-  listBomMprReviews,
   openBomAttachment,
   getBomExportUrl,
-  recheckBomMprReview,
+  getBomTemplateUrl,
   replaceBomExcel,
   updateBom,
   updateBomLine,
@@ -73,11 +71,17 @@ import {
   uploadBomAttachment,
   uploadBomLineImage
 } from '../../services/orderBomMprService';
-import { listMasterData } from '../../services/masterDataService';
+import {
+  createMasterData,
+  deleteProductColorImage,
+  getMasterDataById,
+  listMasterData,
+  updateMasterData,
+  uploadProductColorImage
+} from '../../services/masterDataService';
 import ProductColorImage from '../../components/ProductColorImage';
 import { canManageBom } from 'utils/accessControl';
 import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
-import BomMprReviewDialog from './BomMprReviewDialog';
 import ConfirmDeleteDialog from '../shared/ConfirmDeleteDialog';
 import ExcelUploadProgressDialog from '../../components/ExcelUploadProgressDialog';
 import { initialUploadProgress, startProcessingTicker, uploadProgressFromEvent, uploadStage } from '../../utils/uploadProgress';
@@ -119,17 +123,20 @@ const compactActionButtonSx = {
 };
 
 const headerLabelSx = {
-  fontSize: '0.72rem',
+  fontSize: '0.64rem',
   fontWeight: 800,
   color: '#64748b',
   textTransform: 'uppercase',
-  letterSpacing: 0.2
+  letterSpacing: 0.35,
+  lineHeight: 1.15
 };
 
 const headerValueSx = {
-  fontSize: '0.86rem',
-  fontWeight: 400,
+  mt: 0.3,
+  fontSize: '0.8rem',
+  fontWeight: 600,
   color: '#0f172a',
+  lineHeight: 1.25,
   wordBreak: 'break-word'
 };
 
@@ -151,19 +158,32 @@ const headerDisplayFields = [
   { key: 'bomDate', label: 'BOM Date' }
 ];
 
-const HeaderInfoCell = ({ label, value, wide = false }) => (
+const HeaderInfoCell = ({ label, value, wide = false, multiline = false }) => (
   <Box
     sx={{
-      minHeight: 54,
-      p: 1,
+      minHeight: multiline ? 64 : 44,
+      px: 0.9,
+      py: 0.7,
       border: '1px solid #e2e8f0',
-      borderRadius: 1.25,
+      borderRadius: 1.1,
       backgroundColor: '#fff',
-      gridColumn: wide ? { xs: '1', md: 'span 2' } : undefined
+      gridColumn: wide ? { xs: '1', md: 'span 2' } : undefined,
+      transition: 'border-color 120ms ease, box-shadow 120ms ease',
+      '&:hover': {
+        borderColor: '#cbd5e1',
+        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)'
+      }
     }}
   >
     <Typography sx={headerLabelSx}>{label}</Typography>
-    <Typography sx={headerValueSx}>{value || '—'}</Typography>
+    <Typography
+      sx={{
+        ...headerValueSx,
+        ...(multiline ? { whiteSpace: 'pre-wrap' } : {})
+      }}
+    >
+      {value || '—'}
+    </Typography>
   </Box>
 );
 
@@ -172,6 +192,16 @@ const asNumber = (value) => (
     ? null
     : Number(value)
 );
+
+// Keep BOM consumption decimals as text until they reach Java BigDecimal.
+// This avoids IEEE-754 rounding and preserves all digits entered or imported from Excel.
+const asDecimalValue = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  const normalizedValue = String(value).trim().replace(',', '.');
+  return /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(normalizedValue)
+    ? normalizedValue
+    : null;
+};
 
 const normalized = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
 
@@ -457,8 +487,8 @@ const formToLine = (form = {}) => ({
   direction: String(form.direction || '').trim(),
   costing: asNumber(form.costing),
   costingUnit: String(form.costingUnit || '').trim(),
-  detailConsumption: asNumber(form.detailConsumption),
-  consumptionNet: asNumber(form.consumptionNet),
+  detailConsumption: asDecimalValue(form.detailConsumption),
+  consumptionNet: asDecimalValue(form.consumptionNet),
   consumptionUnit: String(form.consumptionUnit || '').trim(),
   bomRemark: String(form.bomRemark || '').trim(),
   additionalRemark: String(form.additionalRemark || '').trim(),
@@ -521,8 +551,22 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
 
           <TextField label="Legacy Costing / MK" type="number" value={form.costing} onChange={set('costing')} sx={fieldSx} />
           <TextField label="Legacy Costing / Unit" value={form.costingUnit} onChange={set('costingUnit')} sx={fieldSx} />
-          <TextField label="Detail CONS. (New Format)" type="number" value={form.detailConsumption} onChange={set('detailConsumption')} sx={fieldSx} />
-          <TextField label="Consumption MPR" type="number" value={form.consumptionNet} onChange={set('consumptionNet')} sx={fieldSx} />
+          <TextField
+            label="Detail CONS. (New Format)"
+            type="text"
+            inputProps={{ inputMode: 'decimal' }}
+            value={form.detailConsumption}
+            onChange={set('detailConsumption')}
+            sx={fieldSx}
+          />
+          <TextField
+            label="Consumption MPR"
+            type="text"
+            inputProps={{ inputMode: 'decimal' }}
+            value={form.consumptionNet}
+            onChange={set('consumptionNet')}
+            sx={fieldSx}
+          />
           <TextField label="Consumption Unit" value={form.consumptionUnit} onChange={set('consumptionUnit')} sx={fieldSx} />
 
           <FormControlLabel
@@ -752,23 +796,136 @@ function PackingDialog({ open, record, productColors = [], saving, onClose, onSa
 }
 
 function ProductColorDialog({ open, record, header = {}, productColorMasters = [], buyerKey, saving, onClose, onSave }) {
-  const [form, setForm] = useState({ productColorMasterId: '', colorName: '', patternNumber: '', season: '', styleNumber: '', sequence: '' });
+  const blankChildColor = () => ({ id: '', childColor: '', deleteLocked: false, usageCount: 0, usageMessage: '' });
+  const clean = (value) => String(value || '').trim();
+  const mapChildColors = (source = []) => (
+    Array.isArray(source)
+      ? source.map((item) => ({
+        ...blankChildColor(),
+        ...item,
+        id: clean(item?.id),
+        childColor: clean(item?.childColor || item?.value || item?.name),
+        deleteLocked: Boolean(item?.deleteLocked || item?.inUse || Number(item?.usageCount || 0) > 0),
+        usageCount: Math.max(0, Number(item?.usageCount || 0) || 0),
+        usageMessage: clean(item?.usageMessage)
+      }))
+      : []
+  );
+  const childColorUsageCount = (item = {}) => Math.max(0, Number(item?.usageCount || 0) || 0);
+  const isChildColorLocked = (item = {}) => Boolean(item?.deleteLocked || item?.inUse || childColorUsageCount(item) > 0);
+  const childColorLockMessage = (item = {}) => (
+    clean(item?.usageMessage)
+    || (childColorUsageCount(item) > 0
+      ? `This Child Color is used by ${childColorUsageCount(item)} material line(s). Change those lines to another Child Color before deleting it.`
+      : 'This Child Color is already used by a BOM material line and cannot be deleted.')
+  );
+
+  const [mode, setMode] = useState('MASTER');
+  const [form, setForm] = useState({
+    productColorMasterId: '',
+    colorName: '',
+    patternNumber: '',
+    season: '',
+    styleNumber: '',
+    sequence: '',
+    active: 'true',
+    childColors: []
+  });
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState('');
+  const [removeImageRequested, setRemoveImageRequested] = useState(false);
+  const [imageError, setImageError] = useState('');
+  const [selectedMasterDetail, setSelectedMasterDetail] = useState(null);
+  const [masterDetailLoading, setMasterDetailLoading] = useState(false);
+  const [masterDetailError, setMasterDetailError] = useState('');
+  const [childColorDeleteTarget, setChildColorDeleteTarget] = useState(null);
 
   useEffect(() => {
+    if (!open) return;
     const matchedMaster = productColorMasterForBom(record || {}, productColorMasters);
+    const nextMode = matchedMaster ? 'MASTER' : (record ? 'NEW' : (productColorMasters.length ? 'MASTER' : 'NEW'));
+    setMode(nextMode);
     setForm({
       productColorMasterId: matchedMaster?.id || '',
-      colorName: record?.colorName || matchedMaster?.productColor || '',
+      colorName: matchedMaster?.productColor || record?.colorName || '',
       patternNumber: matchedMaster?.patternNumber || record?.patternNumber || header?.patternNumber || '',
       season: matchedMaster?.season || record?.season || header?.season || '',
       styleNumber: matchedMaster?.styleNumber || record?.styleNumber || header?.styleNumber || '',
-      sequence: record?.sequence ?? ''
+      sequence: record?.sequence ?? '',
+      active: matchedMaster?.active === false ? 'false' : 'true',
+      childColors: mapChildColors(matchedMaster?.childColors)
     });
+    setImageFile(null);
+    setRemoveImageRequested(false);
+    setImageError('');
+    setSelectedMasterDetail(null);
+    setMasterDetailError('');
+    setChildColorDeleteTarget(null);
   }, [open, record, header, productColorMasters]);
+
+  useEffect(() => {
+    if (!imageFile) {
+      setImagePreviewUrl('');
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(imageFile);
+    setImagePreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [imageFile]);
+
+  const selectedMasterSummary = productColorMasters.find((item) => String(item?.id || '') === String(form.productColorMasterId || '')) || null;
+  const selectedMaster = String(selectedMasterDetail?.id || '') === String(form.productColorMasterId || '')
+    ? selectedMasterDetail
+    : selectedMasterSummary;
+
+  useEffect(() => {
+    if (!open || mode !== 'MASTER' || !form.productColorMasterId) {
+      setSelectedMasterDetail(null);
+      setMasterDetailLoading(false);
+      setMasterDetailError('');
+      return undefined;
+    }
+
+    let cancelled = false;
+    setMasterDetailLoading(true);
+    setMasterDetailError('');
+    getMasterDataById('productColor', form.productColorMasterId)
+      .then((detail) => {
+        if (cancelled) return;
+        setSelectedMasterDetail(detail || null);
+        setForm((current) => (String(current.productColorMasterId || '') === String(detail?.id || '')
+          ? {
+            ...current,
+            colorName: detail?.productColor || current.colorName,
+            patternNumber: detail?.patternNumber || current.patternNumber,
+            season: detail?.season || current.season,
+            styleNumber: detail?.styleNumber || current.styleNumber,
+            active: detail?.active === false ? 'false' : 'true',
+            childColors: mapChildColors(detail?.childColors)
+          }
+          : current));
+      })
+      .catch(() => {
+        if (!cancelled) setMasterDetailError('Unable to check Child Color usage. Existing Child Colors cannot be deleted until usage is loaded.');
+      })
+      .finally(() => {
+        if (!cancelled) setMasterDetailLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [open, mode, form.productColorMasterId]);
+
+  const selectedMasterHasImage = Boolean(
+    selectedMaster?.hasImage
+    || selectedMaster?.imageAvailable
+    || selectedMaster?.imageFileName
+    || selectedMaster?.imageStorageKey
+    || selectedMaster?.imageUpdatedAt
+  );
 
   const chooseMaster = (event) => {
     const productColorMasterId = event.target.value;
-    const master = productColorMasters.find((item) => item.id === productColorMasterId);
+    const master = productColorMasters.find((item) => String(item?.id || '') === String(productColorMasterId || '')) || null;
     setForm((current) => ({
       ...current,
       productColorMasterId,
@@ -776,70 +933,409 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
       patternNumber: master?.patternNumber || '',
       season: master?.season || '',
       styleNumber: master?.styleNumber || '',
+      active: master?.active === false ? 'false' : 'true',
+      childColors: mapChildColors(master?.childColors),
       sequence: current.sequence
     }));
+    setImageFile(null);
+    setRemoveImageRequested(false);
+    setImageError('');
   };
-  const canSave = Boolean(form.productColorMasterId)
-    && form.colorName.trim()
-    && form.patternNumber.trim()
-    && form.season.trim()
-    && form.styleNumber.trim();
+
+  const chooseMode = (nextMode) => {
+    setMode(nextMode);
+    setImageFile(null);
+    setRemoveImageRequested(false);
+    setImageError('');
+
+    if (nextMode === 'MASTER') {
+      const matchedMaster = productColorMasterForBom(record || {}, productColorMasters);
+      setForm((current) => ({
+        ...current,
+        productColorMasterId: matchedMaster?.id || '',
+        colorName: matchedMaster?.productColor || '',
+        patternNumber: matchedMaster?.patternNumber || '',
+        season: matchedMaster?.season || '',
+        styleNumber: matchedMaster?.styleNumber || '',
+        active: matchedMaster?.active === false ? 'false' : 'true',
+        childColors: mapChildColors(matchedMaster?.childColors)
+      }));
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      productColorMasterId: '',
+      colorName: record?.colorName || '',
+      patternNumber: record?.patternNumber || header?.patternNumber || '',
+      season: record?.season || header?.season || '',
+      styleNumber: record?.styleNumber || header?.styleNumber || '',
+      active: 'true',
+      childColors: []
+    }));
+  };
+
+  const selectImage = (event) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = '';
+    if (!file) return;
+    if (!String(file.type || '').toLowerCase().startsWith('image/')) {
+      setImageError('Please choose an image file.');
+      return;
+    }
+    setImageError('');
+    setRemoveImageRequested(false);
+    setImageFile(file);
+  };
+
+  const changeChildColor = (index, value) => {
+    setForm((current) => ({
+      ...current,
+      childColors: current.childColors.map((item, itemIndex) => (
+        itemIndex === index ? { ...item, childColor: value } : item
+      ))
+    }));
+  };
+
+  const removeChildColor = (index) => {
+    const item = form.childColors[index];
+    if (isChildColorLocked(item)) {
+      setMasterDetailError(childColorLockMessage(item));
+      return;
+    }
+    if (mode === 'MASTER' && clean(item?.id) && (masterDetailLoading || masterDetailError)) {
+      setMasterDetailError('Child Color usage must be loaded before an existing Child Color can be deleted.');
+      return;
+    }
+
+    const label = clean(item?.childColor);
+    if (!label) {
+      setForm((current) => ({
+        ...current,
+        childColors: current.childColors.filter((_, itemIndex) => itemIndex !== index)
+      }));
+      return;
+    }
+
+    setChildColorDeleteTarget({ index, label });
+  };
+
+  const confirmRemoveChildColor = () => {
+    const targetIndex = childColorDeleteTarget?.index;
+    if (!Number.isInteger(targetIndex)) return;
+    setForm((current) => ({
+      ...current,
+      childColors: current.childColors.filter((_, itemIndex) => itemIndex !== targetIndex)
+    }));
+    setChildColorDeleteTarget(null);
+  };
+
+  const normalizedChildColors = form.childColors
+    .map((item) => ({ id: clean(item?.id), childColor: clean(item?.childColor) }))
+    .filter((item) => item.childColor);
+  const hasBlankChildColor = form.childColors.some((item) => !clean(item?.childColor));
+  const duplicateChildColor = normalizedChildColors.some((item, index, items) => (
+    items.findIndex((candidate) => normalized(candidate.childColor) === normalized(item.childColor)) !== index
+  ));
+
+  const canSave = mode === 'MASTER'
+    ? Boolean(form.productColorMasterId) && !masterDetailLoading && !hasBlankChildColor && !duplicateChildColor
+    : Boolean(clean(form.colorName) && clean(form.patternNumber) && clean(form.season) && clean(form.styleNumber))
+      && !hasBlankChildColor
+      && !duplicateChildColor;
+
+  const masterWarningCount = Math.max(0, Number(selectedMaster?.linkedBomCount || 0) || 0);
+  const identityDisabled = mode === 'MASTER';
+
+  const submit = () => {
+    const masterPayload = {
+      patternNumber: clean(form.patternNumber),
+      productColor: clean(form.colorName),
+      season: clean(form.season),
+      styleNumber: clean(form.styleNumber),
+      active: String(form.active) !== 'false',
+      childColors: normalizedChildColors
+    };
+
+    onSave?.({
+      mode,
+      imageFile,
+      removeImage: removeImageRequested && !imageFile,
+      productColorMasterId: mode === 'MASTER' ? form.productColorMasterId : null,
+      masterPayload,
+      colorName: masterPayload.productColor,
+      patternNumber: masterPayload.patternNumber,
+      season: masterPayload.season,
+      styleNumber: masterPayload.styleNumber,
+      sequence: asNumber(form.sequence)
+    });
+  };
 
   return (
-    <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="sm">
+    <>
+      <Dialog
+        open={open}
+      onClose={saving ? undefined : onClose}
+      fullWidth
+      maxWidth="lg"
+      PaperProps={{ sx: { maxHeight: 'calc(100vh - 32px)' } }}
+    >
       <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
         {record ? 'Edit Product Color' : 'Add Product Color'}
         <Typography sx={{ mt: 0.25, fontSize: '0.8rem', color: 'text.secondary', fontWeight: 400 }}>
-          For a manual BOM, select Product Color Master so its saved Child Colors are available when users edit the BOM material lines.
+          Use the same Product Color Master form: identity, status, one image and Child Colors. Sequence remains specific to this BOM.
         </Typography>
         <IconButton onClick={onClose} disabled={saving} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
       </DialogTitle>
+
       <DialogContent dividers>
-        <Stack spacing={1.4}>
-          <TextField
-            select
-            label="Product Color Master"
-            value={form.productColorMasterId}
-            onChange={chooseMaster}
-            helperText={productColorMasters.length ? 'Select a saved Product Color. Its saved image and Child Colors are reused in this BOM.' : 'Create Product Color and upload its image in Product Color Master first.'}
-          >
-            {productColorMasters.map((item) => (
-              <MenuItem key={item.id} value={item.id}>
-                {productColorMasterLabel(item) || item.productColor}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField required label="Product / Style Color" value={form.colorName} placeholder="BLACK" disabled />
-          <TextField required label="Pattern Number" value={form.patternNumber} disabled />
-          <TextField required label="Season" value={form.season} disabled />
-          <TextField required label="Style Number" value={form.styleNumber} disabled />
-          <TextField label="Sequence" type="number" value={form.sequence} onChange={(event) => setForm((current) => ({ ...current, sequence: event.target.value }))} inputProps={{ min: 1, step: 1 }} />
-          <Alert severity="info" sx={{ py: 0.25 }}>
-            Pattern Number, Product / Style Color, Season and Style Number must all match the selected Product Color Master. Sequence remains specific to this BOM.
-          </Alert>
-          <Button component={RouterLink} to={buyerPath(buyerKey, 'product-colors')} size="small" sx={{ alignSelf: 'flex-start', textTransform: 'none' }}>
-            Manage Product Color Master
-          </Button>
+        <Stack spacing={1.75}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+            <Button
+              fullWidth
+              variant={mode === 'MASTER' ? 'contained' : 'outlined'}
+              onClick={() => chooseMode('MASTER')}
+              disabled={!productColorMasters.length}
+              sx={{ textTransform: 'none', boxShadow: 'none', ...(mode === 'MASTER' ? { backgroundColor: '#103B5C' } : {}) }}
+            >
+              Choose From Master
+            </Button>
+            <Button
+              fullWidth
+              variant={mode === 'NEW' ? 'contained' : 'outlined'}
+              onClick={() => chooseMode('NEW')}
+              sx={{ textTransform: 'none', boxShadow: 'none', ...(mode === 'NEW' ? { backgroundColor: '#103B5C' } : {}) }}
+            >
+              Create New
+            </Button>
+          </Stack>
+
+          {mode === 'MASTER' && (
+            <>
+              <TextField
+                select
+                required
+                label="Product Color Master"
+                value={form.productColorMasterId}
+                onChange={chooseMaster}
+                helperText={productColorMasters.length ? 'Select an existing Master record. Child Colors, Status and Image can be updated before linking.' : 'No Product Color is available in Master Data.'}
+              >
+                {productColorMasters.map((item) => (
+                  <MenuItem key={item.id} value={item.id}>
+                    {productColorMasterLabel(item) || item.productColor}{item.active === false ? ' · Inactive' : ''}
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              {selectedMaster && (
+                <Alert severity="warning" sx={{ py: 0.5 }}>
+                  Changes to Status, Product Image or Child Colors update Product Color Master
+                  {masterWarningCount > 0 ? ` and affect ${masterWarningCount} linked BOM(s)` : ''}. Identity fields remain locked.
+                </Alert>
+              )}
+
+              {masterDetailLoading && (
+                <Alert severity="info" sx={{ py: 0.45 }}>Checking which Child Colors are already used...</Alert>
+              )}
+              {masterDetailError && (
+                <Alert severity="warning" sx={{ py: 0.45 }}>{masterDetailError}</Alert>
+              )}
+            </>
+          )}
+
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+            <TextField required label="Pattern Number" value={form.patternNumber} disabled={identityDisabled} onChange={(event) => setForm((current) => ({ ...current, patternNumber: event.target.value }))} placeholder="LLB 352 A" />
+            <TextField required label="Product / Style Color" value={form.colorName} disabled={identityDisabled} onChange={(event) => setForm((current) => ({ ...current, colorName: event.target.value }))} placeholder="BLACK" />
+            <TextField required label="Season" value={form.season} disabled={identityDisabled} onChange={(event) => setForm((current) => ({ ...current, season: event.target.value }))} placeholder="F26" />
+            <TextField required label="Style Number" value={form.styleNumber} disabled={identityDisabled} onChange={(event) => setForm((current) => ({ ...current, styleNumber: event.target.value }))} placeholder="271893" />
+            <TextField select label="Status" value={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.value }))}>
+              <MenuItem value="true">Active</MenuItem>
+              <MenuItem value="false">Inactive</MenuItem>
+            </TextField>
+            <TextField label="Sequence In This BOM" type="number" value={form.sequence} onChange={(event) => setForm((current) => ({ ...current, sequence: event.target.value }))} inputProps={{ min: 1, step: 1 }} helperText="Sequence is stored on this BOM link, not in Product Color Master." />
+          </Box>
+
+          <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e2e8f0', borderRadius: 1.5, backgroundColor: '#fbfdff' }}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+              <Box sx={{ width: { xs: 1, md: 240 }, flexShrink: 0 }}>
+                {imagePreviewUrl ? (
+                  <Box component="img" src={imagePreviewUrl} alt="Selected Product Color" sx={{ width: 1, height: 150, objectFit: 'contain', display: 'block', borderRadius: 1, backgroundColor: '#f8fafc' }} />
+                ) : selectedMaster && !removeImageRequested ? (
+                  <ProductColorImage productColor={selectedMaster} height={150} emptyText="No product image" />
+                ) : (
+                  <Stack alignItems="center" justifyContent="center" spacing={0.5} sx={{ height: 150, backgroundColor: '#f8fafc', borderRadius: 1 }}>
+                    <Image color="action" />
+                    <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>
+                      {removeImageRequested ? 'Image will be removed when saved' : 'No image selected'}
+                    </Typography>
+                  </Stack>
+                )}
+              </Box>
+
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Product Image</Typography>
+                <Typography sx={{ mt: 0.25, fontSize: '0.76rem', color: 'text.secondary' }}>
+                  One shared image only. Uploading a new image replaces the image in Product Color Master and every linked BOM reuses it.
+                </Typography>
+                <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 1 }}>
+                  <Button component="label" size="small" variant="outlined" startIcon={<FileUpload />} sx={{ textTransform: 'none' }} disabled={saving}>
+                    {selectedMasterHasImage || imageFile ? 'Upload / Replace Image' : 'Upload Image'}
+                    <input hidden type="file" accept="image/*" onChange={selectImage} />
+                  </Button>
+
+                  {(imageFile || (selectedMasterHasImage && !removeImageRequested)) && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="warning"
+                      startIcon={<Delete />}
+                      disabled={saving}
+                      onClick={() => {
+                        if (imageFile) {
+                          setImageFile(null);
+                          setImageError('');
+                        } else {
+                          setRemoveImageRequested(true);
+                        }
+                      }}
+                      sx={{ textTransform: 'none' }}
+                    >
+                      Remove Image
+                    </Button>
+                  )}
+
+                  {removeImageRequested && (
+                    <Button size="small" onClick={() => setRemoveImageRequested(false)} disabled={saving} sx={{ textTransform: 'none' }}>
+                      Undo Remove
+                    </Button>
+                  )}
+                </Stack>
+                {imageFile && <Typography sx={{ mt: 0.6, fontSize: '0.72rem', color: 'text.secondary' }}>{imageFile.name}</Typography>}
+                {imageError && <Typography sx={{ mt: 0.6, fontSize: '0.72rem', color: 'error.main' }}>{imageError}</Typography>}
+              </Box>
+            </Stack>
+          </Paper>
+
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
+            <Box>
+              <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Child Colors</Typography>
+              <Typography sx={{ fontSize: '0.76rem', color: 'text.secondary' }}>
+                Add, edit or remove Child Colors exactly as in Product Color Master. Existing IDs are retained when a row is edited.
+              </Typography>
+            </Box>
+            <Button
+              size="small"
+              startIcon={<Add />}
+              variant="outlined"
+              onClick={() => setForm((current) => ({ ...current, childColors: [...current.childColors, blankChildColor()] }))}
+              disabled={saving || (mode === 'MASTER' && !selectedMaster)}
+              sx={{ textTransform: 'none' }}
+            >
+              Add Child Color
+            </Button>
+          </Stack>
+
+          {duplicateChildColor && (
+            <Alert severity="error" sx={{ py: 0.4 }}>Duplicate Child Colors are not allowed.</Alert>
+          )}
+
+          {form.childColors.some(isChildColorLocked) && (
+            <Alert severity="info" sx={{ py: 0.45 }}>
+              Child Colors already used by Core or Packing material lines are locked and cannot be deleted. Rename is still allowed.
+            </Alert>
+          )}
+
+          <TableContainer sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
+            <Table size="small" sx={{ minWidth: 620 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 64, fontWeight: 900, backgroundColor: '#f8fafc' }}>No.</TableCell>
+                  <TableCell sx={{ fontWeight: 900, backgroundColor: '#f8fafc' }}>Child Color / Comment</TableCell>
+                  <TableCell sx={{ width: 80, fontWeight: 900, backgroundColor: '#f8fafc' }} align="center">Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {form.childColors.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3} sx={{ color: 'text.secondary', py: 2, textAlign: 'center' }}>
+                      No Child Color is entered yet.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {form.childColors.map((item, index) => (
+                  <TableRow key={item.id || `child-${index}`}>
+                    <TableCell sx={{ color: 'text.secondary', fontWeight: 700 }}>{index + 1}</TableCell>
+                    <TableCell>
+                      <TextField
+                        size="small"
+                        required
+                        value={item.childColor}
+                        onChange={(event) => changeChildColor(index, event.target.value)}
+                        placeholder="MINERAL GREY YKK#181"
+                        fullWidth
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Tooltip
+                        title={isChildColorLocked(item)
+                          ? childColorLockMessage(item)
+                          : (mode === 'MASTER' && clean(item?.id) && (masterDetailLoading || masterDetailError)
+                            ? 'Usage must be loaded before deleting an existing Child Color.'
+                            : 'Delete Child Color')}
+                        arrow
+                      >
+                        <span>
+                          <IconButton
+                            color="error"
+                            size="small"
+                            onClick={() => removeChildColor(index)}
+                            disabled={saving
+                              || isChildColorLocked(item)
+                              || (mode === 'MASTER' && clean(item?.id) && (masterDetailLoading || Boolean(masterDetailError)))}
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </Stack>
       </DialogContent>
+
       <DialogActions sx={{ p: 2 }}>
         <Button onClick={onClose} disabled={saving} sx={{ textTransform: 'none' }}>Cancel</Button>
-        <Button variant="contained" disabled={saving || !canSave} onClick={() => onSave?.({
-          productColorMasterId: form.productColorMasterId || null,
-          colorName: form.colorName.trim(),
-          patternNumber: form.patternNumber.trim(),
-          season: form.season.trim(),
-          styleNumber: form.styleNumber.trim(),
-          sequence: asNumber(form.sequence)
-        })} sx={{ textTransform: 'none', fontWeight: 800, backgroundColor: '#103B5C' }}>
-          {saving ? 'Saving...' : record ? 'Save Changes' : 'Create Product Color'}
+        <Button
+          variant="contained"
+          disabled={saving || !canSave}
+          onClick={submit}
+          sx={{ textTransform: 'none', fontWeight: 800, backgroundColor: '#103B5C' }}
+        >
+          {saving ? 'Saving...' : record ? 'Save Product Color' : 'Add Product Color'}
         </Button>
       </DialogActions>
-    </Dialog>
+      </Dialog>
+
+      <ConfirmDeleteDialog
+        open={Boolean(childColorDeleteTarget)}
+        title="Remove Child Color"
+        subtitle="Please confirm before removing this Child Color from the Product Color."
+        message={<>Remove <b>{childColorDeleteTarget?.label}</b> from this Product Color?</>}
+        warning="The change is applied when you save. Child Colors already used by Core or Packing material lines remain protected and cannot be removed."
+        itemName="Child Color"
+        confirmText="Remove"
+        deleting={saving}
+        onClose={() => setChildColorDeleteTarget(null)}
+        onConfirm={confirmRemoveChildColor}
+      />
+    </>
   );
 }
 
-function ProtectedAttachmentImage({ bomId, attachment, onOpen }) {
+function ProtectedAttachmentImage({ bomId, attachment, onOpen, height = 105 }) {
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewError, setPreviewError] = useState(false);
 
@@ -884,11 +1380,11 @@ function ProtectedAttachmentImage({ bomId, attachment, onOpen }) {
         onClick={() => onOpen?.(attachment)}
         sx={{
           width: 1,
-          height: 105,
+          height,
           objectFit: 'contain',
           display: 'block',
           backgroundColor: '#f8fafc',
-          cursor: 'pointer'
+          cursor: 'zoom-in'
         }}
       />
     );
@@ -899,13 +1395,123 @@ function ProtectedAttachmentImage({ bomId, attachment, onOpen }) {
       alignItems="center"
       justifyContent="center"
       spacing={0.5}
-      sx={{ height: 105, backgroundColor: '#f8fafc' }}
+      sx={{ height, backgroundColor: '#f8fafc' }}
     >
       <Image color={previewError ? 'disabled' : 'action'} />
       <Typography sx={{ fontSize: '0.66rem', color: 'text.secondary' }}>
         {previewError ? 'Preview unavailable' : 'Loading preview...'}
       </Typography>
     </Stack>
+  );
+}
+
+function BomAttachmentImagePreviewDialog({ open, bomId, attachment, onClose }) {
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+
+    setPreviewUrl('');
+    setLoadError(false);
+
+    if (!open || !bomId || !attachment?.id) {
+      setLoading(false);
+      return undefined;
+    }
+
+    setLoading(true);
+    getBomAttachmentObjectUrl(bomId, attachment.id)
+      .then((url) => {
+        objectUrl = url;
+        if (!active) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setPreviewUrl(url);
+      })
+      .catch(() => {
+        if (active) setLoadError(true);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [open, bomId, attachment?.id]);
+
+  const title = attachment?.originalFileName || 'BOM Image';
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      maxWidth="lg"
+      PaperProps={{
+        sx: {
+          width: 'min(1100px, calc(100vw - 32px))',
+          maxHeight: 'calc(100vh - 32px)',
+          borderRadius: 2
+        }
+      }}
+    >
+      <DialogTitle sx={{ pr: 7, py: 1.5, fontWeight: 900, color: '#103B5C' }}>
+        <Typography noWrap sx={{ pr: 1, fontWeight: 900, color: '#103B5C' }}>
+          {title}
+        </Typography>
+        <IconButton
+          aria-label="Close image preview"
+          onClick={onClose}
+          sx={{ position: 'absolute', right: 12, top: 8 }}
+        >
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent
+        dividers
+        sx={{
+          p: { xs: 1, sm: 2 },
+          minHeight: 260,
+          display: 'grid',
+          placeItems: 'center',
+          bgcolor: '#0f172a'
+        }}
+      >
+        {loading && (
+          <Typography sx={{ color: '#fff', fontWeight: 700 }}>Loading image...</Typography>
+        )}
+
+        {!loading && loadError && (
+          <Stack spacing={1} alignItems="center" sx={{ color: '#fff', textAlign: 'center' }}>
+            <Image sx={{ fontSize: 54, opacity: 0.8 }} />
+            <Typography sx={{ fontWeight: 800 }}>Image preview is unavailable.</Typography>
+          </Stack>
+        )}
+
+        {!loading && previewUrl && (
+          <Box
+            component="img"
+            src={previewUrl}
+            alt={title}
+            sx={{
+              display: 'block',
+              maxWidth: '100%',
+              maxHeight: 'calc(100vh - 150px)',
+              width: 'auto',
+              height: 'auto',
+              objectFit: 'contain',
+              mx: 'auto'
+            }}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -977,6 +1583,79 @@ function AttachmentCards({
     </Stack>
   );
 }
+
+function WholeBomImageCard({ bomId, attachment, saving, actionsDisabled, onUpload, onDelete, onOpen, onDownload }) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 0.8,
+        border: '1px solid #e2e8f0',
+        borderRadius: 1.25,
+        backgroundColor: '#fff',
+        height: '100%'
+      }}
+    >
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ height: '100%' }}>
+        <Box
+          sx={{
+            width: 132,
+            height: 82,
+            flexShrink: 0,
+            overflow: 'hidden',
+            borderRadius: 1,
+            border: '1px solid #eef2f7',
+            backgroundColor: '#f8fafc'
+          }}
+        >
+          {attachment ? (
+            <ProtectedAttachmentImage bomId={bomId} attachment={attachment} onOpen={onOpen} height={82} />
+          ) : (
+            <Stack alignItems="center" justifyContent="center" spacing={0.3} sx={{ height: 82 }}>
+              <Image color="action" sx={{ fontSize: 22 }} />
+              <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>No image</Typography>
+            </Stack>
+          )}
+        </Box>
+
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={{ fontWeight: 850, fontSize: '0.78rem', color: '#0f172a' }}>Whole BOM Image</Typography>
+          {attachment && (
+            <Tooltip title={attachment.originalFileName || 'Whole BOM image'}>
+              <Typography noWrap sx={{ mt: 0.2, fontSize: '0.68rem', color: 'text.secondary' }}>
+                {attachment.originalFileName || 'Whole BOM image'}
+              </Typography>
+            </Tooltip>
+          )}
+          <Stack direction="row" flexWrap="wrap" gap={0.45} sx={{ mt: 0.65, '& .MuiButton-root': { minHeight: 28, px: 0.8, fontSize: '0.68rem' } }}>
+            <Tooltip title={actionsDisabled ? 'BOM permission is required.' : ''} disableHoverListener={!actionsDisabled}>
+              <span>
+                <Button component="label" size="small" variant="outlined" startIcon={<Image />} disabled={actionsDisabled || saving} sx={{ textTransform: 'none' }}>
+                  {attachment ? 'Replace' : 'Upload'}
+                  <input hidden type="file" accept="image/*" onChange={onUpload} />
+                </Button>
+              </span>
+            </Tooltip>
+            {attachment && (
+              <>
+                <Button size="small" onClick={() => onOpen?.(attachment)} sx={{ textTransform: 'none' }}>Open</Button>
+                <Button size="small" onClick={() => onDownload?.(attachment)} sx={{ textTransform: 'none' }}>Download</Button>
+                <Tooltip title={actionsDisabled ? 'BOM permission is required.' : 'Delete image'}>
+                  <span>
+                    <IconButton size="small" color="error" disabled={actionsDisabled || saving} onClick={onDelete} sx={{ width: 28, height: 28 }}>
+                      <Delete sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </>
+            )}
+          </Stack>
+        </Box>
+      </Stack>
+    </Paper>
+  );
+}
+
 function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
   const [previewUrl, setPreviewUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1194,6 +1873,29 @@ function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsD
   );
 }
 
+const BOM_LINE_COLUMN_SIZES = {
+  'No.': { minWidth: 90, maxWidth: 110 },
+  'Material Type': { minWidth: 150, maxWidth: 190 },
+  Image: { minWidth: 150, maxWidth: 170 },
+  'SAP Code': { minWidth: 140, maxWidth: 180 },
+  'Detail No': { minWidth: 100, maxWidth: 125 },
+  Position: { minWidth: 280, maxWidth: 340 },
+  'Position Description': { minWidth: 300, maxWidth: 380 },
+  P: { minWidth: 80, maxWidth: 95 },
+  X: { minWidth: 120, maxWidth: 145 },
+  Y: { minWidth: 120, maxWidth: 145 },
+  'Q.TY': { minWidth: 120, maxWidth: 145 },
+  '><': { minWidth: 100, maxWidth: 120 },
+  'Legacy Costing / MK': { minWidth: 160, maxWidth: 195 },
+  'Legacy Costing / Unit': { minWidth: 160, maxWidth: 195 },
+  'Detail CONS.': { minWidth: 170, maxWidth: 210 },
+  'Consumption MPR': { minWidth: 180, maxWidth: 220 },
+  'Consumption Unit': { minWidth: 150, maxWidth: 180 },
+  'Remarks On BOM': { minWidth: 280, maxWidth: 360 },
+  'Additional Remarks': { minWidth: 280, maxWidth: 360 },
+  'Product Colors': { minWidth: 380, maxWidth: 480 }
+};
+
 function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach, onImageUpload, onImageDelete, onImagePreview, emptyText = 'No BOM lines.', actionsDisabled = false }) {
   const columns = [
     ['No.', (line) => line.materialGroupNo],
@@ -1220,16 +1922,26 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
 
   return (
     <TableContainer sx={{ overflowX: 'auto' }}>
-      <Table size="small" sx={{ minWidth: 2200 }}>
+      <Table size="small" sx={{ minWidth: 3880 }}>
         <TableHead>
           <TableRow>
             {columns.map(([label]) => (
-              <TableCell key={label} sx={{ fontWeight: 900, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>
+              <TableCell
+                key={label}
+                sx={{
+                  fontWeight: 900,
+                  fontSize: '0.72rem',
+                  backgroundColor: '#f8fafc',
+                  whiteSpace: 'nowrap',
+                  minWidth: BOM_LINE_COLUMN_SIZES[label]?.minWidth,
+                  maxWidth: BOM_LINE_COLUMN_SIZES[label]?.maxWidth
+                }}
+              >
                 {label}
               </TableCell>
             ))}
-            <TableCell sx={{ fontWeight: 900, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>Files</TableCell>
-            <TableCell sx={{ fontWeight: 900, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>Actions</TableCell>
+            <TableCell sx={{ minWidth: 90, fontWeight: 900, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>Files</TableCell>
+            <TableCell sx={{ minWidth: 140, fontWeight: 900, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -1238,14 +1950,24 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
           ) : rows.map((line) => (
             <TableRow key={line.id} hover data-bom-line-id={line.id} sx={{ scrollMarginTop: 96 }}>
               {columns.map(([label, render]) => (
-                <TableCell key={label} sx={{ fontSize: '0.75rem', verticalAlign: 'top', maxWidth: label === 'Position Description' ? 220 : 170, whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                <TableCell
+                  key={label}
+                  sx={{
+                    fontSize: '0.75rem',
+                    verticalAlign: 'top',
+                    minWidth: BOM_LINE_COLUMN_SIZES[label]?.minWidth,
+                    maxWidth: BOM_LINE_COLUMN_SIZES[label]?.maxWidth,
+                    whiteSpace: 'normal',
+                    wordBreak: 'break-word'
+                  }}
+                >
                   {label === 'Image'
                     ? <BomLineImageCell bomId={bomId} line={line} onUpload={onImageUpload} onDelete={onImageDelete} onPreview={onImagePreview} actionsDisabled={actionsDisabled} />
                     : (render(line) ?? '—')}
                 </TableCell>
               ))}
-              <TableCell><Chip size="small" label={line.attachmentCount ?? (line.attachments || []).length} variant="outlined" /></TableCell>
-              <TableCell sx={{ whiteSpace: 'nowrap' }}>
+              <TableCell sx={{ minWidth: 90 }}><Chip size="small" label={line.attachmentCount ?? (line.attachments || []).length} variant="outlined" /></TableCell>
+              <TableCell sx={{ minWidth: 140, whiteSpace: 'nowrap' }}>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Add Line File'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onAttach(line)}><Image fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Edit'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onEdit(line)}><Edit fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Delete'}><span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete(line)}><Delete fontSize="small" /></IconButton></span></Tooltip>
@@ -1266,6 +1988,7 @@ export default function BomDetailPage() {
   const writeBlockedMessage = 'BOM permission is required to modify BOM data.';
   const buyerFormatMessage = 'BOM Excel replacement is currently configured for L.L.BEAN only.';
   const fileRef = useRef(null);
+  const lineAttachmentInputRef = useRef(null);
   const excelUploadTickerRef = useRef(null);
   const scrollRestoreRef = useRef(null);
   const scrollTargetRef = useRef(null);
@@ -1279,17 +2002,14 @@ export default function BomDetailPage() {
   const [packingCtx, setPackingCtx] = useState(null);
   const [productColorCtx, setProductColorCtx] = useState(null);
   const [notice, setNotice] = useState({ open: false, severity: 'success', message: '' });
-  const [attachmentScope, setAttachmentScope] = useState('BOM');
-  const [attachmentLineId, setAttachmentLineId] = useState('');
+  const [pendingAttachmentLineId, setPendingAttachmentLineId] = useState('');
   const [productColorMasters, setProductColorMasters] = useState([]);
-  const [mprReviews, setMprReviews] = useState([]);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewSavingId, setReviewSavingId] = useState('');
   const [lineFilters, setLineFilters] = useState(emptyLineFilters);
   const [linePages, setLinePages] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [imagePreviewLine, setImagePreviewLine] = useState(null);
+  const [attachmentPreview, setAttachmentPreview] = useState(null);
   const [excelUploadProgress, setExcelUploadProgress] = useState(initialUploadProgress());
 
   const notify = useCallback((message, severity = 'success') => setNotice({ open: true, severity, message }), []);
@@ -1299,10 +2019,9 @@ export default function BomDetailPage() {
 
     try {
       if (showLoading) setLoading(true);
-      const [data, masterResponse, reviews] = await Promise.all([
+      const [data, masterResponse] = await Promise.all([
         getBom(bomId, buyerKey),
-        listMasterData('productColor', { buyerKey, page: 0, size: 200 }),
-        listBomMprReviews(bomId)
+        listMasterData('productColor', { buyerKey, page: 0, size: 200 })
       ]);
 
       const scopes = [
@@ -1329,7 +2048,6 @@ export default function BomDetailPage() {
       setBom(nextBom);
       setLinePages(nextPages);
       setProductColorMasters(Array.isArray(masterResponse) ? masterResponse : (masterResponse?.content || masterResponse?.items || []));
-      setMprReviews(Array.isArray(reviews) ? reviews : []);
       setHeaderForm(data?.header || {});
       return nextBom;
     } catch (error) {
@@ -1455,11 +2173,6 @@ export default function BomDetailPage() {
   }, [bom?.coreLines, bom?.packings, lineFilters.source]);
   const matchedBomLineCount = (lineFilters.source && lineFilters.source !== '__CORE__' ? 0 : filteredCoreLines.length)
     + matchedPackingLineCount;
-  const pendingMprReviewCount = useMemo(
-    () => mprReviews.filter((review) => review?.status === 'PENDING_BOM_REVIEW').length,
-    [mprReviews]
-  );
-
   const rootAttachments = useMemo(
     () => (bom?.attachments || []),
     [bom]
@@ -1468,6 +2181,11 @@ export default function BomDetailPage() {
     () => rootAttachments.filter((item) => String(item.scope || 'BOM').toUpperCase() === 'BOM'),
     [rootAttachments]
   );
+  const wholeBomImages = useMemo(
+    () => bomAttachments.filter(isImageAttachment),
+    [bomAttachments]
+  );
+  const wholeBomImage = wholeBomImages.length ? wholeBomImages[wholeBomImages.length - 1] : null;
 
   const requestDelete = useCallback((target) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
@@ -1541,31 +2259,86 @@ export default function BomDetailPage() {
     }
   };
 
-  const saveProductColor = async (payload) => {
+  const saveProductColor = async (dialogPayload) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     const isCreate = !productColorCtx?.record?.id;
+    let createdMasterId = '';
+    let masterChanged = false;
 
     try {
       setSaving(true);
+
+      let masterId = dialogPayload?.productColorMasterId || '';
+      let master = productColorMasters.find((item) => String(item?.id || '') === String(masterId)) || null;
+
+      if (dialogPayload?.mode === 'NEW') {
+        master = await createMasterData('productColor', dialogPayload.masterPayload, { buyerKey });
+        masterId = createdIdFromResponse(master);
+        createdMasterId = masterId;
+        masterChanged = true;
+        if (!masterId) throw new Error('Product Color Master was created but its ID was not returned.');
+      } else {
+        if (!masterId) throw new Error('Select a Product Color Master.');
+        const updatedMaster = await updateMasterData('productColor', masterId, dialogPayload.masterPayload, { buyerKey });
+        master = updatedMaster?.id
+          ? updatedMaster
+          : { ...(master || {}), ...dialogPayload.masterPayload, id: masterId };
+        masterChanged = true;
+      }
+
+      const bomPayload = {
+        productColorMasterId: masterId,
+        colorName: master?.productColor || dialogPayload?.masterPayload?.productColor || dialogPayload?.colorName || '',
+        patternNumber: master?.patternNumber || dialogPayload?.masterPayload?.patternNumber || dialogPayload?.patternNumber || '',
+        season: master?.season || dialogPayload?.masterPayload?.season || dialogPayload?.season || '',
+        styleNumber: master?.styleNumber || dialogPayload?.masterPayload?.styleNumber || dialogPayload?.styleNumber || '',
+        sequence: dialogPayload?.sequence ?? null
+      };
+
       let savedProductColor = null;
       if (isCreate) {
-        savedProductColor = await addBomProductColor(bomId, payload);
-        notify('Product Color link created. Manage the shared image in Product Color Master edit screen.');
+        savedProductColor = await addBomProductColor(bomId, bomPayload);
       } else {
-        await updateBomProductColor(bomId, productColorCtx.record.id, payload);
-        notify('Product Color Information Updated. Linked Packing And Material Line Views Now Use The New Information.');
+        await updateBomProductColor(bomId, productColorCtx.record.id, bomPayload);
       }
+
+      let imageActionFailed = false;
+      try {
+        if (dialogPayload?.imageFile) {
+          await uploadProductColorImage(masterId, dialogPayload.imageFile);
+        } else if (dialogPayload?.removeImage) {
+          await deleteProductColorImage(masterId);
+        }
+      } catch (imageError) {
+        imageActionFailed = true;
+      }
+
       setProductColorCtx(null);
 
       if (isCreate) {
         const nextBom = await load({ keepScroll: false, showLoading: false });
-        const createdProductColorId = resolveCreatedProductColorId(savedProductColor, nextBom, payload);
+        const createdProductColorId = resolveCreatedProductColorId(savedProductColor, nextBom, bomPayload);
         scrollToCreatedTarget(createdProductColorId ? `[data-bom-product-color-id="${cssAttributeEscape(createdProductColorId)}"]` : '');
       } else {
         await reloadWithoutJump();
       }
+
+      if (imageActionFailed) {
+        notify('Product Color and Child Colors were saved, but the image change could not be completed.', 'warning');
+      } else if (dialogPayload?.mode === 'NEW') {
+        notify('New Product Color Master, Child Colors and BOM link were saved.');
+      } else if (isCreate) {
+        notify('Product Color Master was updated and linked to this BOM.');
+      } else {
+        notify('Product Color Master, Child Colors, image and BOM link were updated.');
+      }
     } catch (error) {
-      notify(getApiError(error, 'Unable to save Product Color.'), 'error');
+      const fallback = createdMasterId
+        ? 'Product Color Master was created, but it could not be linked to this BOM.'
+        : masterChanged
+          ? 'Product Color Master may have been updated, but the BOM link could not be saved.'
+          : 'Unable to save Product Color.';
+      notify(getApiError(error, fallback), 'error');
     } finally {
       setSaving(false);
     }
@@ -1727,10 +2500,7 @@ export default function BomDetailPage() {
     event.target.value = '';
     if (!file) return;
 
-    const options = target || {
-      scope: attachmentScope,
-      lineId: attachmentScope === 'LINE' ? attachmentLineId : ''
-    };
+    const options = target || { scope: 'BOM', lineId: '' };
 
     if (options.scope === 'LINE' && !options.lineId) {
       notify('Select A Material Line Before Uploading.', 'error');
@@ -1749,6 +2519,41 @@ export default function BomDetailPage() {
     }
   };
 
+
+  const chooseLineAttachment = (line) => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!line?.id) return;
+    setPendingAttachmentLineId(line.id);
+    requestAnimationFrame(() => lineAttachmentInputRef.current?.click());
+  };
+
+  const uploadPendingLineAttachment = async (event) => {
+    const lineId = pendingAttachmentLineId;
+    if (!lineId) {
+      event.target.value = '';
+      return;
+    }
+    await uploadAttachment(event, { scope: 'LINE', lineId });
+    setPendingAttachmentLineId('');
+  };
+
+  const deleteWholeBomImage = async () => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!wholeBomImages.length) return;
+    try {
+      setSaving(true);
+      for (const attachment of wholeBomImages) {
+        await deleteBomAttachment(bomId, attachment.id);
+      }
+      notify('Whole BOM image deleted.');
+      await reloadWithoutJump();
+    } catch (error) {
+      notify(getApiError(error, 'Unable to delete Whole BOM image.'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const deleteAttachment = async (attachmentId) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     try {
@@ -1761,6 +2566,11 @@ export default function BomDetailPage() {
   };
 
   const openAttachment = async (attachment) => {
+    if (isImageAttachment(attachment)) {
+      setAttachmentPreview(attachment);
+      return;
+    }
+
     try {
       await openBomAttachment(bomId, attachment.id);
     } catch (error) {
@@ -1780,9 +2590,41 @@ export default function BomDetailPage() {
     }
   };
 
+  const bomDownloadDate = () => {
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+  };
+
+  const bomDownloadPart = (value, fallback) => {
+    const safe = String(value || fallback || '').trim()
+      .replace(/[^A-Za-z0-9._-]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return safe || fallback;
+  };
+
+  const bomDownloadName = (template = false) => {
+    const buyer = bomDownloadPart(buyerKey, 'BUYER');
+    const bomNo = bomDownloadPart(bom?.bomNo, 'BOM');
+    const date = bomDownloadDate();
+    return template
+      ? `BOM_${buyer}_${bomNo}_Template_${date}.xlsx`
+      : `BOM_${buyer}_${bomNo}_${date}.xlsx`;
+  };
+
+  const downloadBomUploadTemplate = async () => {
+    try {
+      await downloadWithAuth(getBomTemplateUrl(bomId), bomDownloadName(true));
+      notify('Blank BOM template downloaded in the same layout as Export Original Format.');
+    } catch (error) {
+      notify(getApiError(error, 'Unable to download the BOM upload template.'), 'error');
+    }
+  };
+
   const exportOriginalFormat = async () => {
     try {
-      await downloadWithAuth(getBomExportUrl(bomId), `${bom.bomNo || 'BOM'}.xlsx`);
+      await downloadWithAuth(getBomExportUrl(bomId), bomDownloadName(false));
     } catch (error) {
       notify(getApiError(error, 'Unable to export BOM.'), 'error');
     }
@@ -1804,38 +2646,12 @@ export default function BomDetailPage() {
         await removeProductColor(deleteTarget.id);
       } else if (deleteTarget.type === 'attachment') {
         await deleteAttachment(deleteTarget.id);
+      } else if (deleteTarget.type === 'wholeBomImage') {
+        await deleteWholeBomImage();
       }
       setDeleteTarget(null);
     } finally {
       setDeleteSaving(false);
-    }
-  };
-
-  const applyMprReview = async (reviewId, comment) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
-    try {
-      setReviewSavingId(reviewId);
-      await applyBomMprReview(bomId, reviewId, { comment });
-      notify('Sales MPR change was applied to the selected BOM line.');
-      await reloadWithoutJump();
-    } catch (error) {
-      notify(getApiError(error, 'Unable to apply the MPR change to BOM.'), 'error');
-    } finally {
-      setReviewSavingId('');
-    }
-  };
-
-  const recheckMprReview = async (reviewId, comment) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
-    try {
-      setReviewSavingId(reviewId);
-      await recheckBomMprReview(bomId, reviewId, { comment });
-      notify('The item was returned to Sales for recheck.');
-      await reloadWithoutJump();
-    } catch (error) {
-      notify(getApiError(error, 'Unable to return the MPR change to Sales.'), 'error');
-    } finally {
-      setReviewSavingId('');
     }
   };
 
@@ -1844,7 +2660,7 @@ export default function BomDetailPage() {
   }
 
   return (
-    <Box sx={{ p: { xs: 1.5, md: 2.5 } }}>
+    <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ mb: 2 }}>
         <Box>
           <Button component={RouterLink} to={buyerPath(buyerKey, `orders/${orderId}`)} sx={{ px: 0, textTransform: 'none' }}>← Back To Order</Button>
@@ -1865,22 +2681,17 @@ export default function BomDetailPage() {
           gap={1}
           sx={{ '& .MuiButton-root': compactActionButtonSx }}
         >
+          <Button size="small" variant="outlined" startIcon={<FileDownload />} onClick={downloadBomUploadTemplate}>
+            BOM Template
+          </Button>
           <Button size="small" variant="outlined" startIcon={<FileDownload />} onClick={exportOriginalFormat}>
             Export Original Format
           </Button>
-          <Tooltip title={!canWrite ? writeBlockedMessage : 'Review Sales MPR changes'}><span><Button
-            size="small"
-            variant={pendingMprReviewCount ? 'contained' : 'outlined'}
-            onClick={() => setReviewOpen(true)}
-            disabled={!canWrite || saving || Boolean(reviewSavingId)}
-            sx={pendingMprReviewCount ? { backgroundColor: '#B45309' } : undefined}
-          >
-            Review MPR Changes{pendingMprReviewCount ? ` (${pendingMprReviewCount})` : ''}
-          </Button></span></Tooltip>
           <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanExcelEnabled ? buyerFormatMessage : 'Replace BOM Excel')}><span><Button size="small" variant="outlined" startIcon={<FileUpload />} onClick={() => fileRef.current?.click()} disabled={saving || !canWrite || !llBeanExcelEnabled}>
             Replace BOM Excel
           </Button></span></Tooltip>
           <input ref={fileRef} type="file" accept=".xls,.xlsx" hidden onChange={uploadExcel} />
+          <input ref={lineAttachmentInputRef} type="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" hidden onChange={uploadPendingLineAttachment} />
           <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Header'}><span><Button size="small" variant="contained" startIcon={<Save />} onClick={() => setHeaderOpen(true)} disabled={!canWrite} sx={{ backgroundColor: '#103B5C' }}>
             Edit Header
           </Button></span></Tooltip>
@@ -1893,24 +2704,70 @@ export default function BomDetailPage() {
         </Alert>
       )}
 
-      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2, backgroundColor: '#f8fafc' }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={0.75} sx={{ mb: 1.25 }}>
-          <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>BOM Header</Typography>
-            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Hiển thị đầy đủ các thông tin header được import từ vùng THE BOM DETAILS trong file Excel.</Typography>
-          </Box>
-          <Chip size="small" variant="outlined" label="THE BOM DETAILS" sx={{ fontWeight: 800, backgroundColor: '#fff' }} />
+      <Paper elevation={0} sx={{ p: 1, border: '1px solid #e2e8f0', borderRadius: 1.75, mb: 1.1, backgroundColor: '#f8fafc' }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={0.5} sx={{ mb: 0.8 }}>
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <Typography sx={{ fontWeight: 900, color: '#103B5C', fontSize: '0.9rem' }}>BOM Header</Typography>
+            <Chip
+              size="small"
+              variant="outlined"
+              label="THE BOM DETAILS"
+              sx={{ height: 22, fontSize: '0.64rem', fontWeight: 800, backgroundColor: '#fff' }}
+            />
+          </Stack>
+          <Typography sx={{ fontSize: '0.69rem', color: 'text.secondary' }}>
+            Imported header information from the original BOM Excel file.
+          </Typography>
         </Stack>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' }, gap: 1 }}>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: {
+              xs: '1fr',
+              sm: 'repeat(2, minmax(0, 1fr))',
+              md: 'repeat(4, minmax(0, 1fr))',
+              xl: 'repeat(5, minmax(0, 1fr))'
+            },
+            gap: 0.65
+          }}
+        >
           {headerDisplayFields.map((field) => (
             <HeaderInfoCell key={field.key} label={field.label} value={bom.header?.[field.key]} />
           ))}
-          <HeaderInfoCell label="Comments" value={bom.header?.comments} wide />
+        </Box>
+
+        <Box
+          sx={{
+            mt: 0.65,
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.7fr) minmax(360px, 0.8fr)' },
+            gap: 0.65,
+            alignItems: 'stretch'
+          }}
+        >
+          <HeaderInfoCell label="Comments" value={bom.header?.comments} multiline />
+          <WholeBomImageCard
+            bomId={bomId}
+            attachment={wholeBomImage}
+            saving={saving}
+            actionsDisabled={!canWrite}
+            onUpload={(event) => uploadAttachment(event, { scope: 'BOM', lineId: '' })}
+            onOpen={openAttachment}
+            onDownload={downloadAttachment}
+            onDelete={() => requestDelete({
+              type: 'wholeBomImage',
+              id: wholeBomImage?.id,
+              itemName: 'Whole BOM Image',
+              label: wholeBomImage?.originalFileName || 'Whole BOM image',
+              message: <>Delete the Whole BOM image?</>,
+              warning: 'This removes the image displayed below Comments.'
+            })}
+          />
         </Box>
       </Paper>
 
-      <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
+      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={0.75} sx={{ mb: 1.1 }}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>BOM Material Search & Filter</Typography>
@@ -2000,7 +2857,7 @@ export default function BomDetailPage() {
             message: <>Delete BOM Line <b>{lineDeleteLabel(record)}</b>?</>,
             warning: 'This will remove only the selected BOM material line.'
           })}
-          onAttach={(record) => setAttachmentLineId(record.id) || setAttachmentScope('LINE')}
+          onAttach={chooseLineAttachment}
           onImageUpload={uploadLineImage}
           onImageDelete={removeLineImage}
           onImagePreview={setImagePreviewLine}
@@ -2011,7 +2868,7 @@ export default function BomDetailPage() {
         )}
       </Paper>
 
-      <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
+      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Packings</Typography>
@@ -2107,7 +2964,7 @@ export default function BomDetailPage() {
                     message: <>Delete Packing Line <b>{lineDeleteLabel(record)}</b>?</>,
                     warning: 'This will remove only the selected Packing material line.'
                   })}
-                  onAttach={(record) => setAttachmentLineId(record.id) || setAttachmentScope('LINE')}
+                  onAttach={chooseLineAttachment}
                   onImageUpload={uploadLineImage}
                   onImageDelete={removeLineImage}
                   onImagePreview={setImagePreviewLine}
@@ -2122,113 +2979,66 @@ export default function BomDetailPage() {
         );
       })}
 
-      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 2, mt: 2 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5}>
+      <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 2, mt: 2 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} spacing={1}>
           <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>BOM Files And Product Color Images</Typography>
-            <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary' }}>
-              Upload whole-BOM or material-line files here. Product Color images are stored and managed in Product Color Master, then automatically shown in this BOM through the Product Color link.
+            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Product Colors</Typography>
+            <Typography sx={{ mt: 0.2, fontSize: '0.75rem', color: 'text.secondary' }}>
+              Add an existing Product Color from Master Data or create a new Master record with one image.
             </Typography>
           </Box>
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-            <TextField size="small" select label="Attach To" disabled={!canWrite} value={attachmentScope} onChange={(event) => setAttachmentScope(event.target.value)} sx={{ minWidth: 150 }}>
-              <MenuItem value="BOM">Whole BOM</MenuItem>
-              <MenuItem value="LINE">Material Line</MenuItem>
-            </TextField>
-
-            {attachmentScope === 'LINE' && (
-              <TextField size="small" select label="Material Line" disabled={!canWrite} value={attachmentLineId} onChange={(event) => setAttachmentLineId(event.target.value)} sx={{ minWidth: 180 }}>
-                {[...(bom.coreLines || []), ...(bom.packings || []).flatMap((packing) => packing.lines || [])].map((line) => (
-                  <MenuItem key={line.id} value={line.id}>{[line.materialType, line.positionDescription || line.position, line.detailNo].filter(Boolean).join(' — ') || line.id}</MenuItem>
-                ))}
-              </TextField>
-            )}
-
-            <Tooltip title={!canWrite ? writeBlockedMessage : 'Upload file'}><span><Button variant="outlined" startIcon={<Image />} component="label" disabled={!canWrite} sx={{ textTransform: 'none' }}>
-              Upload
-              <input hidden type="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" onChange={uploadAttachment} />
-            </Button></span></Tooltip>
-          </Stack>
+          <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Product Color'}>
+            <span>
+              <Button size="small" variant="contained" startIcon={<Add />} disabled={!canWrite} onClick={() => setProductColorCtx({ record: null })} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
+                Add Product Color
+              </Button>
+            </span>
+          </Tooltip>
         </Stack>
 
-        <Divider sx={{ my: 1.75 }} />
-
-        <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>Whole BOM Files</Typography>
-        <AttachmentCards
-          attachments={bomAttachments}
-          bomId={bomId}
-          onDelete={(attachment) => requestDelete({
-            type: 'attachment',
-            id: attachment?.id,
-            itemName: 'Attachment',
-            label: attachmentLabel(attachment),
-            message: <>Delete file <b>{attachmentLabel(attachment)}</b>?</>,
-            warning: 'This will remove the selected file from this BOM.'
-          })}
-          onOpen={openAttachment}
-          onDownload={downloadAttachment}
-          actionsDisabled={!canWrite}
-          emptyText="No BOM-level images/files."
-        />
-
-        <Box sx={{ mt: 2 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
-            <Box>
-              <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>Linked Product Colors</Typography>
-              <Typography sx={{ mt: 0.25, fontSize: '0.76rem', color: 'text.secondary' }}>
-                Each BOM Product Color must link to Product Color Master. The master owns the product image and Child Colors; this BOM never stores a duplicate image.
-              </Typography>
-            </Box>
-            <Tooltip title={!canWrite ? writeBlockedMessage : 'Link Product Color Master'}><span><Button size="small" variant="contained" startIcon={<Add />} disabled={!canWrite} onClick={() => setProductColorCtx({ record: null })} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
-              Link Product Color
-            </Button></span></Tooltip>
-          </Stack>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25, mt: 1 }}>
+        {!productColors.length ? (
+          <Box sx={{ mt: 1.25, py: 3, textAlign: 'center', border: '1px dashed #cbd5e1', borderRadius: 1.5, backgroundColor: '#f8fafc' }}>
+            <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No Product Color linked to this BOM.</Typography>
+          </Box>
+        ) : (
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1, mt: 1.25 }}>
             {productColors.map((productColor) => {
               const master = productColorMasterForBom(productColor, productColorMasters);
               return (
-                <Paper key={productColor.id} elevation={0} data-bom-product-color-id={productColor.id} sx={{ p: 1.2, border: '1px solid #e5e7eb', borderRadius: 1.5, scrollMarginTop: 96 }}>
-                  <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
-                    <Box>
-                      <Typography sx={{ fontWeight: 900, fontSize: '0.8rem' }}>{productColor.colorName}</Typography>
-                      <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Pattern Number: {productColor.patternNumber || '—'}</Typography>
-                      <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Season: {productColor.season || '—'}</Typography>
-                      <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Style Number: {productColor.styleNumber || '—'}</Typography>
-                      <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>Sequence: {productColor.sequence ?? '—'}</Typography>
+                <Paper key={productColor.id} elevation={0} data-bom-product-color-id={productColor.id} sx={{ p: 1, border: '1px solid #e2e8f0', borderRadius: 1.5, scrollMarginTop: 96 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Box sx={{ width: 118, flexShrink: 0, overflow: 'hidden', borderRadius: 1 }}>
+                      <ProductColorImage productColor={master || productColor} height={90} emptyText={master ? 'No image saved' : 'Master link required'} />
                     </Box>
-                    <Stack spacing={0.25} alignItems="flex-end">
-                      <Tooltip title={!canWrite ? writeBlockedMessage : 'Change Product Color Master link'}><span><Button size="small" startIcon={<Edit />} disabled={!canWrite} onClick={() => setProductColorCtx({ record: productColor })} sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
-                        Change Link
-                      </Button></span></Tooltip>
-                      <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete BOM Product Color link'}><span><Button size="small" color="error" startIcon={<Delete />} disabled={!canWrite} onClick={() => requestDelete({
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography noWrap sx={{ fontWeight: 900, fontSize: '0.82rem' }}>{productColor.colorName || 'Product Color'}</Typography>
+                      <Typography noWrap sx={{ mt: 0.2, fontSize: '0.71rem', color: 'text.secondary' }}>
+                        {[productColor.patternNumber, productColor.season, productColor.styleNumber].filter(Boolean).join(' · ') || 'No master information'}
+                      </Typography>
+                      <Typography sx={{ mt: 0.35, fontSize: '0.7rem', color: 'text.secondary' }}>Sequence: {productColor.sequence ?? '—'}</Typography>
+                      <Chip size="small" variant="outlined" label={master ? 'Master linked' : 'Master missing'} sx={{ mt: 0.7, height: 22, fontSize: '0.66rem' }} />
+                    </Box>
+                    <Stack spacing={0.25}>
+                      <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Product Color and image'}>
+                        <span><IconButton size="small" disabled={!canWrite} onClick={() => setProductColorCtx({ record: productColor })}><Edit fontSize="small" /></IconButton></span>
+                      </Tooltip>
+                      <Tooltip title={!canWrite ? writeBlockedMessage : 'Remove Product Color from BOM'}>
+                        <span><IconButton size="small" color="error" disabled={!canWrite} onClick={() => requestDelete({
                           type: 'productColor',
                           id: productColor.id,
                           itemName: 'Product Color Link',
                           label: productColorLabel(productColor) || productColor.colorName || 'this Product Color link',
-                          message: <>Delete Product Color Link <b>{productColorLabel(productColor) || productColor.colorName || 'this Product Color link'}</b>?</>,
-                          warning: 'This removes only the Product Color link from this BOM. It does not delete the Product Color Master record.'
-                        })} sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
-                        Delete Link
-                      </Button></span></Tooltip>
+                          message: <>Remove <b>{productColor.colorName || 'this Product Color'}</b> from the BOM?</>,
+                          warning: 'The Product Color Master record and its image will not be deleted.'
+                        })}><Delete fontSize="small" /></IconButton></span>
+                      </Tooltip>
                     </Stack>
-                  </Stack>
-                  <Box sx={{ mt: 1 }}>
-                    <ProductColorImage productColor={master || productColor} height={125} emptyText={master ? 'No image saved in Product Color Master' : 'Product Color Master link is required'} />
-                  </Box>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mt: 0.75 }}>
-                    <Typography noWrap sx={{ minWidth: 0, flex: 1, fontSize: '0.7rem', color: master ? 'text.secondary' : 'warning.main' }}>
-                      {master ? `Master: ${productColorMasterLabel(master) || master.productColor || productColor.colorName}` : 'No linked Product Color Master'}
-                    </Typography>
-                    <Button component={RouterLink} to={buyerPath(buyerKey, 'product-colors')} size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
-                      Open Master
-                    </Button>
                   </Stack>
                 </Paper>
               );
             })}
           </Box>
-        </Box>
+        )}
       </Paper>
 
       <ExcelUploadProgressDialog
@@ -2241,6 +3051,13 @@ export default function BomDetailPage() {
         state={excelUploadProgress.state}
         onClose={() => setExcelUploadProgress(initialUploadProgress())}
         onRetry={excelUploadProgress.state === 'error' ? () => executeExcelReplacement(excelUploadProgress.file) : undefined}
+      />
+
+      <BomAttachmentImagePreviewDialog
+        open={Boolean(attachmentPreview)}
+        bomId={bomId}
+        attachment={attachmentPreview}
+        onClose={() => setAttachmentPreview(null)}
       />
 
       <BomLineImagePreviewDialog
@@ -2280,16 +3097,6 @@ export default function BomDetailPage() {
       <LineDialog open={canWrite && Boolean(lineCtx)} record={lineCtx?.record} productColors={productColors} productColorMasters={productColorMasters} saving={saving} onClose={() => setLineCtx(null)} onSave={saveLine} />
       <PackingDialog open={canWrite && Boolean(packingCtx)} record={packingCtx?.record} productColors={productColors} saving={saving} onClose={() => setPackingCtx(null)} onSave={savePacking} />
       <ProductColorDialog open={canWrite && Boolean(productColorCtx)} record={productColorCtx?.record} header={bom?.header} productColorMasters={productColorMasters} buyerKey={buyerKey} saving={saving} onClose={() => setProductColorCtx(null)} onSave={saveProductColor} />
-
-      <BomMprReviewDialog
-        open={canWrite && reviewOpen}
-        reviews={mprReviews}
-        savingReviewId={reviewSavingId}
-        actionsDisabled={!canWrite}
-        onClose={() => setReviewOpen(false)}
-        onApply={applyMprReview}
-        onRecheck={recheckMprReview}
-      />
 
       <ConfirmDeleteDialog
         open={canWrite && Boolean(deleteTarget)}

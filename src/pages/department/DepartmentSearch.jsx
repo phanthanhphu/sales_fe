@@ -63,8 +63,8 @@ export default function DepartmentSearch({
     <Paper
       elevation={0}
       sx={{
-        p: 2,
-        mb: 2,
+        p: 1.25,
+        mb: 1.25,
         borderRadius: 2,
         border: '1px solid #e5e7eb',
         backgroundColor: '#fff',

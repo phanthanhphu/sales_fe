@@ -5,7 +5,7 @@ export default function OrderSearch({ filters, onChange, onSearch, onReset, onAd
   const writeDisabled = loading || actionsDisabled;
 
   return (
-    <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
+    <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ mb: 1.5 }}>
         <Box>
           <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Order Filter</Typography>

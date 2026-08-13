@@ -236,13 +236,13 @@ export default function BuyerManagementPage() {
   };
 
   return (
-    <Box sx={{ p: { xs: 1.5, md: 2.5 } }}>
+    <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
       <Box sx={{ mb: 2 }}>
         <Typography sx={{ fontSize: '1.5rem', fontWeight: 950, color: '#103B5C' }}>Buyer Management</Typography>
-        <Typography sx={{ mt: 0.35, color: 'text.secondary' }}>Manage Buyer keys used to separate Orders, MAT Info and Product Color data.</Typography>
+        <Typography sx={{ mt: 0.35, color: 'text.secondary' }}>Manage Buyers used to separate Orders, MAT Info, Loss, Product Color and Material Ship To data.</Typography>
       </Box>
 
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+      <Paper variant="outlined" sx={{ p: 1.25, mb: 1.25 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ md: 'center' }}>
           <TextField size="small" label="Search Buyer" value={keyword} onChange={(event) => setKeyword(event.target.value)} sx={{ minWidth: 260 }} />
           <FormControl size="small" sx={{ minWidth: 150 }}>

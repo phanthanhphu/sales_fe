@@ -3,7 +3,7 @@ import { Alert, Box, Snackbar } from '@mui/material';
 import MasterDataUploadDialog from './MasterDataUploadDialog';
 import ConfirmDeleteDialog from './ConfirmDeleteDialog';
 import useMasterDataPage from './useMasterDataPage';
-import { downloadMasterDataEditWorkbook, getMasterDataErrorMessage } from '../../services/masterDataService';
+import { downloadMasterDataEditWorkbook, downloadMasterDataTemplate, getMasterDataErrorMessage } from '../../services/masterDataService';
 import { canManageSales } from 'utils/accessControl';
 
 /**
@@ -24,6 +24,7 @@ export default function MasterDataFeaturePage({
   const canWrite = canManageSales();
   const [editUploadOpen, setEditUploadOpen] = useState(false);
   const [downloadingEdit, setDownloadingEdit] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   const openAdd = () => { if (canWrite) page.setAddOpen(true); };
   const openUpload = () => { if (canWrite) page.setUploadOpen(true); };
@@ -59,8 +60,37 @@ export default function MasterDataFeaturePage({
     }
   };
 
+
+  const downloadTemplate = async () => {
+    if (!canWrite || !config.allowTemplate || downloadingTemplate) return;
+
+    setDownloadingTemplate(true);
+    try {
+      const response = await downloadMasterDataTemplate(config.type, scopeParams);
+      const blob = response?.data instanceof Blob
+        ? response.data
+        : new Blob([response?.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const disposition = response?.headers?.['content-disposition'] || '';
+      const match = /filename="?([^";]+)"?/i.exec(disposition);
+      const filename = match?.[1] || `${config.type || 'master-data'}-template.xlsx`;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      page.notify(`${config.menuTitle} template downloaded.`, 'success');
+    } catch (error) {
+      page.notify(getMasterDataErrorMessage(error, `Unable to download ${config.menuTitle} template.`), 'error');
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  };
+
   return (
-    <Box sx={{ p: { xs: 1.25, sm: 1.75, md: 2 } }}>
+    <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
       {scopeTitle && (
         <Box sx={{ mb: 1.5 }}>
           <Box sx={{ color: '#103B5C', fontSize: '1.35rem', fontWeight: 950 }}>{scopeTitle}</Box>
@@ -73,11 +103,13 @@ export default function MasterDataFeaturePage({
         onReset={page.reset}
         onAdd={openAdd}
         onUpload={openUpload}
+        onDownloadTemplate={downloadTemplate}
         onDownloadEdit={downloadEditWorkbook}
         onUploadEdit={openEditUpload}
         showUpload={config.allowUpload !== false}
+        showTemplate={Boolean(config.allowTemplate)}
         showEditWorkbook={Boolean(config.allowEditWorkbook)}
-        disabled={page.loading || downloadingEdit}
+        disabled={page.loading || downloadingEdit || downloadingTemplate}
         actionsDisabled={!canWrite}
       />
 

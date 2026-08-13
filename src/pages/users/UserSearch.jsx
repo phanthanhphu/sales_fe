@@ -13,7 +13,7 @@ export default function UserSearch({
   const resetPage = () => setPage?.(0);
   const handleKeyDown = useCallback((event) => { if (event.key === 'Enter' && !disabled) { resetPage(); onSearch?.(); } }, [disabled, onSearch]);
   return (
-    <Paper elevation={0} sx={{ p: 2, mb: 2, borderRadius: 2, border: '1px solid #e5e7eb', backgroundColor: '#fff', overflow: 'hidden' }}>
+    <Paper elevation={0} sx={{ p: 1.25, mb: 1.25, borderRadius: 2, border: '1px solid #e5e7eb', backgroundColor: '#fff', overflow: 'hidden' }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} spacing={1.25} sx={{ mb: 1.5 }}>
         <Typography variant="subtitle1" fontWeight={650}>User Filter</Typography>
         <Button variant="contained" startIcon={<Add fontSize="small" />} onClick={onAdd} disabled={disabled} sx={{ ...actionButtonSx, alignSelf: { xs: 'flex-start', sm: 'center' }, backgroundColor: '#111827', '&:hover': { backgroundColor: '#0b1220' } }}>Add User</Button>

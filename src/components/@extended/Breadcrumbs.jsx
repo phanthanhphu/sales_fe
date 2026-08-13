@@ -117,7 +117,7 @@ export default function Breadcrumbs({
     breadcrumbContent = (
       <MainCard
         border={card}
-        sx={card === false ? { mb: 3, bgcolor: 'transparent', borderRadius: 0, overflow: 'visible', ...sx } : { mb: 3, ...sx }}
+        sx={card === false ? { mb: 1.25, bgcolor: 'transparent', borderRadius: 0, overflow: 'visible', ...sx } : { mb: 1.25, ...sx }}
         {...others}
         content={card}
         boxShadow={false}
@@ -153,7 +153,7 @@ export default function Breadcrumbs({
             </Grid>
           )}
         </Grid>
-        {card === false && divider !== false && <Divider sx={{ mt: 2 }} />}
+        {card === false && divider !== false && <Divider sx={{ mt: 1 }} />}
       </MainCard>
     );
   }
@@ -216,7 +216,7 @@ export default function Breadcrumbs({
       breadcrumbContent = (
         <MainCard
           border={card}
-          sx={card === false ? { mb: 3, bgcolor: 'transparent', borderRadius: 0, overflow: 'visible', ...sx } : { mb: 3, ...sx }}
+          sx={card === false ? { mb: 1.25, bgcolor: 'transparent', borderRadius: 0, overflow: 'visible', ...sx } : { mb: 1.25, ...sx }}
           {...others}
           content={card}
           boxShadow={false}
@@ -244,7 +244,7 @@ export default function Breadcrumbs({
               </Grid>
             )}
           </Grid>
-          {card === false && divider !== false && <Divider sx={{ mt: 2 }} />}
+          {card === false && divider !== false && <Divider sx={{ mt: 1 }} />}
         </MainCard>
       );
     }

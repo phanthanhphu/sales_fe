@@ -26,6 +26,7 @@ import {
   createMasterData,
   getMasterDataErrorMessage,
   listCurrentCurrencies,
+  listActiveShipTos,
   searchVendorCodeOptions,
   updateMasterData
 } from '../../services/masterDataService';
@@ -154,8 +155,9 @@ export default function MasterDataFormDialog({
   const [serverError, setServerError] = useState('');
   const [currencyOptions, setCurrencyOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
+  const [shipToOptions, setShipToOptions] = useState([]);
   const [supplierSearch, setSupplierSearch] = useState('');
-  const [optionLoading, setOptionLoading] = useState({ currency: false, supplier: false });
+  const [optionLoading, setOptionLoading] = useState({ currency: false, supplier: false, shipTo: false });
   const [optionError, setOptionError] = useState('');
   const [snack, setSnack] = useState({ open: false, severity: 'error', message: '' });
 
@@ -170,6 +172,7 @@ export default function MasterDataFormDialog({
   const formFields = config.formFields || [];
   const usesCurrencyOptions = Boolean(config.needsCurrencyOptions || formFields.some((field) => field.optionSource === 'currency'));
   const usesSupplierOptions = Boolean(config.needsSupplierOptions || formFields.some((field) => field.optionSource === 'supplier'));
+  const usesShipToOptions = Boolean(formFields.some((field) => field.optionSource === 'shipTo'));
 
   useEffect(() => {
     if (!open) return;
@@ -187,7 +190,8 @@ export default function MasterDataFormDialog({
     if (!open) {
       setCurrencyOptions([]);
       setSupplierOptions([]);
-      setOptionLoading({ currency: false, supplier: false });
+      setShipToOptions([]);
+      setOptionLoading({ currency: false, supplier: false, shipTo: false });
       setOptionError('');
       return undefined;
     }
@@ -214,6 +218,28 @@ export default function MasterDataFormDialog({
       alive = false;
     };
   }, [open, usesCurrencyOptions]);
+
+  useEffect(() => {
+    if (!open || !usesShipToOptions) return undefined;
+
+    let alive = true;
+    setOptionLoading((current) => ({ ...current, shipTo: true }));
+    listActiveShipTos()
+      .then((items) => {
+        if (alive) setShipToOptions(Array.isArray(items) ? items : []);
+      })
+      .catch(() => {
+        if (alive) {
+          setShipToOptions([]);
+          setOptionError('Unable to load Ship To Master. Please reload the dialog.');
+        }
+      })
+      .finally(() => {
+        if (alive) setOptionLoading((current) => ({ ...current, shipTo: false }));
+      });
+
+    return () => { alive = false; };
+  }, [open, usesShipToOptions]);
 
   useEffect(() => {
     if (!open || !usesSupplierOptions) return undefined;
@@ -246,6 +272,7 @@ export default function MasterDataFormDialog({
   const getOptions = (field) => {
     if (field.optionSource === 'currency') return currencyOptions;
     if (field.optionSource === 'supplier') return supplierOptions;
+    if (field.optionSource === 'shipTo') return shipToOptions;
     return field.options || [];
   };
 
@@ -434,7 +461,7 @@ export default function MasterDataFormDialog({
                       noOptionsText={loadingOptions ? 'Loading options…' : 'No matching master-data record'}
                       isOptionEqualToValue={(option, selected) => optionValue(field, option) === optionValue(field, selected)}
                       getOptionLabel={(option) => optionLabel(field, option)}
-                      filterOptions={(items) => items}
+                      filterOptions={field.optionSource === 'shipTo' ? undefined : ((items) => items)}
                       onChange={(_, nextOption) => {
                         const nextValue = nextOption ? optionValue(field, nextOption) : '';
                         if (field.optionSource === 'supplier') setSupplierSearch(String(nextValue || ''));

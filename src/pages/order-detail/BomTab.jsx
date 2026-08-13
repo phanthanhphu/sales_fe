@@ -47,6 +47,21 @@ const emptyFilters = {
 };
 
 const normalize = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+
+const downloadDate = () => {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+};
+
+const downloadFilePart = (value, fallback) => {
+  const safe = String(value || fallback || '').trim()
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return safe || fallback;
+};
+
 const includes = (value, needle) => normalize(value).includes(normalize(needle));
 
 const productColorNames = (bom = {}) => (
@@ -190,7 +205,7 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
 
   return (
     <Box>
-      <Paper elevation={0} sx={{ p: 2, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
+      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>BOM</Typography>
@@ -207,7 +222,7 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
         </Stack>
       </Paper>
 
-      <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e5e7eb', borderRadius: 2, mb: 2 }}>
+      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={0.75} sx={{ mb: 1.1 }}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>BOM Search & Filter</Typography>
@@ -280,7 +295,7 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
                     <TableCell sx={{ whiteSpace: 'nowrap' }}>
                       <Tooltip title="Open BOM"><IconButton color="primary" onClick={() => navigate(buyerPath(buyerKey, `orders/${order.id}/boms/${bom.id}`))}><OpenInNew fontSize="small" /></IconButton></Tooltip>
                       <Tooltip title={!canWrite ? writeBlockedMessage : (bom.status === 'SUBMITTED' ? 'BOM already submitted' : 'Submit BOM')}><span><IconButton color="success" disabled={!canWrite || bom.status === 'SUBMITTED'} onClick={() => submit(bom)}><Publish fontSize="small" /></IconButton></span></Tooltip>
-                      <Tooltip title="Export"><IconButton onClick={() => downloadWithAuth(getBomExportUrl(bom.id), `${bom.bomNo || 'BOM'}.xlsx`)}><FileUpload fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title="Export"><IconButton onClick={() => downloadWithAuth(getBomExportUrl(bom.id), `BOM_${downloadFilePart(buyerKey, 'BUYER')}_${downloadFilePart(bom.bomNo, 'BOM')}_${downloadDate()}.xlsx`)}><FileUpload fontSize="small" /></IconButton></Tooltip>
                       <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete'}><span><IconButton color="error" disabled={!canWrite} onClick={() => setDeleteTarget(bom)}><Delete fontSize="small" /></IconButton></span></Tooltip>
                     </TableCell>
                   </TableRow>

@@ -174,7 +174,7 @@ export default function OrdersPage() {
   };
 
   return (
-    <Box sx={{ p: { xs: 1.5, md: 2.5 } }}>
+    <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
       <Box sx={{ mb: 2 }}>
         <Typography sx={{ fontSize: '1.5rem', fontWeight: 950, color: '#103B5C' }}>{buyer.buyerName} — Order Management</Typography>
         <Typography sx={{ mt: 0.35, color: 'text.secondary' }}>Create orders, then open an order to manage BOM and Sales / MPR.</Typography>

@@ -2,9 +2,9 @@
 
 export const APP_DEFAULT_PATH = '/dashboard';
 export const HORIZONTAL_MAX_ITEM = 6;
-export const DRAWER_WIDTH = 220;
+export const DRAWER_WIDTH = 208;
 export const MINI_DRAWER_WIDTH = 0;
-export const HEADER_HEIGHT = 74;
+export const HEADER_HEIGHT = 60;
 export const GRID_COMMON_SPACING = { xs: 2, md: 2.5 };
 
 // ==============================|| API CONFIG ||============================== //

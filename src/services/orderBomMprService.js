@@ -124,34 +124,8 @@ export const uploadBomAttachment = (bomId, file, options = {}) => {
 };
 export const deleteBomAttachment = (bomId, attachmentId) => unwrap(apiRawClient.delete(`/api/boms/${encodeURIComponent(bomId)}/attachments/${encodeURIComponent(attachmentId)}`, withAuth()));
 
-/**
- * BOM review workflow for changes Sales makes in MPR lines.
- * Review functions are kept in this module because BomDetailPage imports them from here.
- */
-export const listBomMprReviews = (bomId, params = {}) => unwrap(
-  apiRawClient.get(
-    `/api/boms/${encodeURIComponent(bomId)}/mpr-reviews`,
-    withAuth({ params: params || {} })
-  )
-);
-
-export const applyBomMprReview = (bomId, reviewId, payload = {}) => unwrap(
-  apiRawClient.post(
-    `/api/boms/${encodeURIComponent(bomId)}/mpr-reviews/${encodeURIComponent(reviewId)}/apply`,
-    payload,
-    withAuth()
-  )
-);
-
-export const recheckBomMprReview = (bomId, reviewId, payload = {}) => unwrap(
-  apiRawClient.post(
-    `/api/boms/${encodeURIComponent(bomId)}/mpr-reviews/${encodeURIComponent(reviewId)}/recheck`,
-    payload,
-    withAuth()
-  )
-);
-
 export const getBomExportUrl = (bomId) => `/api/boms/${encodeURIComponent(bomId)}/export`;
+export const getBomTemplateUrl = (bomId) => `/api/boms/${encodeURIComponent(bomId)}/template`;
 export const getAttachmentUrl = (bomId, attachmentId) => `/api/boms/${encodeURIComponent(bomId)}/attachments/${encodeURIComponent(attachmentId)}/download`;
 
 /**
@@ -257,6 +231,16 @@ export const deleteMprBatch = (orderId, batchId) => unwrap(
   )
 );
 
+export const uploadMprExcel = (orderId, file, options = {}) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return unwrap(apiRawClient.post(
+    `/api/orders/${encodeURIComponent(orderId)}/mpr/import`,
+    formData,
+    excelUploadConfig(file, options?.onUploadProgress)
+  ));
+};
+
 export const getMprExportUrl = (orderId) => `/api/orders/${encodeURIComponent(orderId)}/mpr/export`;
 
 export const downloadWithAuth = async (url, fileName, options = {}) => {
@@ -283,18 +267,29 @@ export const downloadWithAuth = async (url, fileName, options = {}) => {
   const blob = response.data instanceof Blob && response.data.type
     ? response.data
     : new Blob([response.data], { type: contentType });
+  const disposition = response.headers?.['content-disposition'] || '';
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  const regularMatch = /filename=\"?([^\";]+)\"?/i.exec(disposition);
+  let responseFileName = '';
+  try {
+    responseFileName = utf8Match?.[1] ? decodeURIComponent(utf8Match[1]) : '';
+  } catch {
+    responseFileName = utf8Match?.[1] || '';
+  }
+  const resolvedFileName = responseFileName || regularMatch?.[1] || fileName || 'download';
+
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
 
   anchor.href = objectUrl;
-  anchor.download = fileName || 'download';
+  anchor.download = resolvedFileName;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 
   return {
-    fileName: fileName || 'download',
+    fileName: resolvedFileName,
     sizeBytes: blob.size,
     contentType
   };

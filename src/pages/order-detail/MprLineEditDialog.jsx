@@ -17,11 +17,16 @@ const emptyForm = {
   styleDescription: '', styleColor: '', shipTo: '', salesComment: '',
   sapCode: '', bomLineNo: '', materialType: '', matFullDescription: '',
   matColor: '', matUnit: '', yield: '', lossFactor: '', poQuantity: '',
+  sampleQuantity: '', mcdStock: '', cmcdStock: '', nonSapStockQuantity: '',
   currency: '', matPriceWithoutTax: '', shortNameSupplier: '', vendorCode: '',
   vendorName: '', matCharger: ''
 };
 
 const text = (value) => value === null || value === undefined ? '' : String(value);
+const numericFormFields = new Set([
+  'bomLineNo', 'yield', 'lossFactor', 'poQuantity', 'sampleQuantity',
+  'mcdStock', 'cmcdStock', 'nonSapStockQuantity', 'matPriceWithoutTax'
+]);
 const vendorCodeText = (value) => {
   const raw = text(value).trim();
   return /^[0-9,]+$/.test(raw) ? raw.replace(/,/g, '') : raw;
@@ -37,14 +42,15 @@ const toForm = (line = {}) => {
   return Object.fromEntries(
     Object.keys(emptyForm).map((key) => [
       key,
-      key === 'vendorCode' ? vendorCodeText(safeLine[key]) : text(safeLine[key])
+      key === 'vendorCode' ? vendorCodeText(safeLine[key]) : (numericFormFields.has(key) ? text(safeLine[key] ?? 0) : text(safeLine[key]))
     ])
   );
 };
 
-const displayNumber = (value) => Number.isFinite(value)
-  ? value.toLocaleString('en-US', { maximumFractionDigits: 6 })
-  : '-';
+const displayNumber = (value) => {
+  const numeric = Number(value ?? 0);
+  return (Number.isFinite(numeric) ? numeric : 0).toLocaleString('en-US', { maximumFractionDigits: 6 });
+};
 
 export default function MprLineEditDialog({ open, line, productColorMasters = [], saving, onClose, onSave }) {
   const [form, setForm] = useState(emptyForm);
@@ -58,13 +64,23 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
   }, [open, line]);
 
   const calculated = useMemo(() => {
-    const yieldValue = number(form.yield);
-    const factor = number(form.lossFactor);
-    const poQty = number(form.poQuantity);
-    const totalYield = yieldValue !== null && factor !== null ? yieldValue * factor : null;
-    const required = totalYield !== null && poQty !== null ? totalYield * poQty : null;
-    return { totalYield, required };
-  }, [form.yield, form.lossFactor, form.poQuantity]);
+    const yieldValue = number(form.yield) ?? 0;
+    const factor = number(form.lossFactor) ?? 0;
+    const poQty = number(form.poQuantity) ?? 0;
+    const sampleQty = number(form.sampleQuantity) ?? 0;
+    const mcdStock = number(form.mcdStock) ?? 0;
+    const cmcdStock = number(form.cmcdStock) ?? 0;
+    const nonSapStock = number(form.nonSapStockQuantity) ?? 0;
+    const totalYield = yieldValue * factor;
+    const required = totalYield * poQty;
+    const matSample = sampleQty * yieldValue;
+    const sapStock = mcdStock + cmcdStock;
+    const purchase = Math.max(0, required + matSample - sapStock - nonSapStock);
+    return { totalYield, required, matSample, sapStock, purchase };
+  }, [
+    form.yield, form.lossFactor, form.poQuantity, form.sampleQuantity,
+    form.mcdStock, form.cmcdStock, form.nonSapStockQuantity
+  ]);
 
   const childColorOptions = useMemo(() => {
     const normalize = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
@@ -94,14 +110,22 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
     if (!form.matFullDescription.trim()) next.matFullDescription = 'MAT Full Description Is Required.';
     if (!form.matUnit.trim()) next.matUnit = 'MAT Unit Is Required.';
 
-    const yieldValue = number(form.yield);
-    const factor = number(form.lossFactor);
-    const poQty = number(form.poQuantity);
+    const yieldValue = number(form.yield) ?? 0;
+    const factor = number(form.lossFactor) ?? 0;
+    const poQty = number(form.poQuantity) ?? 0;
+    const sampleQty = number(form.sampleQuantity);
+    const mcdStock = number(form.mcdStock);
+    const cmcdStock = number(form.cmcdStock);
+    const nonSapStock = number(form.nonSapStockQuantity);
     const price = number(form.matPriceWithoutTax);
 
     if (yieldValue !== null && yieldValue < 0) next.yield = 'Yield Cannot Be Negative.';
     if (factor === null || factor <= 0) next.lossFactor = 'Loss Factor Must Be Greater Than Zero.';
     if (poQty !== null && poQty < 0) next.poQuantity = 'PO Qty Cannot Be Negative.';
+    if (sampleQty !== null && sampleQty < 0) next.sampleQuantity = 'Sample Qty Cannot Be Negative.';
+    if (mcdStock !== null && mcdStock < 0) next.mcdStock = 'MCD Stock Cannot Be Negative.';
+    if (cmcdStock !== null && cmcdStock < 0) next.cmcdStock = 'CMCD Stock Cannot Be Negative.';
+    if (nonSapStock !== null && nonSapStock < 0) next.nonSapStockQuantity = 'NON SAP Stock Cannot Be Negative.';
     if (price !== null && price < 0) next.matPriceWithoutTax = 'MAT Price Cannot Be Negative.';
 
     setErrors(next);
@@ -117,16 +141,20 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
       shipTo: form.shipTo.trim(),
       salesComment: form.salesComment.trim(),
       sapCode: form.sapCode.trim(),
-      bomLineNo: number(form.bomLineNo),
+      bomLineNo: number(form.bomLineNo) ?? 0,
       materialType: form.materialType.trim(),
       matFullDescription: form.matFullDescription.trim(),
       matColor: form.matColor.trim(),
       matUnit: form.matUnit.trim(),
-      yield: number(form.yield),
-      lossFactor: number(form.lossFactor),
-      poQuantity: number(form.poQuantity),
+      yield: number(form.yield) ?? 0,
+      lossFactor: number(form.lossFactor) ?? 0,
+      poQuantity: number(form.poQuantity) ?? 0,
+      sampleQuantity: number(form.sampleQuantity) ?? 0,
+      mcdStock: number(form.mcdStock) ?? 0,
+      cmcdStock: number(form.cmcdStock) ?? 0,
+      nonSapStockQuantity: number(form.nonSapStockQuantity) ?? 0,
       currency: form.currency.trim().toUpperCase(),
-      matPriceWithoutTax: number(form.matPriceWithoutTax),
+      matPriceWithoutTax: number(form.matPriceWithoutTax) ?? 0,
       shortNameSupplier: form.shortNameSupplier.trim(),
       vendorCode: vendorCodeText(form.vendorCode),
       vendorName: form.vendorName.trim(),
@@ -153,7 +181,8 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
       <DialogTitle sx={{ fontWeight: 900, color: '#103B5C' }}>Edit MPR Item</DialogTitle>
       <DialogContent dividers>
         <Typography sx={{ mb: 1.5, fontSize: '.8rem', color: 'text.secondary' }}>
-          The system recalculates T.YIELD and MAT REQUIRED Q&apos;TY from Yield, Loss Factor, and PO Qty when you save.
+          Calculated values follow the approved MPR: T.YIELD = Yield × Loss, MAT REQUIRED = T.YIELD × PO Qty,
+          MAT SAMPLE = Sample Qty × Yield, SAP STOCK = MCD + CMCD, and PURCHASE = MAX(0, Required + Sample − SAP − NON SAP).
         </Typography>
 
         <Typography sx={{ fontSize: '.84rem', fontWeight: 900, mb: .75 }}>Style And BOM Information</Typography>
@@ -196,6 +225,10 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
           {field('yield', 'Yield', { type: 'number', inputProps: { min: 0, step: 'any' } })}
           {field('lossFactor', 'Loss Factor', { type: 'number', helperText: 'Example: 1.03 For 3% Loss.', inputProps: { min: 0.000001, step: 'any' } })}
           {field('poQuantity', 'PO Qty', { type: 'number', inputProps: { min: 0, step: 'any' } })}
+          {field('sampleQuantity', 'Sample Qty', { type: 'number', inputProps: { min: 0, step: 'any' } })}
+          {field('mcdStock', 'MCD Stock', { type: 'number', inputProps: { min: 0, step: 'any' } })}
+          {field('cmcdStock', 'CMCD Stock', { type: 'number', inputProps: { min: 0, step: 'any' } })}
+          {field('nonSapStockQuantity', 'NON SAP Stock Qty', { type: 'number', inputProps: { min: 0, step: 'any' } })}
         </Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.25 }}>
           <Box sx={{ flex: 1, p: 1.25, border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
@@ -205,6 +238,18 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
           <Box sx={{ flex: 1, p: 1.25, border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
             <Typography sx={{ fontSize: '.72rem', color: 'text.secondary' }}>MAT REQUIRED Q&apos;TY</Typography>
             <Typography sx={{ fontWeight: 900 }}>{displayNumber(calculated.required)}</Typography>
+          </Box>
+          <Box sx={{ flex: 1, p: 1.25, border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
+            <Typography sx={{ fontSize: '.72rem', color: 'text.secondary' }}>MAT SAMPLE Q&apos;TY</Typography>
+            <Typography sx={{ fontWeight: 900 }}>{displayNumber(calculated.matSample)}</Typography>
+          </Box>
+          <Box sx={{ flex: 1, p: 1.25, border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
+            <Typography sx={{ fontSize: '.72rem', color: 'text.secondary' }}>SAP STOCK QTY</Typography>
+            <Typography sx={{ fontWeight: 900 }}>{displayNumber(calculated.sapStock)}</Typography>
+          </Box>
+          <Box sx={{ flex: 1, p: 1.25, border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
+            <Typography sx={{ fontSize: '.72rem', color: 'text.secondary' }}>PURCHASE QTY</Typography>
+            <Typography sx={{ fontWeight: 900 }}>{displayNumber(calculated.purchase)}</Typography>
           </Box>
         </Stack>
 

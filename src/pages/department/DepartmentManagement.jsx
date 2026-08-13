@@ -315,7 +315,7 @@ export default function DepartmentManagement() {
   };
 
   return (
-    <Box sx={{ p: { xs: 1.25, sm: 1.75, md: 2 } }}>
+    <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
       <DepartmentSearch
         searchValue={searchDivision}
         departmentNameValue={searchDeptName}
