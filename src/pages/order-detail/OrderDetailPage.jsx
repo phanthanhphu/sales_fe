@@ -2,27 +2,26 @@ import { useEffect, useState } from 'react';
 import {
   Alert,
   Box,
-  Breadcrumbs,
-  Chip,
+  Button,
   CircularProgress,
-  Link,
   Paper,
+  Stack,
   Tab,
   Tabs,
   Typography
 } from '@mui/material';
+import { ArrowBackOutlined } from '@mui/icons-material';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 
 import { getApiError, getOrder } from '../../services/orderBomMprService';
-import { statusSx } from '../orders/orderUi';
-import { buyerPath, getBuyerDefinition, normalizeBuyerKey } from 'utils/buyerContext';
+import StatusBadge from '../../components/StatusBadge';
+import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
 import BomTab from './BomTab';
 import MprTab from './MprTab';
 
 export default function OrderDetailPage() {
   const { buyerKey: routeBuyerKey, orderId } = useParams();
   const buyerKey = normalizeBuyerKey(routeBuyerKey);
-  const buyer = getBuyerDefinition(buyerKey);
 
   const [order, setOrder] = useState(null);
   const [tab, setTab] = useState(0);
@@ -30,143 +29,84 @@ export default function OrderDetailPage() {
 
   useEffect(() => {
     let alive = true;
-
     const loadOrder = async () => {
       try {
         const data = await getOrder(orderId, buyerKey);
-
         if (alive) {
           setOrder(data);
           setError('');
         }
       } catch (requestError) {
-        if (alive) {
-          setError(getApiError(requestError, 'Unable to load order.'));
-        }
+        if (alive) setError(getApiError(requestError, 'Unable to load order.'));
       }
     };
-
     loadOrder();
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [buyerKey, orderId]);
 
   if (error) {
-    return (
-      <Box sx={{ p: 2.5 }}>
-        <Alert severity="error">{error}</Alert>
-      </Box>
-    );
+    return <Box sx={{ p: 1 }}><Alert severity="error">{error}</Alert></Box>;
   }
 
   if (!order) {
-    return (
-      <Box
-        sx={{
-          p: 4,
-          display: 'flex',
-          justifyContent: 'center'
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    );
+    return <Box sx={{ p: 3, display: 'flex', justifyContent: 'center' }}><CircularProgress size={28} /></Box>;
   }
 
   return (
-    <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
-      {/* Keep breadcrumb only. No large order title is rendered below. */}
-      <Breadcrumbs
-        aria-label="breadcrumb"
-        sx={{
-          mb: 0.75,
-          fontSize: '.82rem'
-        }}
-      >
-        <Link
-          component={RouterLink}
-          to={buyerPath(buyerKey, 'orders')}
-          underline="hover"
-          color="inherit"
-        >
-          {buyer.buyerName} Orders
-        </Link>
-
-        <Typography color="text.primary" sx={{ fontSize: '.85rem' }}>
-          {order.orderNo}
-        </Typography>
-      </Breadcrumbs>
-
-      {/* Order summary without the large Order No heading */}
+    <Box sx={{ p: { xs: 0.55, sm: 0.7, md: 0.85 } }}>
       <Paper
         elevation={0}
         sx={{
-          px: 1.5,
-          py: 1.15,
-          mb: 1.25,
-          border: '1px solid #e5e7eb',
-          borderRadius: 2
-        }}
-      >
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 1.5,
-            flexWrap: 'wrap'
-          }}
-        >
-          <Typography sx={{ color: 'text.secondary', fontSize: '.9rem' }}>
-            {[order.style, order.customer, order.season]
-              .filter(Boolean)
-              .join(' · ')}
-          </Typography>
-
-          <Chip
-            label={String(order.status || 'DRAFT').replaceAll('_', ' ')}
-            sx={statusSx(order.status)}
-          />
-        </Box>
-      </Paper>
-
-      <Paper
-        elevation={0}
-        sx={{
-          border: '1px solid #e5e7eb',
+          border: '1px solid #dfe6ee',
           borderRadius: 2,
-          overflow: 'hidden'
+          overflow: 'hidden',
+          bgcolor: '#fff'
         }}
       >
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+          justifyContent="space-between"
+          spacing={0.8}
+          sx={{ px: 1.15, py: 0.75, borderBottom: '1px solid #e5e7eb', bgcolor: '#fbfcfe' }}
+        >
+          <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Button
+              component={RouterLink}
+              to={buyerPath(buyerKey, 'orders')}
+              size="small"
+              variant="text"
+              startIcon={<ArrowBackOutlined fontSize="small" />}
+              sx={{ minWidth: 'auto', px: 0.45, textTransform: 'none', color: '#49657f', fontSize: '0.76rem' }}
+            >
+              Back to Orders
+            </Button>
+            <Typography sx={{ fontSize: '0.94rem', fontWeight: 800, color: '#173b63' }}>
+              Order {order.orderNo}
+            </Typography>
+            <Typography sx={{ color: '#718096', fontSize: '0.8rem' }}>•</Typography>
+            <Typography sx={{ color: '#4f647a', fontSize: '0.82rem', fontWeight: 600 }}>
+              {[order.style, order.customer, order.season].filter(Boolean).join(' · ')}
+            </Typography>
+          </Stack>
+          <StatusBadge status={order.status || 'DRAFT'} />
+        </Stack>
+
         <Tabs
           value={tab}
           onChange={(_, nextTab) => setTab(nextTab)}
           sx={{
             px: 0.75,
-            minHeight: 40,
-            borderBottom: '1px solid #e5e7eb'
+            minHeight: 38,
+            borderBottom: '1px solid #e5e7eb',
+            '& .MuiTab-root': { minHeight: 38, py: 0.45, px: 1.5, fontSize: '0.8rem' }
           }}
         >
-          <Tab
-            label="BOM"
-            sx={{
-              fontWeight: 900,
-              textTransform: 'none'
-            }}
-          />
-
-          <Tab
-            label="Sales / MPR"
-            sx={{
-              fontWeight: 900,
-              textTransform: 'none'
-            }}
-          />
+          <Tab label="BOM" sx={{ fontWeight: 750, textTransform: 'none' }} />
+          <Tab label="Sales / MPR" sx={{ fontWeight: 750, textTransform: 'none' }} />
         </Tabs>
 
-        <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
+        <Box sx={{ p: 0 }}>
           {tab === 0 ? <BomTab order={order} buyerKey={buyerKey} /> : <MprTab order={order} buyerKey={buyerKey} />}
         </Box>
       </Paper>

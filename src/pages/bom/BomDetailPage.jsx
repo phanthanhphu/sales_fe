@@ -15,6 +15,8 @@ import {
   Divider,
   FormControlLabel,
   IconButton,
+  ListItemIcon,
+  Menu,
   MenuItem,
   Paper,
   Snackbar,
@@ -31,6 +33,7 @@ import {
 } from '@mui/material';
 import {
   Add,
+  ArrowBackOutlined,
   Close,
   Delete,
   Edit,
@@ -39,6 +42,10 @@ import {
   FileUpload,
   Image,
   InsertDriveFile,
+  KeyboardArrowDown,
+  LayersOutlined,
+  DescriptionOutlined,
+  ChatBubbleOutline,
   RestartAlt,
   Save
 } from '@mui/icons-material';
@@ -84,6 +91,10 @@ import { canManageBom } from 'utils/accessControl';
 import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
 import ConfirmDeleteDialog from '../shared/ConfirmDeleteDialog';
 import ExcelUploadProgressDialog from '../../components/ExcelUploadProgressDialog';
+import StatusBadge from '../../components/StatusBadge';
+import EmptyTableState from '../../components/EmptyTableState';
+import ColumnVisibilityMenu from '../../components/ColumnVisibilityMenu';
+import SectionHeader from '../../components/SectionHeader';
 import { initialUploadProgress, startProcessingTicker, uploadProgressFromEvent, uploadStage } from '../../utils/uploadProgress';
 
 const blankLine = {
@@ -122,69 +133,118 @@ const compactActionButtonSx = {
   whiteSpace: 'nowrap'
 };
 
-const headerLabelSx = {
-  fontSize: '0.64rem',
-  fontWeight: 800,
-  color: '#64748b',
-  textTransform: 'uppercase',
-  letterSpacing: 0.35,
-  lineHeight: 1.15
+const bomOverviewCardSx = {
+  border: '1px solid #e2e8f0',
+  borderRadius: 1.5,
+  backgroundColor: '#fff',
+  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.025)',
+  overflow: 'hidden'
 };
 
-const headerValueSx = {
-  mt: 0.3,
-  fontSize: '0.8rem',
-  fontWeight: 600,
-  color: '#0f172a',
-  lineHeight: 1.25,
-  wordBreak: 'break-word'
-};
-
-const headerDisplayFields = [
-  { key: 'buyer', label: 'Buyer' },
-  { key: 'revStage', label: 'Rev. Stage' },
-  { key: 'season', label: 'Season' },
-  { key: 'patternDate', label: 'Pattern Date' },
-  { key: 'styleNumber', label: 'Style Number' },
-  { key: 'patternRevisedDate', label: 'Pattern Revised Date' },
-  { key: 'patternNumber', label: 'Pattern Number' },
-  { key: 'patternMaker', label: 'Pattern Maker' },
-  { key: 'styleName', label: 'Style Name' },
-  { key: 'markerDate', label: 'Marker Date' },
-  { key: 'markerMaker', label: 'Marker Maker' },
-  { key: 'factoryProduct', label: 'Factory Product' },
-  { key: 'size', label: 'Size (W x H x D)' },
-  { key: 'bomMaker', label: 'BOM Maker' },
-  { key: 'bomDate', label: 'BOM Date' }
-];
-
-const HeaderInfoCell = ({ label, value, wide = false, multiline = false }) => (
-  <Box
-    sx={{
-      minHeight: multiline ? 64 : 44,
-      px: 0.9,
-      py: 0.7,
-      border: '1px solid #e2e8f0',
-      borderRadius: 1.1,
-      backgroundColor: '#fff',
-      gridColumn: wide ? { xs: '1', md: 'span 2' } : undefined,
-      transition: 'border-color 120ms ease, box-shadow 120ms ease',
-      '&:hover': {
-        borderColor: '#cbd5e1',
-        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)'
-      }
-    }}
-  >
-    <Typography sx={headerLabelSx}>{label}</Typography>
-    <Typography
+const OverviewCardTitle = ({ icon, title }) => (
+  <Stack direction="row" spacing={0.6} alignItems="center" sx={{ pb: 0.55, mb: 0.6, borderBottom: '1px solid #edf1f5' }}>
+    <Box
       sx={{
-        ...headerValueSx,
-        ...(multiline ? { whiteSpace: 'pre-wrap' } : {})
+        width: 24,
+        height: 24,
+        borderRadius: 0.9,
+        display: 'grid',
+        placeItems: 'center',
+        color: '#0a6ed1',
+        backgroundColor: '#eef6ff',
+        flexShrink: 0,
+        '& .MuiSvgIcon-root': { fontSize: 15 }
       }}
     >
-      {value || '—'}
-    </Typography>
-  </Box>
+      {icon}
+    </Box>
+    <Typography sx={{ fontSize: '.78rem', fontWeight: 700, color: '#132238' }}>{title}</Typography>
+  </Stack>
+);
+
+const overviewGridLine = '#dbe4ed';
+
+const OverviewInfoCell = ({ label, value, strong = false, empty = false }) => (
+  <TableCell
+    sx={{
+      px: 0.72,
+      py: 0.5,
+      height: 44,
+      verticalAlign: 'middle',
+      backgroundColor: '#fff',
+      borderRight: `1px solid ${overviewGridLine}`,
+      borderBottom: `1px solid ${overviewGridLine}`,
+      '&:last-of-type': { borderRight: 0 }
+    }}
+  >
+    {!empty && (
+      <>
+        <Typography
+          sx={{
+            mb: 0.12,
+            fontSize: '.54rem',
+            color: '#6f8296',
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '.035em',
+            lineHeight: 1.15,
+            whiteSpace: 'nowrap'
+          }}
+        >
+          {label}
+        </Typography>
+        <Typography
+          sx={{
+            minWidth: 0,
+            fontSize: '.7rem',
+            color: '#17283d',
+            fontWeight: strong ? 700 : 560,
+            lineHeight: 1.3,
+            overflowWrap: 'anywhere'
+          }}
+        >
+          {value || '—'}
+        </Typography>
+      </>
+    )}
+  </TableCell>
+);
+
+const OverviewInfoGroup = ({ title, children, subtle = false }) => (
+  <TableRow
+    sx={{
+      '&:last-of-type td': { borderBottom: 0 }
+    }}
+  >
+    <TableCell
+      sx={{
+        width: 116,
+        minWidth: 116,
+        px: 0.72,
+        py: 0.5,
+        height: 44,
+        verticalAlign: 'middle',
+        backgroundColor: subtle ? '#fafbfd' : '#f5f8fb',
+        borderRight: `1px solid ${overviewGridLine}`,
+        borderBottom: `1px solid ${overviewGridLine}`
+      }}
+    >
+      <Typography
+        sx={{
+          fontSize: '.57rem',
+          fontWeight: 750,
+          color: subtle ? '#718397' : '#38536d',
+          textTransform: 'uppercase',
+          letterSpacing: '.045em',
+          lineHeight: 1.3,
+          whiteSpace: 'nowrap'
+        }}
+      >
+        {title}
+      </Typography>
+    </TableCell>
+    {children}
+  </TableRow>
 );
 
 const asNumber = (value) => (
@@ -270,21 +330,6 @@ const childColorsForProductColor = (productColorId, productColors = [], productC
     if (id && childColor) unique.set(id, { id, childColor });
   });
   return Array.from(unique.values());
-};
-
-const productColorIdsForPacking = (packing = {}, productColors = []) => {
-  const safePacking = packing || {};
-  const safeProductColors = Array.isArray(productColors) ? productColors : [];
-
-  const linkedIds = Array.isArray(safePacking.applicableProductColorIds)
-    ? safePacking.applicableProductColorIds.filter(Boolean)
-    : [];
-
-  if (linkedIds.length) return linkedIds;
-
-  return (safePacking.applicableColors || [])
-    .map((colorName) => safeProductColors.find((item) => normalized(item?.colorName) === normalized(colorName))?.id)
-    .filter(Boolean);
 };
 
 const productColorNamesForLine = (line = {}, productColors = []) => {
@@ -522,7 +567,7 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="lg">
-      <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
+      <DialogTitle sx={{ pr: 6, fontWeight: 750, color: '#103B5C' }}>
         {record ? 'Edit BOM Line' : 'Add BOM Line'}
         <Typography sx={{ mt: 0.25, fontSize: '0.8rem', color: 'text.secondary', fontWeight: 400 }}>
           Supports both the legacy BOM format and the new A:Y format. Consumption MPR is stored separately from the new detail CONS. value.
@@ -595,7 +640,7 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
           <Box sx={{ gridColumn: { xs: '1', sm: 'span 4' }, border: '1px solid #dbe3ec', borderRadius: 1.5, p: 1.25 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 1 }}>
               <Box>
-                <Typography sx={{ fontWeight: 900, fontSize: '0.83rem', color: '#103B5C' }}>Product Color Values</Typography>
+                <Typography sx={{ fontWeight: 750, fontSize: '0.83rem', color: '#103B5C' }}>Product Color Values</Typography>
                 <Typography sx={{ fontSize: '0.73rem', color: 'text.secondary' }}>
                   Select the Product / Style Color first. The Child Color list is then filtered from its Product Color Master. Each Product Color can be selected once per material line.
                 </Typography>
@@ -705,7 +750,7 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
 
       <DialogActions sx={{ p: 2 }}>
         <Button onClick={onClose} disabled={saving} sx={{ textTransform: 'none' }}>Cancel</Button>
-        <Button variant="contained" onClick={save} disabled={saving} sx={{ textTransform: 'none', fontWeight: 800, backgroundColor: '#103B5C' }}>
+        <Button variant="contained" onClick={save} disabled={saving} sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}>
           {saving ? 'Saving...' : record ? 'Save Changes' : 'Create Line'}
         </Button>
       </DialogActions>
@@ -713,80 +758,40 @@ function LineDialog({ open, record, productColors = [], productColorMasters = []
   );
 }
 
-function PackingDialog({ open, record, productColors = [], saving, onClose, onSave }) {
+function PackingDialog({ open, record, saving, onClose, onSave }) {
   const [packingName, setPackingName] = useState('');
-  const [sequence, setSequence] = useState('');
-  const [applicableProductColorIds, setApplicableProductColorIds] = useState([]);
 
   useEffect(() => {
     setPackingName(record?.packingName || '');
-    setSequence(record?.sequence ?? '');
-    setApplicableProductColorIds(record ? productColorIdsForPacking(record, productColors) : []);
-  }, [open, record, productColors]);
-
-  const toggleProductColor = (productColorId) => {
-    setApplicableProductColorIds((current) => (
-      current.includes(productColorId)
-        ? current.filter((id) => id !== productColorId)
-        : [...current, productColorId]
-    ));
-  };
+  }, [open, record]);
 
   return (
-    <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="md">
-      <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
+    <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ pr: 6, fontWeight: 750, color: '#103B5C' }}>
         {record ? 'Edit Packing' : 'Add Packing'}
         <Typography sx={{ mt: 0.25, fontSize: '0.8rem', color: 'text.secondary', fontWeight: 400 }}>
-          Link this Packing to Product Color items. Editing a Product Color later updates its information everywhere this Packing uses it.
+          {record ? 'Update the Packing name.' : 'Create a Packing for BOM material lines.'}
         </Typography>
         <IconButton onClick={onClose} disabled={saving} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
       </DialogTitle>
       <DialogContent dividers>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 160px' }, gap: 1.5 }}>
-          <TextField required label="Packing Name" value={packingName} onChange={(event) => setPackingName(event.target.value)} placeholder="PACKING US" />
-          <TextField label="Sequence" type="number" value={sequence} onChange={(event) => setSequence(event.target.value)} />
-        </Box>
-
-        <Box sx={{ mt: 2, border: '1px solid #e5e7eb', borderRadius: 1.5, p: 1.25 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={0.75}>
-            <Box>
-              <Typography sx={{ fontWeight: 800, fontSize: '0.83rem' }}>Applicable Product Colors</Typography>
-              <Typography sx={{ fontSize: '0.74rem', color: 'text.secondary' }}>
-                Leave all unselected to apply this Packing to every Product Color.
-              </Typography>
-            </Box>
-            <Stack direction="row" spacing={0.5}>
-              <Button size="small" onClick={() => setApplicableProductColorIds(productColors.map((item) => item.id))} sx={{ textTransform: 'none' }}>Select All</Button>
-              <Button size="small" onClick={() => setApplicableProductColorIds([])} sx={{ textTransform: 'none' }}>Clear</Button>
-            </Stack>
-          </Stack>
-          {!productColors.length ? (
-            <Alert severity="info" sx={{ mt: 1.2 }}>Create Product Color items first, then link them to this Packing.</Alert>
-          ) : (
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, mt: 0.75 }}>
-              {productColors.map((productColor) => (
-                <FormControlLabel
-                  key={productColor.id}
-                  control={<Checkbox checked={applicableProductColorIds.includes(productColor.id)} onChange={() => toggleProductColor(productColor.id)} />}
-                  label={<Typography sx={{ fontSize: '0.78rem' }}>{productColorLabel(productColor)}</Typography>}
-                  sx={{ mr: 0 }}
-                />
-              ))}
-            </Box>
-          )}
-        </Box>
+        <TextField
+          fullWidth
+          required
+          autoFocus
+          label="Packing Name"
+          value={packingName}
+          onChange={(event) => setPackingName(event.target.value)}
+          placeholder="PACKING US"
+        />
       </DialogContent>
       <DialogActions sx={{ p: 2 }}>
         <Button onClick={onClose} disabled={saving} sx={{ textTransform: 'none' }}>Cancel</Button>
         <Button
           variant="contained"
           disabled={saving || !packingName.trim()}
-          onClick={() => onSave?.({
-            packingName: packingName.trim(),
-            sequence: asNumber(sequence),
-            applicableProductColorIds
-          })}
-          sx={{ textTransform: 'none', fontWeight: 800, backgroundColor: '#103B5C' }}
+          onClick={() => onSave?.({ packingName: packingName.trim() })}
+          sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}
         >
           {saving ? 'Saving...' : record ? 'Save Changes' : 'Create Packing'}
         </Button>
@@ -794,7 +799,6 @@ function PackingDialog({ open, record, productColors = [], saving, onClose, onSa
     </Dialog>
   );
 }
-
 function ProductColorDialog({ open, record, header = {}, productColorMasters = [], buyerKey, saving, onClose, onSave }) {
   const blankChildColor = () => ({ id: '', childColor: '', deleteLocked: false, usageCount: 0, usageMessage: '' });
   const clean = (value) => String(value || '').trim();
@@ -1080,7 +1084,7 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
       maxWidth="lg"
       PaperProps={{ sx: { maxHeight: 'calc(100vh - 32px)' } }}
     >
-      <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
+      <DialogTitle sx={{ pr: 6, fontWeight: 750, color: '#103B5C' }}>
         {record ? 'Edit Product Color' : 'Add Product Color'}
         <Typography sx={{ mt: 0.25, fontSize: '0.8rem', color: 'text.secondary', fontWeight: 400 }}>
           Use the same Product Color Master form: identity, status, one image and Child Colors. Sequence remains specific to this BOM.
@@ -1173,7 +1177,7 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
               </Box>
 
               <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Product Image</Typography>
+                <Typography sx={{ fontWeight: 750, color: '#103B5C' }}>Product Image</Typography>
                 <Typography sx={{ mt: 0.25, fontSize: '0.76rem', color: 'text.secondary' }}>
                   One shared image only. Uploading a new image replaces the image in Product Color Master and every linked BOM reuses it.
                 </Typography>
@@ -1218,7 +1222,7 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
 
           <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1}>
             <Box>
-              <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Child Colors</Typography>
+              <Typography sx={{ fontWeight: 750, color: '#103B5C' }}>Child Colors</Typography>
               <Typography sx={{ fontSize: '0.76rem', color: 'text.secondary' }}>
                 Add, edit or remove Child Colors exactly as in Product Color Master. Existing IDs are retained when a row is edited.
               </Typography>
@@ -1249,9 +1253,9 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
             <Table size="small" sx={{ minWidth: 620 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ width: 64, fontWeight: 900, backgroundColor: '#f8fafc' }}>No.</TableCell>
-                  <TableCell sx={{ fontWeight: 900, backgroundColor: '#f8fafc' }}>Child Color / Comment</TableCell>
-                  <TableCell sx={{ width: 80, fontWeight: 900, backgroundColor: '#f8fafc' }} align="center">Action</TableCell>
+                  <TableCell sx={{ width: 64, fontWeight: 750, backgroundColor: '#f8fafc' }}>No.</TableCell>
+                  <TableCell sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }}>Child Color / Comment</TableCell>
+                  <TableCell sx={{ width: 80, fontWeight: 750, backgroundColor: '#f8fafc' }} align="center">Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -1312,7 +1316,7 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
           variant="contained"
           disabled={saving || !canSave}
           onClick={submit}
-          sx={{ textTransform: 'none', fontWeight: 800, backgroundColor: '#103B5C' }}
+          sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}
         >
           {saving ? 'Saving...' : record ? 'Save Product Color' : 'Add Product Color'}
         </Button>
@@ -1461,8 +1465,8 @@ function BomAttachmentImagePreviewDialog({ open, bomId, attachment, onClose }) {
         }
       }}
     >
-      <DialogTitle sx={{ pr: 7, py: 1.5, fontWeight: 900, color: '#103B5C' }}>
-        <Typography noWrap sx={{ pr: 1, fontWeight: 900, color: '#103B5C' }}>
+      <DialogTitle sx={{ pr: 7, py: 1.5, fontWeight: 750, color: '#103B5C' }}>
+        <Typography noWrap sx={{ pr: 1, fontWeight: 750, color: '#103B5C' }}>
           {title}
         </Typography>
         <IconButton
@@ -1490,7 +1494,7 @@ function BomAttachmentImagePreviewDialog({ open, bomId, attachment, onClose }) {
         {!loading && loadError && (
           <Stack spacing={1} alignItems="center" sx={{ color: '#fff', textAlign: 'center' }}>
             <Image sx={{ fontSize: 54, opacity: 0.8 }} />
-            <Typography sx={{ fontWeight: 800 }}>Image preview is unavailable.</Typography>
+            <Typography sx={{ fontWeight: 700 }}>Image preview is unavailable.</Typography>
           </Stack>
         )}
 
@@ -1586,51 +1590,20 @@ function AttachmentCards({
 
 function WholeBomImageCard({ bomId, attachment, saving, actionsDisabled, onUpload, onDelete, onOpen, onDownload }) {
   return (
-    <Paper
-      elevation={0}
-      sx={{
-        p: 0.8,
-        border: '1px solid #e2e8f0',
-        borderRadius: 1.25,
-        backgroundColor: '#fff',
-        height: '100%'
-      }}
-    >
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ height: '100%' }}>
-        <Box
-          sx={{
-            width: 132,
-            height: 82,
-            flexShrink: 0,
-            overflow: 'hidden',
-            borderRadius: 1,
-            border: '1px solid #eef2f7',
-            backgroundColor: '#f8fafc'
-          }}
-        >
-          {attachment ? (
-            <ProtectedAttachmentImage bomId={bomId} attachment={attachment} onOpen={onOpen} height={82} />
-          ) : (
-            <Stack alignItems="center" justifyContent="center" spacing={0.3} sx={{ height: 82 }}>
-              <Image color="action" sx={{ fontSize: 22 }} />
-              <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>No image</Typography>
-            </Stack>
-          )}
-        </Box>
+    <Paper elevation={0} sx={{ ...bomOverviewCardSx, p: 0.8 }}>
+      <OverviewCardTitle icon={<Image />} title="Whole BOM Image" />
+      <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="space-between">
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Tooltip title={attachment?.originalFileName || 'Whole BOM image'}>
+            <Typography noWrap sx={{ fontSize: '.63rem', color: attachment ? '#667b90' : '#7a8c9f', mb: 0.3 }}>
+              {attachment?.originalFileName || 'No image uploaded'}
+            </Typography>
+          </Tooltip>
 
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 850, fontSize: '0.78rem', color: '#0f172a' }}>Whole BOM Image</Typography>
-          {attachment && (
-            <Tooltip title={attachment.originalFileName || 'Whole BOM image'}>
-              <Typography noWrap sx={{ mt: 0.2, fontSize: '0.68rem', color: 'text.secondary' }}>
-                {attachment.originalFileName || 'Whole BOM image'}
-              </Typography>
-            </Tooltip>
-          )}
-          <Stack direction="row" flexWrap="wrap" gap={0.45} sx={{ mt: 0.65, '& .MuiButton-root': { minHeight: 28, px: 0.8, fontSize: '0.68rem' } }}>
+          <Stack direction="row" flexWrap="wrap" gap={0.15} sx={{ '& .MuiButton-root': { minHeight: 22, px: 0.45, fontSize: '.61rem', textTransform: 'none' } }}>
             <Tooltip title={actionsDisabled ? 'BOM permission is required.' : ''} disableHoverListener={!actionsDisabled}>
               <span>
-                <Button component="label" size="small" variant="outlined" startIcon={<Image />} disabled={actionsDisabled || saving} sx={{ textTransform: 'none' }}>
+                <Button component="label" size="small" variant="text" disabled={actionsDisabled || saving}>
                   {attachment ? 'Replace' : 'Upload'}
                   <input hidden type="file" accept="image/*" onChange={onUpload} />
                 </Button>
@@ -1638,18 +1611,28 @@ function WholeBomImageCard({ bomId, attachment, saving, actionsDisabled, onUploa
             </Tooltip>
             {attachment && (
               <>
-                <Button size="small" onClick={() => onOpen?.(attachment)} sx={{ textTransform: 'none' }}>Open</Button>
-                <Button size="small" onClick={() => onDownload?.(attachment)} sx={{ textTransform: 'none' }}>Download</Button>
+                <Button size="small" onClick={() => onOpen?.(attachment)}>Open</Button>
+                <Button size="small" onClick={() => onDownload?.(attachment)}>Download</Button>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required.' : 'Delete image'}>
                   <span>
-                    <IconButton size="small" color="error" disabled={actionsDisabled || saving} onClick={onDelete} sx={{ width: 28, height: 28 }}>
-                      <Delete sx={{ fontSize: 16 }} />
+                    <IconButton size="small" color="error" disabled={actionsDisabled || saving} onClick={onDelete} sx={{ width: 22, height: 22 }}>
+                      <Delete sx={{ fontSize: 13 }} />
                     </IconButton>
                   </span>
                 </Tooltip>
               </>
             )}
           </Stack>
+        </Box>
+
+        <Box sx={{ width: 88, height: 58, flexShrink: 0, overflow: 'hidden', borderRadius: 1, border: '1px solid #e5eaf0', backgroundColor: '#f8fafc' }}>
+          {attachment ? (
+            <ProtectedAttachmentImage bomId={bomId} attachment={attachment} onOpen={onOpen} height={58} />
+          ) : (
+            <Stack alignItems="center" justifyContent="center" sx={{ height: 58 }}>
+              <Image color="action" sx={{ fontSize: 18 }} />
+            </Stack>
+          )}
         </Box>
       </Stack>
     </Paper>
@@ -1720,8 +1703,8 @@ function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
         }
       }}
     >
-      <DialogTitle sx={{ pr: 7, py: 1.5, fontWeight: 900, color: '#103B5C' }}>
-        <Typography noWrap sx={{ pr: 1, fontWeight: 900, color: '#103B5C' }}>
+      <DialogTitle sx={{ pr: 7, py: 1.5, fontWeight: 750, color: '#103B5C' }}>
+        <Typography noWrap sx={{ pr: 1, fontWeight: 750, color: '#103B5C' }}>
           {title}
         </Typography>
         <IconButton
@@ -1751,7 +1734,7 @@ function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
         {!loading && loadError && (
           <Stack spacing={1} alignItems="center" sx={{ color: '#fff', textAlign: 'center' }}>
             <Image sx={{ fontSize: 54, opacity: 0.8 }} />
-            <Typography sx={{ fontWeight: 800 }}>Image preview is unavailable.</Typography>
+            <Typography sx={{ fontWeight: 700 }}>Image preview is unavailable.</Typography>
             <Typography sx={{ fontSize: '0.78rem', opacity: 0.8 }}>
               Check the image conversion service on the Backend server.
             </Typography>
@@ -1779,7 +1762,7 @@ function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
   );
 }
 
-function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsDisabled = false }) {
+function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsDisabled = false, compact = false }) {
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [loadError, setLoadError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
@@ -1816,7 +1799,7 @@ function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsD
   }, [bomId, line?.id, line?.primaryImage?.id, line?.primaryImage?.updatedAt, retryKey]);
 
   return (
-    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 118 }}>
+    <Stack direction="row" spacing={compact ? 0.35 : 0.5} alignItems="center" sx={{ minWidth: compact ? 76 : 118 }}>
       {thumbnailUrl ? (
         <Box
           component="img"
@@ -1828,19 +1811,19 @@ function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsD
             setThumbnailUrl('');
             setLoadError(true);
           }}
-          sx={{ width: 54, height: 54, objectFit: 'contain', border: '1px solid #dbe3ec', borderRadius: 1, cursor: 'zoom-in', backgroundColor: '#fff' }}
+          sx={{ width: compact ? 38 : 54, height: compact ? 38 : 54, objectFit: 'contain', border: '1px solid #dbe3ec', borderRadius: 1, cursor: 'zoom-in', backgroundColor: '#fff' }}
         />
       ) : (
         <Tooltip title={loadError ? 'Cannot create PNG preview. Check LibreOffice / LIBREOFFICE_PATH on the Backend server.' : ''}>
-          <Box sx={{ width: 54, height: 54, display: 'grid', placeItems: 'center', border: '1px dashed #cbd5e1', borderRadius: 1, color: loadError ? '#dc2626' : '#94a3b8' }}>
+          <Box sx={{ width: compact ? 38 : 54, height: compact ? 38 : 54, display: 'grid', placeItems: 'center', border: '1px dashed #cbd5e1', borderRadius: 1, color: loadError ? '#dc2626' : '#94a3b8' }}>
             <Stack spacing={0} alignItems="center">
               <Image fontSize="small" />
-              {loadError && <Typography sx={{ fontSize: '0.58rem', fontWeight: 800 }}>EMF</Typography>}
+              {loadError && <Typography sx={{ fontSize: '0.58rem', fontWeight: 700 }}>EMF</Typography>}
             </Stack>
           </Box>
         </Tooltip>
       )}
-      <Stack spacing={0.1}>
+      <Stack spacing={0.05} sx={{ '& .MuiIconButton-root': compact ? { width: 24, height: 24 } : undefined }}>
         <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : (line?.primaryImage ? 'Replace Image' : 'Upload Image')}>
           <span>
             <IconButton component="label" size="small" disabled={actionsDisabled}>
@@ -1874,12 +1857,13 @@ function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsD
 }
 
 const BOM_LINE_COLUMN_SIZES = {
-  'No.': { minWidth: 90, maxWidth: 110 },
-  'Material Type': { minWidth: 150, maxWidth: 190 },
-  Image: { minWidth: 150, maxWidth: 170 },
-  'SAP Code': { minWidth: 140, maxWidth: 180 },
+  'No.': { minWidth: 58, maxWidth: 72 },
+  Material: { minWidth: 180, maxWidth: 230 },
+  'Material Type': { minWidth: 135, maxWidth: 170 },
+  Image: { minWidth: 130, maxWidth: 155 },
+  'SAP Code': { minWidth: 120, maxWidth: 155 },
   'Detail No': { minWidth: 100, maxWidth: 125 },
-  Position: { minWidth: 280, maxWidth: 340 },
+  Position: { minWidth: 250, maxWidth: 320 },
   'Position Description': { minWidth: 300, maxWidth: 380 },
   P: { minWidth: 80, maxWidth: 95 },
   X: { minWidth: 120, maxWidth: 145 },
@@ -1889,16 +1873,28 @@ const BOM_LINE_COLUMN_SIZES = {
   'Legacy Costing / MK': { minWidth: 160, maxWidth: 195 },
   'Legacy Costing / Unit': { minWidth: 160, maxWidth: 195 },
   'Detail CONS.': { minWidth: 170, maxWidth: 210 },
-  'Consumption MPR': { minWidth: 180, maxWidth: 220 },
-  'Consumption Unit': { minWidth: 150, maxWidth: 180 },
+  'Consumption MPR': { minWidth: 145, maxWidth: 175 },
+  'Consumption Unit': { minWidth: 110, maxWidth: 140 },
   'Remarks On BOM': { minWidth: 280, maxWidth: 360 },
   'Additional Remarks': { minWidth: 280, maxWidth: 360 },
-  'Product Colors': { minWidth: 380, maxWidth: 480 }
+  'Product Colors': { minWidth: 230, maxWidth: 320 }
 };
+
+const BOM_LINE_OVERVIEW_COLUMNS = [
+  'No.', 'Material', 'SAP Code', 'Position', 'Consumption MPR', 'Consumption Unit', 'Product Colors'
+];
+
+const BOM_LINE_VIEW_PRESETS = [
+  { label: 'Overview', keys: BOM_LINE_OVERVIEW_COLUMNS },
+  { label: 'Cutting Details', keys: ['No.', 'Material', 'SAP Code', 'Position', 'P', 'X', 'Y', 'Q.TY', '><', 'Remarks On BOM'] },
+  { label: 'Consumption', keys: ['No.', 'Material', 'SAP Code', 'Position', 'Detail CONS.', 'Consumption MPR', 'Consumption Unit', 'Remarks On BOM'] },
+  { label: 'Product Colors', keys: ['No.', 'Material', 'SAP Code', 'Position', 'Product Colors', 'Remarks On BOM'] }
+];
 
 function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach, onImageUpload, onImageDelete, onImagePreview, emptyText = 'No BOM lines.', actionsDisabled = false }) {
   const columns = [
     ['No.', (line) => line.materialGroupNo],
+    ['Material', null],
     ['Material Type', (line) => line.materialType],
     ['Image', null],
     ['SAP Code', (line) => line.sapCode],
@@ -1919,37 +1915,56 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
     ['Additional Remarks', (line) => line.additionalRemark],
     ['Product Colors', (line) => productColorNamesForLine(line, productColors).join(', ')]
   ];
+  const [visibleLabels, setVisibleLabels] = useState(BOM_LINE_OVERVIEW_COLUMNS);
+  const visibleColumns = columns.filter(([label]) => visibleLabels.includes(label));
+  const tableMinWidth = Math.max(1010, visibleColumns.reduce((total, [label]) => total + Number(BOM_LINE_COLUMN_SIZES[label]?.minWidth || 110), 0) + 120);
 
   return (
-    <TableContainer sx={{ overflowX: 'auto' }}>
-      <Table size="small" sx={{ minWidth: 3880 }}>
+    <>
+      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} spacing={0.7} sx={{ px: 0.8, py: 0.45, borderBottom: '1px solid #e5e7eb', bgcolor: '#fff' }}>
+        <Typography sx={{ fontSize: '.71rem', color: '#60758a', fontWeight: 600 }}>
+          {rows.length} materials
+        </Typography>
+        <ColumnVisibilityMenu
+          columns={columns.map(([label]) => ({ key: label, label }))}
+          visibleKeys={visibleLabels}
+          lockedKeys={['No.', 'Material', 'Position', 'Consumption MPR']}
+          onChange={setVisibleLabels}
+          onCompact={() => setVisibleLabels(BOM_LINE_OVERVIEW_COLUMNS)}
+          compactLabel="Overview"
+          presets={BOM_LINE_VIEW_PRESETS.filter((preset) => preset.label !== 'Overview')}
+        />
+      </Stack>
+      <TableContainer sx={{ overflowX: 'auto', maxHeight: 560 }}>
+      <Table stickyHeader size="small" sx={{ minWidth: tableMinWidth }}>
         <TableHead>
           <TableRow>
-            {columns.map(([label]) => (
+            {visibleColumns.map(([label]) => (
               <TableCell
                 key={label}
                 sx={{
-                  fontWeight: 900,
+                  fontWeight: 750,
                   fontSize: '0.72rem',
                   backgroundColor: '#f8fafc',
                   whiteSpace: 'nowrap',
                   minWidth: BOM_LINE_COLUMN_SIZES[label]?.minWidth,
-                  maxWidth: BOM_LINE_COLUMN_SIZES[label]?.maxWidth
+                  maxWidth: BOM_LINE_COLUMN_SIZES[label]?.maxWidth,
+                  ...(label === 'No.' ? { position: 'sticky', left: 0, zIndex: 6, boxShadow: '1px 0 0 #e5e7eb' } : {}),
+                  ...(label === 'Material' ? { position: 'sticky', left: 58, zIndex: 6, boxShadow: '1px 0 0 #e5e7eb' } : {})
                 }}
               >
                 {label}
               </TableCell>
             ))}
-            <TableCell sx={{ minWidth: 90, fontWeight: 900, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>Files</TableCell>
-            <TableCell sx={{ minWidth: 140, fontWeight: 900, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>Actions</TableCell>
+            <TableCell sx={{ minWidth: 112, fontWeight: 750, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap', position: 'sticky', right: 0, zIndex: 6, boxShadow: '-1px 0 0 #e5e7eb' }}>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
           {!rows.length ? (
-            <TableRow><TableCell colSpan={columns.length + 2} align="center" sx={{ py: 2.5, color: 'text.secondary' }}>{emptyText}</TableCell></TableRow>
+            <EmptyTableState colSpan={visibleColumns.length + 1} title={emptyText} description="" />
           ) : rows.map((line) => (
             <TableRow key={line.id} hover data-bom-line-id={line.id} sx={{ scrollMarginTop: 96 }}>
-              {columns.map(([label, render]) => (
+              {visibleColumns.map(([label, render]) => (
                 <TableCell
                   key={label}
                   sx={{
@@ -1958,16 +1973,37 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
                     minWidth: BOM_LINE_COLUMN_SIZES[label]?.minWidth,
                     maxWidth: BOM_LINE_COLUMN_SIZES[label]?.maxWidth,
                     whiteSpace: 'normal',
-                    wordBreak: 'break-word'
+                    wordBreak: 'break-word',
+                    ...(label === 'No.' ? { position: 'sticky', left: 0, zIndex: 2, backgroundColor: '#fff', boxShadow: '1px 0 0 #e5e7eb' } : {}),
+                    ...(label === 'Material' ? { position: 'sticky', left: 58, zIndex: 2, backgroundColor: '#fff', boxShadow: '1px 0 0 #e5e7eb' } : {})
                   }}
                 >
-                  {label === 'Image'
+                  {label === 'Material' ? (
+                    <Stack direction="row" spacing={0.65} alignItems="center" sx={{ minWidth: 0 }}>
+                      <BomLineImageCell
+                        bomId={bomId}
+                        line={line}
+                        onUpload={onImageUpload}
+                        onDelete={onImageDelete}
+                        onPreview={onImagePreview}
+                        actionsDisabled={actionsDisabled}
+                        compact
+                      />
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography sx={{ fontSize: '.75rem', fontWeight: 650, color: '#20354b', lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+                          {line.materialType || 'Material'}
+                        </Typography>
+                        {line.detailNo && (
+                          <Typography sx={{ mt: 0.12, fontSize: '.64rem', color: '#7a8da0' }}>Detail {line.detailNo}</Typography>
+                        )}
+                      </Box>
+                    </Stack>
+                  ) : label === 'Image'
                     ? <BomLineImageCell bomId={bomId} line={line} onUpload={onImageUpload} onDelete={onImageDelete} onPreview={onImagePreview} actionsDisabled={actionsDisabled} />
                     : (render(line) ?? '—')}
                 </TableCell>
               ))}
-              <TableCell sx={{ minWidth: 90 }}><Chip size="small" label={line.attachmentCount ?? (line.attachments || []).length} variant="outlined" /></TableCell>
-              <TableCell sx={{ minWidth: 140, whiteSpace: 'nowrap' }}>
+              <TableCell sx={{ minWidth: 112, whiteSpace: 'nowrap', position: 'sticky', right: 0, zIndex: 2, backgroundColor: '#fff', boxShadow: '-1px 0 0 #e5e7eb' }}>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Add Line File'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onAttach(line)}><Image fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Edit'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onEdit(line)}><Edit fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Delete'}><span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete(line)}><Delete fontSize="small" /></IconButton></span></Tooltip>
@@ -1977,6 +2013,7 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
         </TableBody>
       </Table>
     </TableContainer>
+    </>
   );
 }
 
@@ -1997,6 +2034,7 @@ export default function BomDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [headerOpen, setHeaderOpen] = useState(false);
+  const [downloadAnchorEl, setDownloadAnchorEl] = useState(null);
   const [headerForm, setHeaderForm] = useState({});
   const [lineCtx, setLineCtx] = useState(null);
   const [packingCtx, setPackingCtx] = useState(null);
@@ -2609,7 +2647,7 @@ export default function BomDetailPage() {
     const bomNo = bomDownloadPart(bom?.bomNo, 'BOM');
     const date = bomDownloadDate();
     return template
-      ? `BOM_${buyer}_${bomNo}_Template_${date}.xlsx`
+      ? `BOM_Upload_Template_${buyer}_${bomNo}_${date}.xlsx`
       : `BOM_${buyer}_${bomNo}_${date}.xlsx`;
   };
 
@@ -2661,132 +2699,292 @@ export default function BomDetailPage() {
 
   return (
     <Box sx={{ p: { xs: 0.75, sm: 1, md: 1.25 } }}>
-      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ mb: 2 }}>
-        <Box>
-          <Button component={RouterLink} to={buyerPath(buyerKey, `orders/${orderId}`)} sx={{ px: 0, textTransform: 'none' }}>← Back To Order</Button>
-          <Typography sx={{ fontSize: '1.45rem', fontWeight: 950, color: '#103B5C' }}>{bom.bomNo} — {bom.bomName}</Typography>
-          <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mt: 0.75 }}>
-            <Chip label={bom.status} />
-            <Chip label={`${productColors.length} Product Colors`} variant="outlined" />
-            <Chip label={`${(bom.packings || []).length} Packings`} variant="outlined" />
-            {bom.sourceFileName && <Chip label={`Template: ${bom.sourceFileName}`} variant="outlined" />}
-          </Stack>
-        </Box>
+      <Box id="bom-overview" sx={{ scrollMarginTop: 88, mb: 0.75 }}>
+        <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'flex-start' }} spacing={0.8} sx={{ mb: 0.65 }}>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Stack direction="row" spacing={0.7} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Button
+                component={RouterLink}
+                to={buyerPath(buyerKey, `orders/${orderId}`)}
+                size="small"
+                variant="text"
+                startIcon={<ArrowBackOutlined sx={{ fontSize: '15px !important' }} />}
+                sx={{ px: 0.35, minHeight: 24, color: '#49657f', fontSize: '.68rem', textTransform: 'none' }}
+              >
+                Back to Order
+              </Button>
+              <Typography
+                sx={{
+                  fontSize: { xs: '1rem', sm: '1.16rem' },
+                  fontWeight: 750,
+                  color: '#132b45',
+                  letterSpacing: '-0.012em',
+                  lineHeight: 1.2
+                }}
+              >
+                {bom.bomNo} — {bom.bomName}
+              </Typography>
+              <StatusBadge status={bom.status} />
+            </Stack>
 
-        <Stack
-          direction="row"
-          flexWrap="wrap"
-          justifyContent={{ xs: 'flex-start', md: 'flex-end' }}
-          alignItems="center"
-          gap={1}
-          sx={{ '& .MuiButton-root': compactActionButtonSx }}
-        >
-          <Button size="small" variant="outlined" startIcon={<FileDownload />} onClick={downloadBomUploadTemplate}>
-            BOM Template
-          </Button>
-          <Button size="small" variant="outlined" startIcon={<FileDownload />} onClick={exportOriginalFormat}>
-            Export Original Format
-          </Button>
-          <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanExcelEnabled ? buyerFormatMessage : 'Replace BOM Excel')}><span><Button size="small" variant="outlined" startIcon={<FileUpload />} onClick={() => fileRef.current?.click()} disabled={saving || !canWrite || !llBeanExcelEnabled}>
-            Replace BOM Excel
-          </Button></span></Tooltip>
-          <input ref={fileRef} type="file" accept=".xls,.xlsx" hidden onChange={uploadExcel} />
-          <input ref={lineAttachmentInputRef} type="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" hidden onChange={uploadPendingLineAttachment} />
-          <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Header'}><span><Button size="small" variant="contained" startIcon={<Save />} onClick={() => setHeaderOpen(true)} disabled={!canWrite} sx={{ backgroundColor: '#103B5C' }}>
-            Edit Header
-          </Button></span></Tooltip>
-        </Stack>
-      </Stack>
+            <Stack direction="row" spacing={0.7} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.35 }}>
+              <Typography noWrap sx={{ maxWidth: 720, fontSize: '.68rem', color: '#60758a' }}>
+                {[bom.header?.styleName, bom.header?.season, bom.header?.patternNumber].filter(Boolean).join(' · ') || 'BOM detail'}
+              </Typography>
+              <Chip size="small" label={`${productColors.length} Colors`} variant="outlined" sx={{ height: 22, fontSize: '.61rem', bgcolor: '#fff', borderColor: '#d8e1eb' }} />
+              <Chip size="small" label={`${(bom.packings || []).length} Packings`} variant="outlined" sx={{ height: 22, fontSize: '.61rem', bgcolor: '#fff', borderColor: '#d8e1eb' }} />
+              {bom.sourceFileName && (
+                <Tooltip title={bom.sourceFileName}>
+                  <Chip
+                    size="small"
+                    icon={<DescriptionOutlined sx={{ fontSize: '13px !important' }} />}
+                    label="Source Excel"
+                    variant="outlined"
+                    sx={{ height: 22, fontSize: '.61rem', bgcolor: '#fff', borderColor: '#d8e1eb' }}
+                  />
+                </Tooltip>
+              )}
+            </Stack>
+          </Box>
 
-      {!llBeanExcelEnabled && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          {buyerFormatMessage} Manual BOM maintenance remains available.
-        </Alert>
-      )}
-
-      <Paper elevation={0} sx={{ p: 1, border: '1px solid #e2e8f0', borderRadius: 1.75, mb: 1.1, backgroundColor: '#f8fafc' }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={0.5} sx={{ mb: 0.8 }}>
-          <Stack direction="row" spacing={0.75} alignItems="center">
-            <Typography sx={{ fontWeight: 900, color: '#103B5C', fontSize: '0.9rem' }}>BOM Header</Typography>
-            <Chip
+          <Stack
+            direction="row"
+            flexWrap="wrap"
+            justifyContent={{ xs: 'flex-start', lg: 'flex-end' }}
+            alignItems="center"
+            gap={0.55}
+            sx={{ '& .MuiButton-root': { ...compactActionButtonSx, minHeight: 31, height: 31, px: 1, fontSize: '.7rem' } }}
+          >
+            <Button
               size="small"
               variant="outlined"
-              label="THE BOM DETAILS"
-              sx={{ height: 22, fontSize: '0.64rem', fontWeight: 800, backgroundColor: '#fff' }}
-            />
+              startIcon={<FileDownload />}
+              endIcon={<KeyboardArrowDown />}
+              onClick={(event) => setDownloadAnchorEl(event.currentTarget)}
+              sx={{ color: '#2f4b65', borderColor: '#cbd7e3', bgcolor: '#fff' }}
+            >
+              Download
+            </Button>
+            <Menu
+              anchorEl={downloadAnchorEl}
+              open={Boolean(downloadAnchorEl)}
+              onClose={() => setDownloadAnchorEl(null)}
+              PaperProps={{ sx: { minWidth: 220, mt: 0.5, border: '1px solid #e2e8f0', boxShadow: '0 12px 32px rgba(15,23,42,.12)' } }}
+            >
+              <MenuItem onClick={() => { setDownloadAnchorEl(null); downloadBomUploadTemplate(); }}>
+                <ListItemIcon><FileDownload fontSize="small" /></ListItemIcon>
+                BOM Template
+              </MenuItem>
+              <MenuItem onClick={() => { setDownloadAnchorEl(null); exportOriginalFormat(); }}>
+                <ListItemIcon><FileDownload fontSize="small" /></ListItemIcon>
+                Export Original Format
+              </MenuItem>
+            </Menu>
+            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanExcelEnabled ? buyerFormatMessage : 'Replace BOM Excel')}>
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<FileUpload />}
+                  onClick={() => fileRef.current?.click()}
+                  disabled={saving || !canWrite || !llBeanExcelEnabled}
+                  sx={{ color: '#2f4b65', borderColor: '#cbd7e3', bgcolor: '#fff' }}
+                >
+                  Replace Excel
+                </Button>
+              </span>
+            </Tooltip>
+            <input ref={fileRef} type="file" accept=".xls,.xlsx" hidden onChange={uploadExcel} />
+            <input ref={lineAttachmentInputRef} type="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" hidden onChange={uploadPendingLineAttachment} />
+            <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit BOM header'}>
+              <span>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<Edit />}
+                  onClick={() => setHeaderOpen(true)}
+                  disabled={!canWrite}
+                  sx={{ backgroundColor: '#0b3a5b', '&:hover': { backgroundColor: '#082f4b' } }}
+                >
+                  Edit Header
+                </Button>
+              </span>
+            </Tooltip>
           </Stack>
-          <Typography sx={{ fontSize: '0.69rem', color: 'text.secondary' }}>
-            Imported header information from the original BOM Excel file.
-          </Typography>
         </Stack>
+
+        {!llBeanExcelEnabled && (
+          <Alert severity="info" sx={{ mb: 1 }}>
+            {buyerFormatMessage} Manual BOM maintenance remains available.
+          </Alert>
+        )}
 
         <Box
           sx={{
-            display: 'grid',
-            gridTemplateColumns: {
-              xs: '1fr',
-              sm: 'repeat(2, minmax(0, 1fr))',
-              md: 'repeat(4, minmax(0, 1fr))',
-              xl: 'repeat(5, minmax(0, 1fr))'
-            },
-            gap: 0.65
+            borderBottom: '1px solid #dfe6ee',
+            mb: 0.7,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.2,
+            overflowX: 'auto',
+            '& .MuiButton-root': {
+              minWidth: 'auto',
+              px: 0.95,
+              py: 0.55,
+              borderRadius: 0,
+              textTransform: 'none',
+              fontSize: '.7rem',
+              fontWeight: 650,
+              whiteSpace: 'nowrap',
+              color: '#31465b'
+            }
           }}
         >
-          {headerDisplayFields.map((field) => (
-            <HeaderInfoCell key={field.key} label={field.label} value={bom.header?.[field.key]} />
-          ))}
+          <Button sx={{ color: '#0a6ed1 !important', borderBottom: '2px solid #0a6ed1' }} onClick={() => document.getElementById('bom-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Overview</Button>
+          <Button onClick={() => document.getElementById('bom-core-materials')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Core Materials</Button>
+          <Button onClick={() => document.getElementById('bom-packings')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Packing</Button>
+          <Button onClick={() => document.getElementById('bom-product-colors')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Product Colors</Button>
         </Box>
 
         <Box
           sx={{
-            mt: 0.65,
             display: 'grid',
-            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.7fr) minmax(360px, 0.8fr)' },
-            gap: 0.65,
+            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 3fr) minmax(285px, 1fr)' },
+            gap: 0.7,
             alignItems: 'stretch'
           }}
         >
-          <HeaderInfoCell label="Comments" value={bom.header?.comments} multiline />
-          <WholeBomImageCard
-            bomId={bomId}
-            attachment={wholeBomImage}
-            saving={saving}
-            actionsDisabled={!canWrite}
-            onUpload={(event) => uploadAttachment(event, { scope: 'BOM', lineId: '' })}
-            onOpen={openAttachment}
-            onDownload={downloadAttachment}
-            onDelete={() => requestDelete({
-              type: 'wholeBomImage',
-              id: wholeBomImage?.id,
-              itemName: 'Whole BOM Image',
-              label: wholeBomImage?.originalFileName || 'Whole BOM image',
-              message: <>Delete the Whole BOM image?</>,
-              warning: 'This removes the image displayed below Comments.'
-            })}
-          />
-        </Box>
-      </Paper>
+          <Paper elevation={0} sx={{ ...bomOverviewCardSx, p: { xs: 0.8, sm: 0.9 }, minWidth: 0 }}>
+            <OverviewCardTitle icon={<LayersOutlined />} title="BOM Information" />
 
-      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={0.75} sx={{ mb: 1.1 }}>
-          <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>BOM Material Search & Filter</Typography>
-            <Typography sx={{ fontSize: '.75rem', color: 'text.secondary' }}>
-              Search material type, SAP code, description, position, product color, child color, or BOM remark. Filters apply to Core and Packing lines.
-            </Typography>
-          </Box>
-          <Typography sx={{ fontSize: '.78rem', color: 'text.secondary', fontWeight: 700 }}>
-            Showing {matchedBomLineCount} / {totalBomLineCount} loaded line(s)
-          </Typography>
-        </Stack>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 1 }}>
+            <TableContainer
+              component={Box}
+              sx={{
+                border: `1px solid ${overviewGridLine}`,
+                borderRadius: 1,
+                overflowX: 'auto',
+                backgroundColor: '#fff'
+              }}
+            >
+              <Table
+                size="small"
+                sx={{
+                  tableLayout: 'fixed',
+                  minWidth: 820,
+                  '& td': { boxSizing: 'border-box' }
+                }}
+              >
+                <colgroup>
+                  <col style={{ width: 116 }} />
+                  <col style={{ width: '25%' }} />
+                  <col style={{ width: '25%' }} />
+                  <col style={{ width: '25%' }} />
+                  <col style={{ width: '25%' }} />
+                </colgroup>
+                <TableBody>
+                  <OverviewInfoGroup title="Product">
+                    <OverviewInfoCell label="Style Number" value={bom.header?.styleNumber} strong />
+                    <OverviewInfoCell label="Style Name" value={bom.header?.styleName} strong />
+                    <OverviewInfoCell label="Buyer" value={bom.header?.buyer} />
+                    <OverviewInfoCell empty />
+                  </OverviewInfoGroup>
+
+                  <OverviewInfoGroup title="Pattern / Season">
+                    <OverviewInfoCell label="Season" value={bom.header?.season} />
+                    <OverviewInfoCell label="Pattern Number" value={bom.header?.patternNumber} />
+                    <OverviewInfoCell label="Pattern Date" value={bom.header?.patternDate} />
+                    <OverviewInfoCell label="Pattern Maker" value={bom.header?.patternMaker} />
+                  </OverviewInfoGroup>
+
+                  <OverviewInfoGroup title="BOM / Factory">
+                    <OverviewInfoCell label="BOM Maker" value={bom.header?.bomMaker} />
+                    <OverviewInfoCell label="BOM Date" value={bom.header?.bomDate} />
+                    <OverviewInfoCell label="Revised Date" value={bom.header?.patternRevisedDate} />
+                    <OverviewInfoCell label="Factory Product" value={bom.header?.factoryProduct} />
+                  </OverviewInfoGroup>
+
+                  <OverviewInfoGroup title="Additional" subtle>
+                    <OverviewInfoCell label="Rev. Stage" value={bom.header?.revStage} />
+                    <OverviewInfoCell label="Marker Date" value={bom.header?.markerDate} />
+                    <OverviewInfoCell label="Marker Maker" value={bom.header?.markerMaker} />
+                    <OverviewInfoCell label="Size (W x H x D)" value={bom.header?.size} />
+                  </OverviewInfoGroup>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+
+          <Stack spacing={0.65} sx={{ minWidth: 0 }}>
+            <Paper elevation={0} sx={{ ...bomOverviewCardSx, p: 0.8, flex: 1, minHeight: 64 }}>
+              <OverviewCardTitle icon={<ChatBubbleOutline />} title="Comments" />
+              <Typography
+                sx={{
+                  fontSize: '.69rem',
+                  fontWeight: 500,
+                  color: '#31465b',
+                  whiteSpace: 'pre-wrap',
+                  lineHeight: 1.35,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden'
+                }}
+              >
+                {bom.header?.comments || '—'}
+              </Typography>
+            </Paper>
+
+            <WholeBomImageCard
+              bomId={bomId}
+              attachment={wholeBomImage}
+              saving={saving}
+              actionsDisabled={!canWrite}
+              onUpload={(event) => uploadAttachment(event, { scope: 'BOM', lineId: '' })}
+              onOpen={openAttachment}
+              onDownload={downloadAttachment}
+              onDelete={() => requestDelete({
+                type: 'wholeBomImage',
+                id: wholeBomImage?.id,
+                itemName: 'Whole BOM Image',
+                label: wholeBomImage?.originalFileName || 'Whole BOM image',
+                message: <>Delete the Whole BOM image?</>,
+                warning: 'This removes the image displayed below Comments.'
+              })}
+            />
+          </Stack>
+        </Box>
+
+      </Box>
+
+      <Paper id="bom-core-materials" elevation={0} sx={{ scrollMarginTop: 88, border: '1px solid #e5e7eb', borderRadius: 1.7, overflow: 'hidden', mb: 1 }}>
+        <SectionHeader
+          title="Core Materials"
+          compact
+          subtitle={`${lineFilters.source && lineFilters.source !== '__CORE__' ? 0 : filteredCoreLines.length} of ${bom.coreLineCount ?? (bom.coreLines || []).length} materials · use View for cutting, consumption or product-color fields`}
+          actions={(
+            <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Core Material Line'}>
+              <span>
+                <Button
+                  startIcon={<Add />}
+                  size="small"
+                  disabled={!canWrite}
+                  onClick={() => setLineCtx({ record: null, packingId: '' })}
+                  sx={{ textTransform: 'none', whiteSpace: 'nowrap', minHeight: 28, px: 0.8 }}
+                >
+                  Add Line
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+        />
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.55, px: 0.75, py: 0.6, borderBottom: '1px solid #e5e7eb', bgcolor: '#fbfcfe' }}>
           <TextField
             size="small"
             label="Keyword"
             value={lineFilters.keyword}
             onChange={(event) => setLineFilters((current) => ({ ...current, keyword: event.target.value }))}
             placeholder="SAP Code, description, child color..."
-            sx={{ minWidth: { xs: '100%', md: 285 }, flex: 1 }}
+            sx={{ minWidth: { xs: '100%', md: 220 }, flex: 1, '& .MuiInputBase-root': { height: 32 } }}
           />
           <TextField
             size="small"
@@ -2794,7 +2992,7 @@ export default function BomDetailPage() {
             label="Product Color"
             value={lineFilters.productColorId}
             onChange={(event) => setLineFilters((current) => ({ ...current, productColorId: event.target.value }))}
-            sx={{ minWidth: 200 }}
+            sx={{ minWidth: 150, '& .MuiInputBase-root': { height: 32 } }}
           >
             <MenuItem value="">All Product Colors</MenuItem>
             {productColors.map((productColor) => <MenuItem key={productColor.id} value={productColor.id}>{productColorLabel(productColor)}</MenuItem>)}
@@ -2805,7 +3003,7 @@ export default function BomDetailPage() {
             label="Material Type"
             value={lineFilters.materialType}
             onChange={(event) => setLineFilters((current) => ({ ...current, materialType: event.target.value }))}
-            sx={{ minWidth: 180 }}
+            sx={{ minWidth: 145, '& .MuiInputBase-root': { height: 32 } }}
           >
             <MenuItem value="">All Material Types</MenuItem>
             {materialTypeOptions.map((option) => <MenuItem key={option.key} value={option.key}>{option.label}</MenuItem>)}
@@ -2816,7 +3014,7 @@ export default function BomDetailPage() {
             label="Source"
             value={lineFilters.source}
             onChange={(event) => setLineFilters((current) => ({ ...current, source: event.target.value }))}
-            sx={{ minWidth: 200 }}
+            sx={{ minWidth: 150, '& .MuiInputBase-root': { height: 32 } }}
           >
             <MenuItem value="">Core + All Packings</MenuItem>
             <MenuItem value="__CORE__">Core BOM (No Packing)</MenuItem>
@@ -2826,23 +3024,11 @@ export default function BomDetailPage() {
             variant="outlined"
             startIcon={<RestartAlt />}
             onClick={() => setLineFilters(emptyLineFilters)}
-            sx={{ textTransform: 'none' }}
+            sx={{ textTransform: 'none', minHeight: 32, height: 32, px: 1 }}
           >
             Reset
           </Button>
         </Box>
-      </Paper>
-
-      <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, overflow: 'hidden', mb: 2 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 1.5, borderBottom: '1px solid #e5e7eb' }}>
-          <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Core Materials ({lineFilters.source && lineFilters.source !== '__CORE__' ? 0 : filteredCoreLines.length} Loaded / {bom.coreLineCount ?? (bom.coreLines || []).length})</Typography>
-            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Columns A–Z, including the dedicated Image column and all Product Color values, are retained from the original BOM Excel.</Typography>
-          </Box>
-          <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Material'}><span><Button startIcon={<Add />} variant="contained" size="small" disabled={!canWrite} onClick={() => setLineCtx({ record: null, packingId: '' })} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
-            Add Material
-          </Button></span></Tooltip>
-        </Stack>
         <LineTable
           bomId={bomId}
           rows={lineFilters.source && lineFilters.source !== '__CORE__' ? [] : filteredCoreLines}
@@ -2868,35 +3054,62 @@ export default function BomDetailPage() {
         )}
       </Paper>
 
-      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-          <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Packings</Typography>
-            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Each Packing links to Product Color items and stores its own material lines. Packing-file upload is not used.</Typography>
-          </Box>
-          <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Packing'}><span><Button startIcon={<Add />} variant="contained" size="small" disabled={!canWrite} onClick={() => setPackingCtx({ record: null })} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
-            Add Packing
-          </Button></span></Tooltip>
-        </Stack>
+      <Paper id="bom-packings" elevation={0} sx={{ scrollMarginTop: 88, border: '1px solid #e5e7eb', borderRadius: 1.7, mb: 0.8, overflow: 'hidden' }}>
+        <SectionHeader
+          title={`Packings (${(bom.packings || []).length})`}
+          compact
+          actions={(
+            <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Packing'}>
+              <span><Button startIcon={<Add />} variant="contained" size="small" disabled={!canWrite} onClick={() => setPackingCtx({ record: null })} sx={{ backgroundColor: '#103B5C' }}>Add Packing</Button></span>
+            </Tooltip>
+          )}
+        />
       </Paper>
 
       {(bom.packings || [])
         .filter((packing) => !lineFilters.source || lineFilters.source === packing.id)
         .map((packing) => {
-        const linkedProductColorIds = productColorIdsForPacking(packing, productColors);
-        const linkedProductColors = linkedProductColorIds
-          .map((id) => productColors.find((item) => item.id === id))
-          .filter(Boolean);
         const filteredPackingLines = (packing.lines || []).filter((line) => lineMatchesFilters(line, lineFilters, productColors));
 
         return (
-          <Accordion key={packing.id} defaultExpanded data-bom-packing-id={packing.id} sx={{ scrollMarginTop: 96 }}>
-            <AccordionSummary component="div" expandIcon={<ExpandMore />}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ width: 1, pr: 1 }}>
-                <Typography sx={{ fontWeight: 900 }}>{packing.packingName}</Typography>
-                <Chip size="small" label={`${filteredPackingLines.length} Loaded / ${packing.lineCount ?? (packing.lines || []).length} Lines`} />
-                <Chip size="small" label={linkedProductColors.length ? `${linkedProductColors.length} Product Colors` : 'All Product Colors'} variant="outlined" />
+          <Accordion
+            key={packing.id}
+            data-bom-packing-id={packing.id}
+            sx={{
+              scrollMarginTop: 96,
+              mb: 0.55,
+              border: '1px solid #e5e7eb',
+              borderRadius: '7px !important',
+              boxShadow: 'none',
+              overflow: 'hidden',
+              '&:before': { display: 'none' }
+            }}
+          >
+            <AccordionSummary
+              component="div"
+              expandIcon={<ExpandMore sx={{ fontSize: 18 }} />}
+              sx={{ minHeight: 38, px: 1, '& .MuiAccordionSummary-content': { my: 0.45 } }}
+            >
+              <Stack direction="row" spacing={0.65} alignItems="center" sx={{ width: 1, pr: 0.5 }}>
+                <Typography sx={{ fontWeight: 700, fontSize: '.76rem' }}>{packing.packingName}</Typography>
+                <Chip size="small" label={`${filteredPackingLines.length}/${packing.lineCount ?? (packing.lines || []).length} Lines`} sx={{ height: 21, fontSize: '.6rem' }} />
                 <Box sx={{ flex: 1 }} />
+                <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Packing Line'}>
+                  <span>
+                    <Button
+                      size="small"
+                      startIcon={<Add />}
+                      disabled={!canWrite}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setLineCtx({ record: null, packingId: packing.id });
+                      }}
+                      sx={{ textTransform: 'none', whiteSpace: 'nowrap', minHeight: 28, px: 0.8 }}
+                    >
+                      Add Line
+                    </Button>
+                  </span>
+                </Tooltip>
                 <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Packing'}><span><IconButton size="small" disabled={!canWrite} onClick={(event) => { event.stopPropagation(); setPackingCtx({ record: packing }); }}><Edit fontSize="small" /></IconButton></span></Tooltip>
                 <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete Packing'}><span><IconButton color="error" size="small" disabled={!canWrite} onClick={(event) => {
                       event.stopPropagation();
@@ -2911,23 +3124,7 @@ export default function BomDetailPage() {
                     }}><Delete fontSize="small" /></IconButton></span></Tooltip>
               </Stack>
             </AccordionSummary>
-            <AccordionDetails>
-              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} spacing={1} sx={{ mb: 1 }}>
-                <Box>
-                  <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>
-                    Product Color information and images are linked from Product Color Master. Updating the saved master image updates every linked BOM automatically.
-                  </Typography>
-                  <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mt: 0.75 }}>
-                    {linkedProductColors.length
-                      ? linkedProductColors.map((item) => <Chip key={item.id} size="small" label={productColorLabel(item)} />)
-                      : <Chip size="small" variant="outlined" label="Applies To All Product Colors" />}
-                  </Stack>
-                </Box>
-                <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Packing Line'}><span><Button size="small" startIcon={<Add />} disabled={!canWrite} onClick={() => setLineCtx({ record: null, packingId: packing.id })} sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}>
-                  Add Packing Line
-                </Button></span></Tooltip>
-              </Stack>
-
+            <AccordionDetails sx={{ p: 0.8 }}>
               {(packing.attachments || []).length > 0 && (
                 <Box sx={{ mb: 1.25 }}>
                   <Typography sx={{ fontSize: '0.73rem', color: 'text.secondary' }}>Imported Packing Files</Typography>
@@ -2979,44 +3176,39 @@ export default function BomDetailPage() {
         );
       })}
 
-      <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 2, mt: 2 }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} spacing={1}>
-          <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>Product Colors</Typography>
-            <Typography sx={{ mt: 0.2, fontSize: '0.75rem', color: 'text.secondary' }}>
-              Add an existing Product Color from Master Data or create a new Master record with one image.
-            </Typography>
-          </Box>
-          <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Product Color'}>
-            <span>
-              <Button size="small" variant="contained" startIcon={<Add />} disabled={!canWrite} onClick={() => setProductColorCtx({ record: null })} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>
-                Add Product Color
-              </Button>
-            </span>
-          </Tooltip>
-        </Stack>
+      <Paper id="bom-product-colors" elevation={0} sx={{ scrollMarginTop: 88, border: '1px solid #e2e8f0', borderRadius: 1.7, mt: 0.8, overflow: 'hidden' }}>
+        <SectionHeader
+          title={`Product Colors (${productColors.length})`}
+          subtitle="Linked to Product Color Master so names and images stay consistent across BOM and MPR."
+          actions={(
+            <Tooltip title={!canWrite ? writeBlockedMessage : 'Add Product Color'}>
+              <span><Button size="small" variant="contained" startIcon={<Add />} disabled={!canWrite} onClick={() => setProductColorCtx({ record: null })} sx={{ backgroundColor: '#103B5C' }}>Add Product Color</Button></span>
+            </Tooltip>
+          )}
+          compact
+        />
 
         {!productColors.length ? (
-          <Box sx={{ mt: 1.25, py: 3, textAlign: 'center', border: '1px dashed #cbd5e1', borderRadius: 1.5, backgroundColor: '#f8fafc' }}>
+          <Box sx={{ m: 1.25, py: 3, textAlign: 'center', border: '1px dashed #cbd5e1', borderRadius: 1.5, backgroundColor: '#f8fafc' }}>
             <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>No Product Color linked to this BOM.</Typography>
           </Box>
         ) : (
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1, mt: 1.25 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(3, minmax(0, 1fr))' }, gap: 0.7, m: 0.8 }}>
             {productColors.map((productColor) => {
               const master = productColorMasterForBom(productColor, productColorMasters);
               return (
-                <Paper key={productColor.id} elevation={0} data-bom-product-color-id={productColor.id} sx={{ p: 1, border: '1px solid #e2e8f0', borderRadius: 1.5, scrollMarginTop: 96 }}>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Box sx={{ width: 118, flexShrink: 0, overflow: 'hidden', borderRadius: 1 }}>
-                      <ProductColorImage productColor={master || productColor} height={90} emptyText={master ? 'No image saved' : 'Master link required'} />
+                <Paper key={productColor.id} elevation={0} data-bom-product-color-id={productColor.id} sx={{ p: 0.75, border: '1px solid #e2e8f0', borderRadius: 1.25, scrollMarginTop: 96 }}>
+                  <Stack direction="row" spacing={0.7} alignItems="center">
+                    <Box sx={{ width: 86, flexShrink: 0, overflow: 'hidden', borderRadius: 1 }}>
+                      <ProductColorImage productColor={master || productColor} height={64} emptyText={master ? 'No image saved' : 'Master link required'} />
                     </Box>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography noWrap sx={{ fontWeight: 900, fontSize: '0.82rem' }}>{productColor.colorName || 'Product Color'}</Typography>
-                      <Typography noWrap sx={{ mt: 0.2, fontSize: '0.71rem', color: 'text.secondary' }}>
+                      <Typography noWrap sx={{ fontWeight: 750, fontSize: '0.75rem' }}>{productColor.colorName || 'Product Color'}</Typography>
+                      <Typography noWrap sx={{ mt: 0.2, fontSize: '0.66rem', color: 'text.secondary' }}>
                         {[productColor.patternNumber, productColor.season, productColor.styleNumber].filter(Boolean).join(' · ') || 'No master information'}
                       </Typography>
-                      <Typography sx={{ mt: 0.35, fontSize: '0.7rem', color: 'text.secondary' }}>Sequence: {productColor.sequence ?? '—'}</Typography>
-                      <Chip size="small" variant="outlined" label={master ? 'Master linked' : 'Master missing'} sx={{ mt: 0.7, height: 22, fontSize: '0.66rem' }} />
+                      <Typography sx={{ mt: 0.35, fontSize: '0.64rem', color: 'text.secondary' }}>Sequence: {productColor.sequence ?? '—'}</Typography>
+                      <Chip size="small" variant="outlined" label={master ? 'Master linked' : 'Master missing'} sx={{ mt: 0.4, height: 20, fontSize: '0.59rem' }} />
                     </Box>
                     <Stack spacing={0.25}>
                       <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit Product Color and image'}>
@@ -3068,7 +3260,7 @@ export default function BomDetailPage() {
       />
 
       <Dialog open={canWrite && headerOpen} onClose={saving ? undefined : () => setHeaderOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle sx={{ pr: 6, fontWeight: 900, color: '#103B5C' }}>
+        <DialogTitle sx={{ pr: 6, fontWeight: 750, color: '#103B5C' }}>
           Edit BOM Header
           <IconButton onClick={() => setHeaderOpen(false)} disabled={saving} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
         </DialogTitle>
@@ -3088,14 +3280,14 @@ export default function BomDetailPage() {
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setHeaderOpen(false)} disabled={saving} sx={{ textTransform: 'none' }}>Cancel</Button>
-          <Button variant="contained" onClick={saveHeader} disabled={saving} sx={{ textTransform: 'none', fontWeight: 800, backgroundColor: '#103B5C' }}>
+          <Button variant="contained" onClick={saveHeader} disabled={saving} sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}>
             {saving ? 'Saving...' : 'Save Changes'}
           </Button>
         </DialogActions>
       </Dialog>
 
       <LineDialog open={canWrite && Boolean(lineCtx)} record={lineCtx?.record} productColors={productColors} productColorMasters={productColorMasters} saving={saving} onClose={() => setLineCtx(null)} onSave={saveLine} />
-      <PackingDialog open={canWrite && Boolean(packingCtx)} record={packingCtx?.record} productColors={productColors} saving={saving} onClose={() => setPackingCtx(null)} onSave={savePacking} />
+      <PackingDialog open={canWrite && Boolean(packingCtx)} record={packingCtx?.record} saving={saving} onClose={() => setPackingCtx(null)} onSave={savePacking} />
       <ProductColorDialog open={canWrite && Boolean(productColorCtx)} record={productColorCtx?.record} header={bom?.header} productColorMasters={productColorMasters} buyerKey={buyerKey} saving={saving} onClose={() => setProductColorCtx(null)} onSave={saveProductColor} />
 
       <ConfirmDeleteDialog

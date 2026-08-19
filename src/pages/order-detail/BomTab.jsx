@@ -10,9 +10,11 @@ import {
   DialogTitle,
   IconButton,
   MenuItem,
+  Pagination,
   Paper,
   Snackbar,
   Stack,
+  Select,
   Table,
   TableBody,
   TableCell,
@@ -35,7 +37,9 @@ import {
   listBoms,
   submitBom
 } from '../../services/orderBomMprService';
-import { formatDateTime, statusSx } from '../orders/orderUi';
+import { formatDateTime } from '../orders/orderUi';
+import StatusBadge from '../../components/StatusBadge';
+import EmptyTableState from '../../components/EmptyTableState';
 import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
 import BomCreateDialog from './BomCreateDialog';
 
@@ -119,6 +123,8 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
   const [notice, setNotice] = useState({ open: false, severity: 'success', message: '' });
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const notify = (message, severity = 'success') => setNotice({ open: true, severity, message });
 
@@ -157,6 +163,17 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
     () => rows.filter((bom) => bomMatchesFilters(bom, appliedFilters)),
     [rows, appliedFilters]
   );
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
+  const pagedRows = useMemo(() => {
+    const start = page * rowsPerPage;
+    return filteredRows.slice(start, start + rowsPerPage);
+  }, [filteredRows, page, rowsPerPage]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(filteredRows.length / rowsPerPage) - 1);
+    if (page > maxPage) setPage(maxPage);
+  }, [filteredRows.length, page, rowsPerPage]);
 
   const create = async (payload) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
@@ -197,114 +214,145 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
   };
 
   const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
-  const applyFilter = () => setAppliedFilters({ ...filters });
+  const applyFilter = () => { setAppliedFilters({ ...filters }); setPage(0); };
   const resetFilter = () => {
     setFilters(emptyFilters);
     setAppliedFilters(emptyFilters);
+    setPage(0);
   };
 
   return (
     <Box>
-      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5}>
-          <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>BOM</Typography>
-            <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>
-              BOM/Admin creates one or more BOMs inside this order. Submit a BOM when Sales can use it.
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            <Button startIcon={<Refresh />} onClick={load} disabled={loading} sx={{ textTransform: 'none' }}>Refresh</Button>
-            <Tooltip title={!canWrite ? writeBlockedMessage : ''} arrow disableHoverListener={canWrite}>
-              <span><Button variant="contained" startIcon={<Add />} onClick={() => setAddOpen(true)} disabled={!canWrite} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>Add BOM</Button></span>
-            </Tooltip>
+      <Box
+        sx={{
+          px: 0.85,
+          py: 0.7,
+          borderBottom: '1px solid #e5e7eb',
+          bgcolor: '#fff',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 0.65
+        }}
+      >
+        <TextField
+          size="small"
+          label="Keyword"
+          value={filters.keyword}
+          onChange={(event) => updateFilter('keyword', event.target.value)}
+          onKeyDown={(event) => event.key === 'Enter' && applyFilter()}
+          placeholder="BOM No, Style, Product Color..."
+          sx={{ minWidth: { xs: '100%', md: 250 }, flex: 1, '& .MuiInputBase-root': { height: 34 } }}
+        />
+        <TextField size="small" select label="Status" value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} sx={{ minWidth: 145, '& .MuiInputBase-root': { height: 34 } }}>
+          <MenuItem value="">All Status</MenuItem>
+          <MenuItem value="DRAFT">Draft</MenuItem>
+          <MenuItem value="SUBMITTED">Submitted</MenuItem>
+        </TextField>
+        <TextField size="small" select label="Product Color" value={filters.productColor} onChange={(event) => updateFilter('productColor', event.target.value)} sx={{ minWidth: 170, '& .MuiInputBase-root': { height: 34 } }}>
+          <MenuItem value="">All Product Colors</MenuItem>
+          {productColorOptions.map((option) => <MenuItem key={option.key} value={option.key}>{option.label}</MenuItem>)}
+        </TextField>
+        <TextField size="small" select label="Packing" value={filters.packingKey} onChange={(event) => updateFilter('packingKey', event.target.value)} sx={{ minWidth: 185, '& .MuiInputBase-root': { height: 34 } }}>
+          <MenuItem value="">All Packings</MenuItem>
+          {packingOptions.map((option) => <MenuItem key={option.key} value={option.key}>{option.label}</MenuItem>)}
+        </TextField>
+        <Button size="small" variant="contained" startIcon={<Search fontSize="small" />} onClick={applyFilter} disabled={loading} sx={{ textTransform: 'none', backgroundColor: '#103B5C', height: 34, minWidth: 82 }}>Search</Button>
+        <Button size="small" variant="text" startIcon={<RestartAlt fontSize="small" />} onClick={resetFilter} disabled={loading} sx={{ textTransform: 'none', height: 34, color: '#52677d' }}>Reset</Button>
+        <Box sx={{ flex: { xs: '1 1 100%', xl: 1 } }} />
+        <Tooltip title="Refresh">
+          <IconButton onClick={load} disabled={loading} size="small" sx={{ border: '1px solid #d8e1ea', borderRadius: 1.2, width: 34, height: 34 }}>
+            <Refresh fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={!canWrite ? writeBlockedMessage : ''} arrow disableHoverListener={canWrite}>
+          <span><Button size="small" variant="contained" startIcon={<Add fontSize="small" />} onClick={() => setAddOpen(true)} disabled={!canWrite} sx={{ textTransform: 'none', backgroundColor: '#103B5C', height: 34 }}>Add BOM</Button></span>
+        </Tooltip>
+      </Box>
+
+      <TableContainer sx={{ maxHeight: 'calc(100vh - 220px)' }}>
+        <Table stickyHeader size="small">
+          <TableHead>
+            <TableRow>
+              {['No.', 'BOM No', 'BOM Name', 'Colors', 'Packings', 'Status', 'Updated At', 'Actions'].map((heading) => (
+                <TableCell key={heading} sx={{ fontWeight: 750, fontSize: '0.75rem', color: '#40566d', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>{heading}</TableCell>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading && <TableRow><TableCell colSpan={8} sx={{ py: 2.5, textAlign: 'center', color: 'text.secondary' }}>Loading...</TableCell></TableRow>}
+            {!loading && filteredRows.length === 0 && (
+              <EmptyTableState
+                colSpan={8}
+                title={rows.length ? 'No BOM matches the current filter' : 'No BOM yet'}
+                description=""
+                actionLabel={!rows.length && canWrite ? 'Add BOM' : ''}
+                onAction={!rows.length && canWrite ? () => setAddOpen(true) : undefined}
+              />
+            )}
+            {pagedRows.map((bom, index) => {
+              const productColors = productColorNames(bom);
+              return (
+                <TableRow hover key={bom.id} sx={{ '&:hover': { bgcolor: '#fbfdff' } }}>
+                  <TableCell align="center" sx={{ width: 56, color: '#64748b', fontWeight: 650 }}>{page * rowsPerPage + index + 1}</TableCell>
+                  <TableCell sx={{ fontWeight: 750, color: '#173b63' }}>{bom.bomNo}</TableCell>
+                  <TableCell>{bom.bomName}</TableCell>
+                  <TableCell>
+                    {productColors.slice(0, 3).map((color) => <Chip key={color} size="small" label={color} sx={{ mr: .4, mb: .25, height: 22, fontSize: '.68rem' }} />)}
+                    {productColors.length > 3 ? `+${productColors.length - 3}` : ''}
+                  </TableCell>
+                  <TableCell>{(bom.packings || []).length}</TableCell>
+                  <TableCell><StatusBadge status={bom.status} /></TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(bom.updatedAt)}</TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                    <Tooltip title="Open BOM"><IconButton size="small" color="primary" onClick={() => navigate(buyerPath(buyerKey, `orders/${order.id}/boms/${bom.id}`))}><OpenInNew fontSize="small" /></IconButton></Tooltip>
+                    <Tooltip title={!canWrite ? writeBlockedMessage : (bom.status === 'SUBMITTED' ? 'BOM already submitted' : 'Submit BOM')}><span><IconButton size="small" color="success" disabled={!canWrite || bom.status === 'SUBMITTED'} onClick={() => submit(bom)}><Publish fontSize="small" /></IconButton></span></Tooltip>
+                    <Tooltip title="Export"><IconButton size="small" onClick={() => downloadWithAuth(getBomExportUrl(bom.id), `BOM_${downloadFilePart(buyerKey, 'BUYER')}_${downloadFilePart(bom.bomNo, 'BOM')}_${downloadDate()}.xlsx`)}><FileUpload fontSize="small" /></IconButton></Tooltip>
+                    <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete'}><span><IconButton size="small" color="error" disabled={!canWrite} onClick={() => setDeleteTarget(bom)}><Delete fontSize="small" /></IconButton></span></Tooltip>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <Stack
+        direction={{ xs: 'column', md: 'row' }}
+        justifyContent="space-between"
+        alignItems={{ xs: 'stretch', md: 'center' }}
+        spacing={0.8}
+        sx={{ px: 0.9, py: 0.6, borderTop: '1px solid #e5e7eb', bgcolor: '#fbfcfe' }}
+      >
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+          <Typography sx={{ fontSize: '0.75rem', color: '#6b7c90' }}>
+            {filteredRows.length === 0
+              ? `0 of ${rows.length} BOM(s)`
+              : `Showing ${page * rowsPerPage + 1}-${Math.min((page + 1) * rowsPerPage, filteredRows.length)} of ${filteredRows.length} BOM(s)`}
+          </Typography>
+          <Stack direction="row" spacing={0.7} alignItems="center">
+            <Typography sx={{ fontSize: '0.74rem', color: '#6b7c90' }}>Rows per page</Typography>
+            <Select
+              size="small"
+              value={rowsPerPage}
+              onChange={(event) => { setRowsPerPage(Number(event.target.value) || 10); setPage(0); }}
+              sx={{ minWidth: 78, height: 30, '& .MuiSelect-select': { fontSize: '0.75rem', py: 0.4 } }}
+            >
+              {[10, 25, 50, 100].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+            </Select>
           </Stack>
         </Stack>
-      </Paper>
-
-      <Paper elevation={0} sx={{ p: 1.25, border: '1px solid #e5e7eb', borderRadius: 2, mb: 1.25 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={0.75} sx={{ mb: 1.1 }}>
-          <Box>
-            <Typography sx={{ fontWeight: 900, color: '#103B5C' }}>BOM Search & Filter</Typography>
-            <Typography sx={{ fontSize: '.75rem', color: 'text.secondary' }}>
-              Search BOM number, name, style, season, product color, packing, or source file.
-            </Typography>
-          </Box>
-          <Typography sx={{ fontSize: '.78rem', color: 'text.secondary', fontWeight: 700 }}>
-            Showing {filteredRows.length} / {rows.length} BOM(s)
-          </Typography>
-        </Stack>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 1 }}>
-          <TextField
-            size="small"
-            label="Keyword"
-            value={filters.keyword}
-            onChange={(event) => updateFilter('keyword', event.target.value)}
-            onKeyDown={(event) => event.key === 'Enter' && applyFilter()}
-            placeholder="BOM No, Style, Product Color..."
-            sx={{ minWidth: { xs: '100%', md: 270 }, flex: 1 }}
-          />
-          <TextField size="small" select label="Status" value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} sx={{ minWidth: 160 }}>
-            <MenuItem value="">All Status</MenuItem>
-            <MenuItem value="DRAFT">Draft</MenuItem>
-            <MenuItem value="SUBMITTED">Submitted</MenuItem>
-          </TextField>
-          <TextField size="small" select label="Product Color" value={filters.productColor} onChange={(event) => updateFilter('productColor', event.target.value)} sx={{ minWidth: 190 }}>
-            <MenuItem value="">All Product Colors</MenuItem>
-            {productColorOptions.map((option) => <MenuItem key={option.key} value={option.key}>{option.label}</MenuItem>)}
-          </TextField>
-          <TextField size="small" select label="Packing" value={filters.packingKey} onChange={(event) => updateFilter('packingKey', event.target.value)} sx={{ minWidth: 210 }}>
-            <MenuItem value="">All Packings</MenuItem>
-            {packingOptions.map((option) => <MenuItem key={option.key} value={option.key}>{option.label}</MenuItem>)}
-          </TextField>
-          <Button variant="contained" startIcon={<Search />} onClick={applyFilter} disabled={loading} sx={{ textTransform: 'none', backgroundColor: '#111827' }}>Search</Button>
-          <Button variant="outlined" startIcon={<RestartAlt />} onClick={resetFilter} disabled={loading} sx={{ textTransform: 'none' }}>Reset</Button>
-        </Box>
-      </Paper>
-
-      <Paper elevation={0} sx={{ border: '1px solid #e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                {['BOM No', 'BOM Name', 'Colors', 'Packings', 'Status', 'Updated At', 'Actions'].map((heading) => (
-                  <TableCell key={heading} sx={{ fontWeight: 900, backgroundColor: '#f8fafc' }}>{heading}</TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading && <TableRow><TableCell colSpan={7}>Loading...</TableCell></TableRow>}
-              {!loading && filteredRows.length === 0 && (
-                <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                  {rows.length ? 'No BOM matches the current filter.' : 'No BOM yet. Use Add BOM to create one.'}
-                </TableCell></TableRow>
-              )}
-              {filteredRows.map((bom) => {
-                const productColors = productColorNames(bom);
-                return (
-                  <TableRow hover key={bom.id}>
-                    <TableCell sx={{ fontWeight: 800 }}>{bom.bomNo}</TableCell>
-                    <TableCell>{bom.bomName}</TableCell>
-                    <TableCell>
-                      {productColors.slice(0, 3).map((color) => <Chip key={color} size="small" label={color} sx={{ mr: .5, mb: .5, fontSize: '.7rem' }} />)}
-                      {productColors.length > 3 ? `+${productColors.length - 3}` : ''}
-                    </TableCell>
-                    <TableCell>{(bom.packings || []).length}</TableCell>
-                    <TableCell><Chip label={bom.status} sx={statusSx(bom.status)} /></TableCell>
-                    <TableCell>{formatDateTime(bom.updatedAt)}</TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                      <Tooltip title="Open BOM"><IconButton color="primary" onClick={() => navigate(buyerPath(buyerKey, `orders/${order.id}/boms/${bom.id}`))}><OpenInNew fontSize="small" /></IconButton></Tooltip>
-                      <Tooltip title={!canWrite ? writeBlockedMessage : (bom.status === 'SUBMITTED' ? 'BOM already submitted' : 'Submit BOM')}><span><IconButton color="success" disabled={!canWrite || bom.status === 'SUBMITTED'} onClick={() => submit(bom)}><Publish fontSize="small" /></IconButton></span></Tooltip>
-                      <Tooltip title="Export"><IconButton onClick={() => downloadWithAuth(getBomExportUrl(bom.id), `BOM_${downloadFilePart(buyerKey, 'BUYER')}_${downloadFilePart(bom.bomNo, 'BOM')}_${downloadDate()}.xlsx`)}><FileUpload fontSize="small" /></IconButton></Tooltip>
-                      <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete'}><span><IconButton color="error" disabled={!canWrite} onClick={() => setDeleteTarget(bom)}><Delete fontSize="small" /></IconButton></span></Tooltip>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+        <Pagination
+          size="small"
+          page={page + 1}
+          count={totalPages}
+          onChange={(_, nextPage) => setPage(nextPage - 1)}
+          disabled={loading || filteredRows.length === 0}
+          shape="rounded"
+          siblingCount={1}
+          boundaryCount={1}
+        />
+      </Stack>
 
       <BomCreateDialog open={canWrite && addOpen} saving={saving} onClose={() => setAddOpen(false)} onSave={create} />
       <Dialog open={canWrite && Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)}>
