@@ -44,6 +44,8 @@ import { getBuyerDefinition, normalizeBuyerKey } from 'utils/buyerContext';
 import ConfirmDeleteDialog from '../shared/ConfirmDeleteDialog';
 import { PaginationBar, SortIndicator } from '../shared/MasterDataTable';
 import { formatDateTime } from '../shared/masterDataUtils';
+import SortableTableCell from '../../components/SortableTableCell';
+import useTableSort from '../../utils/useTableSort';
 
 const blankChildColor = () => ({ id: '', childColor: '' });
 const blankForm = () => ({
@@ -174,6 +176,7 @@ function ChildColorChips({ colors = [], maxVisible = 4 }) {
 
 function ChildColorsPreviewDialog({ open, record, onClose }) {
   const colors = childColorNames(record);
+  const { sortedRows: sortedColors, sortKey, sortDirection, requestSort } = useTableSort(colors, { getValue: (color) => color });
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -192,12 +195,12 @@ function ChildColorsPreviewDialog({ open, record, onClose }) {
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ width: 70, fontWeight: 750, backgroundColor: '#f8fafc' }}>No.</TableCell>
-                  <TableCell sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }}>Child Color / Comment</TableCell>
+                  <SortableTableCell label="No." sortable={false} sx={{ width: 70, fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                  <SortableTableCell label="Child Color / Comment" columnKey="color" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }} />
                 </TableRow>
               </TableHead>
               <TableBody>
-                {colors.map((color, index) => (
+                {sortedColors.map((color, index) => (
                   <TableRow key={`${color}-${index}`} hover>
                     <TableCell sx={{ color: 'text.secondary', fontWeight: 700 }}>{index + 1}</TableCell>
                     <TableCell>
@@ -230,6 +233,8 @@ function ProductColorDialog({
 }) {
   const [form, setForm] = useState(blankForm());
   const [childColorDeleteTarget, setChildColorDeleteTarget] = useState(null);
+  const editableChildColorRows = form.childColors.map((item, sourceIndex) => ({ ...item, __sourceIndex: sourceIndex }));
+  const { sortedRows: sortedEditableChildColors, sortKey: childSortKey, sortDirection: childSortDirection, requestSort: requestChildSort } = useTableSort(editableChildColorRows, { getValue: (item, key) => key === 'childColor' ? item.childColor : item?.[key] });
   const isEdit = Boolean(record?.id);
   const imageExists = hasImage(record);
   const identityLocked = isEdit && isProductColorLocked(record);
@@ -402,25 +407,25 @@ function ProductColorDialog({
         <TableContainer sx={{ border: '1px solid #e5e7eb', borderRadius: 1.5 }}>
           <Table size="small" sx={{ minWidth: 620 }}>
             <TableHead><TableRow>
-              <TableCell sx={{ width: 64, fontWeight: 750, backgroundColor: '#f8fafc' }}>No.</TableCell>
-              <TableCell sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }}>Child Color / Comment</TableCell>
-              <TableCell sx={{ width: 80, fontWeight: 750, backgroundColor: '#f8fafc' }} align="center">Action</TableCell>
+              <SortableTableCell label="No." sortable={false} sx={{ width: 64, fontWeight: 750, backgroundColor: '#f8fafc' }} />
+              <SortableTableCell label="Child Color / Comment" columnKey="childColor" sortKey={childSortKey} sortDirection={childSortDirection} onSort={requestChildSort} sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }} />
+              <SortableTableCell label="Action" sortable={false} sx={{ width: 80, fontWeight: 750, backgroundColor: '#f8fafc' }} align="center" />
             </TableRow></TableHead>
             <TableBody>
               {form.childColors.length === 0 && (
                 <TableRow><TableCell colSpan={3} sx={{ color: 'text.secondary', py: 2, textAlign: 'center' }}>No Child Color is entered yet. BOM Detail import can add missing Child Colors automatically.</TableCell></TableRow>
               )}
-              {form.childColors.map((item, index) => (
-                <TableRow key={item.id || `child-${index}`}>
+              {sortedEditableChildColors.map((item, index) => (
+                <TableRow key={item.id || `child-${item.__sourceIndex}`}>
                   <TableCell sx={{ color: 'text.secondary', fontWeight: 700 }}>{index + 1}</TableCell>
-                  <TableCell><TextField size="small" required value={item.childColor} onChange={(event) => changeChildColor(index, event.target.value)} placeholder="MINERAL GREY YKK#181" fullWidth /></TableCell>
+                  <TableCell><TextField size="small" required value={item.childColor} onChange={(event) => changeChildColor(item.__sourceIndex, event.target.value)} placeholder="MINERAL GREY YKK#181" fullWidth /></TableCell>
                   <TableCell align="center">
                     <Tooltip title={isChildColorLocked(item) ? childColorLockMessage(item) : 'Delete Child Color'} arrow>
                       <span>
                         <IconButton
                           color="error"
                           size="small"
-                          onClick={() => removeChildColor(index)}
+                          onClick={() => removeChildColor(item.__sourceIndex)}
                           disabled={saving || isChildColorLocked(item)}
                         >
                           <Delete fontSize="small" />

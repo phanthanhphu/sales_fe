@@ -44,7 +44,7 @@ const decodeJwtPayload = (token) => {
   } catch { return null; }
 };
 const isTokenExpired = (token) => Boolean(decodeJwtPayload(token)?.exp && decodeJwtPayload(token).exp * 1000 <= Date.now());
-const clearAuthSession = () => ['token','accessToken','user','userId','isAuthenticated','role','accessPermissions','buyerKeys','accessibleBuyers','approvePermission','canApproveNotice','canApproveDocument','bookingPermission','canManageBooking','departmentId','departmentName','division','loginAt'].forEach((key) => localStorage.removeItem(key));
+const clearAuthSession = () => ['token','accessToken','user','userId','isAuthenticated','role','accessPermissions','buyerKeys','accessibleBuyers','selectedBuyerKey','approvePermission','canApproveNotice','canApproveDocument','bookingPermission','canManageBooking','departmentId','departmentName','division','loginAt'].forEach((key) => localStorage.removeItem(key));
 const getStoredRole = () => { try { const user = JSON.parse(localStorage.getItem('user') || '{}'); return String(user?.role || localStorage.getItem('role') || '').trim().toUpperCase(); } catch { return String(localStorage.getItem('role') || '').trim().toUpperCase(); } };
 const isAdminRole = (role) => role === 'ADMIN' || role === 'ROLE_ADMIN';
 
@@ -104,15 +104,17 @@ const MainRoutes = {
             { path: 'buyer-access-unavailable', element: <BuyerAccessUnavailablePage /> },
 
             { path: 'currencies', element: <CurrencyPage /> },
-            { path: 'vendor-codes', element: <VendorCodePage /> },
-            { path: 'vender-codes', element: <Navigate to="/vendor-codes" replace /> },
+            { path: 'vendor-codes', element: <LegacyBuyerRedirect child="vendor-codes" /> },
+            { path: 'vender-codes', element: <LegacyBuyerRedirect child="vendor-codes" /> },
             { path: 'loss', element: <LegacyBuyerRedirect child="loss" /> },
-            { path: 'ship-tos', element: <ShipToPage /> },
+            { path: 'ship-tos', element: <LegacyBuyerRedirect child="ship-tos" /> },
 
             { path: 'buyers/:buyerKey/orders', element: <BuyerRoute><OrdersPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/orders/:orderId', element: <BuyerRoute><OrderDetailPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/orders/:orderId/boms/:bomId', element: <BuyerRoute><BomDetailPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/mat-info', element: <BuyerRoute><MatInfoPage /></BuyerRoute> },
+            { path: 'buyers/:buyerKey/vendor-codes', element: <BuyerRoute><VendorCodePage /></BuyerRoute> },
+            { path: 'buyers/:buyerKey/ship-tos', element: <BuyerRoute><ShipToPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/loss', element: <BuyerRoute><LossPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/product-colors', element: <BuyerRoute><ProductColorPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/material-ship-to', element: <BuyerRoute><MaterialShipToPage /></BuyerRoute> },
@@ -122,15 +124,15 @@ const MainRoutes = {
             { path: 'mat-info', element: <LegacyBuyerRedirect child="mat-info" /> },
             { path: 'product-colors', element: <LegacyBuyerRedirect child="product-colors" /> },
 
-            { path: 'suppliers', element: <Navigate to="/vendor-codes" replace /> },
-            { path: 'vendor-code', element: <Navigate to="/vendor-codes" replace /> },
+            { path: 'suppliers', element: <LegacyBuyerRedirect child="vendor-codes" /> },
+            { path: 'vendor-code', element: <LegacyBuyerRedirect child="vendor-codes" /> },
             { path: 'master-data', element: <LegacyBuyerRedirect child="mat-info" /> },
             { path: 'master-data/currencies', element: <Navigate to="/currencies" replace /> },
-            { path: 'master-data/suppliers', element: <Navigate to="/vendor-codes" replace /> },
-            { path: 'master-data/vendor-codes', element: <Navigate to="/vendor-codes" replace /> },
+            { path: 'master-data/suppliers', element: <LegacyBuyerRedirect child="vendor-codes" /> },
+            { path: 'master-data/vendor-codes', element: <LegacyBuyerRedirect child="vendor-codes" /> },
             { path: 'master-data/mat-infos', element: <LegacyBuyerRedirect child="mat-info" /> },
             { path: 'master-data/loss', element: <LegacyBuyerRedirect child="loss" /> },
-            { path: 'master-data/ship-tos', element: <Navigate to="/ship-tos" replace /> },
+            { path: 'master-data/ship-tos', element: <LegacyBuyerRedirect child="ship-tos" /> },
             { path: 'master-data/product-colors', element: <LegacyBuyerRedirect child="product-colors" /> },
             { path: '*', element: <DefaultAuthorizedRoute /> }
           ]

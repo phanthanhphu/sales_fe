@@ -43,6 +43,8 @@ import {
 } from 'services/cartonLoadingService';
 import { getPackingOrder } from 'services/packingListService';
 import { getBuyerBySlug } from 'utils/buyerAccess';
+import SortableTableCell from 'components/SortableTableCell';
+import useTableSort from 'utils/useTableSort';
 
 const FINAL_STATUSES = ['COMPLETED', 'WEIGHT_WARNING'];
 
@@ -94,6 +96,14 @@ const scanMeta = (value) => {
 const kg = (value) => value == null
   ? '—'
   : `${Number(value).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`;
+
+const cartonSortValue = (row, key) => {
+  if (key === 'cartonSequence') return row.cartonSequence ?? row.itemSequence;
+  if (key === 'cartonPcs') return row.cartonPcs ?? row.qtyPerCarton;
+  if (key === 'itemKey') return row.itemKey || row.cartonCode;
+  if (key === 'updatedBy') return row.weighedBy || row.scannedBy;
+  return row?.[key];
+};
 
 export default function CartonItemDetailPage() {
   const { buyerSlug, orderId, masterLineId } = useParams();
@@ -280,6 +290,7 @@ export default function CartonItemDetailPage() {
       return matchStatus && (!key || text.includes(key));
     });
   }, [rows, keyword, status]);
+  const { sortedRows: sortedFiltered, sortKey, sortDirection, requestSort } = useTableSort(filtered, { getValue: cartonSortValue });
 
   const first = rows[0] || {};
   const completed = rows.filter((row) => FINAL_STATUSES.includes(row.status)).length;
@@ -710,15 +721,29 @@ export default function CartonItemDetailPage() {
           <Table size="medium" sx={{ minWidth: 1430 }}>
             <TableHead>
               <TableRow>
-                {['Carton', 'CTN No.', 'Qty', 'Factory Barcode', 'Item Key', 'Scan Status', 'Expected', 'Actual', 'Difference', 'Weight Status', 'Source', 'Station', 'Updated By'].map((label) => (
-                  <TableCell key={label} sx={{ bgcolor: '#F8FAFC', fontWeight: 950, fontSize: '0.78rem', whiteSpace: 'nowrap', borderBottom: '2px solid #E2E8F0' }}>{label}</TableCell>
+                {[
+                  { label: 'Carton', key: 'cartonSequence' },
+                  { label: 'CTN No.', key: 'cartonNumber' },
+                  { label: 'Qty', key: 'cartonPcs' },
+                  { label: 'Factory Barcode', key: 'factoryBarcode' },
+                  { label: 'Item Key', key: 'itemKey' },
+                  { label: 'Scan Status', key: 'status' },
+                  { label: 'Expected', key: 'expectedWeightKg' },
+                  { label: 'Actual', key: 'weightKg' },
+                  { label: 'Difference', key: 'weightDifferenceKg' },
+                  { label: 'Weight Status', key: 'weightStatus' },
+                  { label: 'Source', key: 'weightSource' },
+                  { label: 'Station', key: 'stationCode' },
+                  { label: 'Updated By', key: 'updatedBy' }
+                ].map((column) => (
+                  <SortableTableCell key={column.label} label={column.label} columnKey={column.key} sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} sx={{ bgcolor: '#F8FAFC', fontWeight: 950, fontSize: '0.78rem', whiteSpace: 'nowrap', borderBottom: '2px solid #E2E8F0' }} />
                 ))}
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow><TableCell colSpan={13} align="center" sx={{ py: 8 }}><CircularProgress size={34} /></TableCell></TableRow>
-              ) : filtered.length ? filtered.map((row) => {
+              ) : sortedFiltered.length ? sortedFiltered.map((row) => {
                 const scan = scanMeta(row.status);
                 const weight = weightMeta(row.weightStatus);
                 const isActive = activeTransaction?.id === row.id;

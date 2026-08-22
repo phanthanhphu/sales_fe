@@ -64,7 +64,6 @@ export default function Header() {
   const appBarSx = {
     bgcolor: alpha('#FFFFFF', 0.98),
     color: '#2D4358',
-    boxShadow: 'none',
     backdropFilter: 'blur(10px)',
     WebkitBackdropFilter: 'blur(10px)',
     borderBottom: '1px solid #E8EEF5',

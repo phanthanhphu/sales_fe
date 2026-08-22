@@ -23,7 +23,7 @@ import {
 import { alpha } from '@mui/material/styles';
 
 import { getDashboardError, getDashboardSummary } from '../../services/dashboardService';
-import { getAccessibleBuyers, getDefaultBuyerKey } from '../../utils/buyerContext';
+import { getAccessibleBuyers, getSelectedBuyerKey, normalizeBuyerKey, setSelectedBuyerKey } from '../../utils/buyerContext';
 import { listAccessibleBuyers } from '../../services/buyerService';
 
 const ORDER_COLORS = ['#22A06B', '#F59E0B', '#EF5B5B'];
@@ -409,7 +409,7 @@ const initialData = {
 export default function DashboardPage() {
   const [buyers, setBuyers] = useState(() => getAccessibleBuyers());
   const initialFilters = useMemo(() => ({
-    buyerKey: getDefaultBuyerKey() || getAccessibleBuyers()?.[0]?.buyerKey || 'LLBEAN',
+    buyerKey: getSelectedBuyerKey() || getAccessibleBuyers()?.[0]?.buyerKey || 'LLBEAN',
     fromDate: '',
     toDate: '',
     season: '',
@@ -428,12 +428,23 @@ export default function DashboardPage() {
         const rows = Array.isArray(result) ? result : Array.isArray(result?.data) ? result.data : [];
         if (!active || !rows.length) return;
         const normalized = rows.filter((item) => item?.active !== false).map((item) => ({
-          buyerKey: item.buyerKey,
+          buyerKey: normalizeBuyerKey(item.buyerKey),
           buyerName: item.buyerName || item.buyerKey,
           sequence: Number(item.sequence || 0)
         }));
         setBuyers(normalized);
-        setFilters((current) => ({ ...current, buyerKey: current.buyerKey || normalized[0]?.buyerKey || 'LLBEAN' }));
+        localStorage.setItem('accessibleBuyers', JSON.stringify(normalized));
+        const selected = getSelectedBuyerKey();
+        const nextBuyerKey = normalized.some((item) => item.buyerKey === selected)
+          ? selected
+          : normalized[0]?.buyerKey || '';
+        if (nextBuyerKey) setSelectedBuyerKey(nextBuyerKey);
+        setFilters((current) => ({
+          ...current,
+          buyerKey: nextBuyerKey || current.buyerKey,
+          season: current.buyerKey === nextBuyerKey ? current.season : '',
+          style: current.buyerKey === nextBuyerKey ? current.style : ''
+        }));
       } catch {
         // Keep local login buyer definitions as fallback.
       }
@@ -467,9 +478,23 @@ export default function DashboardPage() {
 
   useEffect(() => {
     load();
-    // Initial load only; subsequent changes are applied through the filter action.
+    // Initial load only; later Buyer switches are handled by buyer:changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const handleBuyerChanged = (event) => {
+      const nextBuyerKey = normalizeBuyerKey(event?.detail?.buyerKey || getSelectedBuyerKey());
+      if (!nextBuyerKey || !buyers.some((item) => item.buyerKey === nextBuyerKey)) return;
+      setFilters((current) => {
+        const next = { ...current, buyerKey: nextBuyerKey, season: '', style: '' };
+        load(next);
+        return next;
+      });
+    };
+    window.addEventListener('buyer:changed', handleBuyerChanged);
+    return () => window.removeEventListener('buyer:changed', handleBuyerChanged);
+  }, [buyers, load]);
 
   const buyerName = useMemo(() => buyers.find((item) => item.buyerKey === filters.buyerKey)?.buyerName || filters.buyerKey, [buyers, filters.buyerKey]);
   const totalOrders = safeNumber(data.totalOrders);
@@ -492,7 +517,7 @@ export default function DashboardPage() {
             size="small"
             label="Buyer"
             value={filters.buyerKey}
-            onChange={(event) => setFilters((current) => ({ ...current, buyerKey: event.target.value, season: '', style: '' }))}
+            onChange={(event) => setSelectedBuyerKey(event.target.value)}
             sx={{ minWidth: { xs: '100%', xl: 180 } }}
           >
             {buyers.map((buyer) => <MenuItem key={buyer.buyerKey} value={buyer.buyerKey}>{buyer.buyerName}</MenuItem>)}

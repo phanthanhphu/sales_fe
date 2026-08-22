@@ -73,12 +73,20 @@ import PackingAllocationImportDialog from './PackingAllocationImportDialog';
 import PackingListImportDialog from './PackingListImportDialog';
 import PackingListLineFormDialog from './PackingListLineFormDialog';
 import { formatPackingValue, PACKING_ALLOCATION_FIELDS, PACKING_LIST_FIELDS } from './packingListConfig';
+import SortableTableCell from 'components/SortableTableCell';
+import useTableSort from 'utils/useTableSort';
 
 const emptyMasterFilters = {
   keyword: '', poNumber: '', articleNumber: '', styleNumber: '', color: '', sizeValue: '', shipmentMode: '', status: ''
 };
 const emptyPackingFilters = {
   keyword: '', poNumber: '', articleNumber: '', styleNumber: '', color: '', sizeValue: ''
+};
+
+const cartonSortValue = (row, key) => {
+  if (key === 'physicalCarton') return row.cartonCode || row.cartonSequence;
+  if (key === 'qtyPerCarton') return row.cartonPcs ?? row.qtyPerCarton;
+  return row?.[key];
 };
 
 const summaryCard = (label, value) => (
@@ -100,6 +108,7 @@ export default function PackingAllocationPage() {
   const [masterFilters, setMasterFilters] = useState(emptyMasterFilters);
   const [masterApplied, setMasterApplied] = useState(emptyMasterFilters);
   const [masterRows, setMasterRows] = useState([]);
+  const { sortedRows: sortedMasterRows, sortKey: masterSortKey, sortDirection: masterSortDirection, requestSort: requestMasterSort } = useTableSort(masterRows);
   const [masterPage, setMasterPage] = useState(0);
   const [masterPages, setMasterPages] = useState(1);
   const [masterTotal, setMasterTotal] = useState(0);
@@ -115,6 +124,7 @@ export default function PackingAllocationPage() {
   const [packingFilters, setPackingFilters] = useState(emptyPackingFilters);
   const [packingApplied, setPackingApplied] = useState(emptyPackingFilters);
   const [packingRows, setPackingRows] = useState([]);
+  const { sortedRows: sortedPackingRows, sortKey: packingSortKey, sortDirection: packingSortDirection, requestSort: requestPackingSort } = useTableSort(packingRows);
   const [packingPage, setPackingPage] = useState(0);
   const [packingPages, setPackingPages] = useState(1);
   const [packingTotal, setPackingTotal] = useState(0);
@@ -133,6 +143,7 @@ export default function PackingAllocationPage() {
   const [cartonItemOpen, setCartonItemOpen] = useState(false);
   const [cartonItemRow, setCartonItemRow] = useState(null);
   const [cartonItemChildren, setCartonItemChildren] = useState([]);
+  const { sortedRows: sortedCartonChildren, sortKey: cartonSortKey, sortDirection: cartonSortDirection, requestSort: requestCartonSort } = useTableSort(cartonItemChildren, { getValue: cartonSortValue });
   const [cartonItemLoading, setCartonItemLoading] = useState(false);
   const [cartonAssignTarget, setCartonAssignTarget] = useState(null);
   const [cartonBarcode, setCartonBarcode] = useState('');
@@ -567,14 +578,14 @@ export default function PackingAllocationPage() {
             <TableContainer sx={{ maxHeight: 'calc(100vh - 470px)', minHeight: 300 }}>
               <Table stickyHeader size="small" sx={{ minWidth: 3600 }}>
                 <TableHead><TableRow>
-                  <TableCell sx={{ position: 'sticky', left: 0, zIndex: 5, bgcolor: '#eaf1f6', fontWeight: 750, minWidth: 70 }}>No.</TableCell>
-                  {PACKING_ALLOCATION_FIELDS.map((field) => <TableCell key={field.name} sx={{ bgcolor: '#eaf1f6', fontWeight: 750, minWidth: field.width, whiteSpace: 'nowrap' }}>{field.label}</TableCell>)}
-                  <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 5, bgcolor: '#eaf1f6', fontWeight: 750, minWidth: 100 }}>Actions</TableCell>
+                  <SortableTableCell label="No." sortable={false} sx={{ position: 'sticky', left: 0, zIndex: 5, bgcolor: '#eaf1f6', fontWeight: 750, minWidth: 70 }} />
+                  {PACKING_ALLOCATION_FIELDS.map((field) => <SortableTableCell key={field.name} label={field.label} columnKey={field.name} sortKey={masterSortKey} sortDirection={masterSortDirection} onSort={requestMasterSort} sx={{ bgcolor: '#eaf1f6', fontWeight: 750, minWidth: field.width, whiteSpace: 'nowrap' }} />)}
+                  <SortableTableCell label="Actions" sortable={false} align="center" sx={{ position: 'sticky', right: 0, zIndex: 5, bgcolor: '#eaf1f6', fontWeight: 750, minWidth: 100 }} />
                 </TableRow></TableHead>
                 <TableBody>
                   {masterLoading && <TableRow><TableCell colSpan={PACKING_ALLOCATION_FIELDS.length + 2} align="center" sx={{ py: 4 }}>Loading Order Items...</TableCell></TableRow>}
                   {!masterLoading && masterRows.length === 0 && <TableRow><TableCell colSpan={PACKING_ALLOCATION_FIELDS.length + 2} align="center" sx={{ py: 4, color: 'text.secondary' }}>No matching Order Items.</TableCell></TableRow>}
-                  {!masterLoading && masterRows.map((row, index) => <TableRow
+                  {!masterLoading && sortedMasterRows.map((row, index) => <TableRow
                     key={row.id}
                     hover
                   >
@@ -641,14 +652,14 @@ export default function PackingAllocationPage() {
             <TableContainer sx={{ maxHeight: 'calc(100vh - 470px)', minHeight: 300 }}>
               <Table stickyHeader size="small" sx={{ minWidth: 2350 }}>
                 <TableHead><TableRow>
-                  <TableCell sx={{ position: 'sticky', left: 0, zIndex: 5, bgcolor: '#eaf1f6', fontWeight: 750, minWidth: 70 }}>No.</TableCell>
-                  {PACKING_LIST_FIELDS.map((field) => <TableCell key={field.name} sx={{ bgcolor: '#eaf1f6', fontWeight: 750, minWidth: field.width, whiteSpace: 'nowrap' }}>{field.label}</TableCell>)}
-                  <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 5, bgcolor: '#eaf1f6', fontWeight: 750, minWidth: 100 }}>Actions</TableCell>
+                  <SortableTableCell label="No." sortable={false} sx={{ position: 'sticky', left: 0, zIndex: 5, bgcolor: '#eaf1f6', fontWeight: 750, minWidth: 70 }} />
+                  {PACKING_LIST_FIELDS.map((field) => <SortableTableCell key={field.name} label={field.label} columnKey={field.name} sortKey={packingSortKey} sortDirection={packingSortDirection} onSort={requestPackingSort} sx={{ bgcolor: '#eaf1f6', fontWeight: 750, minWidth: field.width, whiteSpace: 'nowrap' }} />)}
+                  <SortableTableCell label="Actions" sortable={false} align="center" sx={{ position: 'sticky', right: 0, zIndex: 5, bgcolor: '#eaf1f6', fontWeight: 750, minWidth: 100 }} />
                 </TableRow></TableHead>
                 <TableBody>
                   {packingLoading && <TableRow><TableCell colSpan={PACKING_LIST_FIELDS.length + 2} align="center" sx={{ py: 4 }}>Loading Packing List...</TableCell></TableRow>}
                   {!packingLoading && packingRows.length === 0 && <TableRow><TableCell colSpan={PACKING_LIST_FIELDS.length + 2} align="center" sx={{ py: 4, color: 'text.secondary' }}>No matching Packing List rows.</TableCell></TableRow>}
-                  {!packingLoading && packingRows.map((row, index) => <TableRow key={row.id} hover>
+                  {!packingLoading && sortedPackingRows.map((row, index) => <TableRow key={row.id} hover>
                     <TableCell sx={{ position: 'sticky', left: 0, zIndex: 2, bgcolor: 'background.paper', fontWeight: 700 }}>{packingPage * 50 + index + 1}</TableCell>
                     {PACKING_LIST_FIELDS.map((field) => <TableCell key={field.name} sx={{ minWidth: field.width, maxWidth: field.name === 'style' ? 340 : field.width + 80, whiteSpace: ['style', 'remarks'].includes(field.name) ? 'normal' : 'nowrap' }}>{formatPackingValue(row[field.name], field.type)}</TableCell>)}
                     <TableCell align="center" sx={{ position: 'sticky', right: 0, zIndex: 2, bgcolor: 'background.paper', whiteSpace: 'nowrap' }}>
@@ -708,13 +719,22 @@ export default function PackingAllocationPage() {
                   <Table stickyHeader size="small" sx={{ minWidth: 980 }}>
                     <TableHead>
                       <TableRow>
-                        {['No.', 'Physical Carton', 'CTN No.', 'Qty/CTN', 'Status', 'Factory Barcode', 'Weight', 'Action'].map((label) => (
-                          <TableCell key={label} sx={{ bgcolor: '#EAF1F6', fontWeight: 750, whiteSpace: 'nowrap' }}>{label}</TableCell>
+                        {[
+                          { label: 'No.', sortable: false },
+                          { label: 'Physical Carton', key: 'physicalCarton' },
+                          { label: 'CTN No.', key: 'cartonNumber' },
+                          { label: 'Qty/CTN', key: 'qtyPerCarton' },
+                          { label: 'Status', key: 'status' },
+                          { label: 'Factory Barcode', key: 'factoryBarcode' },
+                          { label: 'Weight', key: 'weightKg' },
+                          { label: 'Action', sortable: false }
+                        ].map((column) => (
+                          <SortableTableCell key={column.label} label={column.label} columnKey={column.key} sortable={column.sortable !== false} sortKey={cartonSortKey} sortDirection={cartonSortDirection} onSort={requestCartonSort} sx={{ bgcolor: '#EAF1F6', fontWeight: 750, whiteSpace: 'nowrap' }} />
                         ))}
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {cartonItemChildren.map((carton, index) => {
+                      {sortedCartonChildren.map((carton, index) => {
                         const completed = ['COMPLETED', 'WEIGHT_WARNING'].includes(carton.status);
                         const canAssign = canWrite && !carton.factoryBarcode && carton.status === 'PLANNED';
                         const canUnassign = canWrite && Boolean(carton.factoryBarcode) && carton.status === 'PLANNED';

@@ -37,6 +37,7 @@ import {
 } from '@mui/material';
 import { CheckCircle, Delete, Download, Edit, ErrorOutline, ExpandMore, FileUpload, Preview, Refresh, RestartAlt, Save, Search as SearchIcon } from '@mui/icons-material';
 import {
+  confirmMpr,
   deleteMpr,
   deleteMprBatch,
   deleteMprLine,
@@ -58,6 +59,8 @@ import StatusBadge from '../../components/StatusBadge';
 import EmptyTableState from '../../components/EmptyTableState';
 import ColumnVisibilityMenu from '../../components/ColumnVisibilityMenu';
 import ExcelUploadProgressDialog from '../../components/ExcelUploadProgressDialog';
+import SortableTableCell from '../../components/SortableTableCell';
+import useTableSort from '../../utils/useTableSort';
 import { initialUploadProgress, startProcessingTicker, uploadProgressFromEvent, uploadStage } from '../../utils/uploadProgress';
 import { listActiveShipTos, listMasterData } from '../../services/masterDataService';
 import { canManageSales } from 'utils/accessControl';
@@ -551,7 +554,7 @@ const MprSummaryMetric = ({ label, value, helper = '' }) => (
   </Box>
 );
 
-export default function MprTab({ order, buyerKey: buyerKeyProp }) {
+export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusChange }) {
   const buyerKey = normalizeBuyerKey(buyerKeyProp || order?.buyerKey);
   const llBeanMprEnabled = buyerKey === 'LLBEAN';
   const canWrite = canManageSales();
@@ -565,6 +568,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState({ open: false, severity: 'success', message: '' });
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [batchDeleteTarget, setBatchDeleteTarget] = useState(null);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [editingLine, setEditingLine] = useState(null);
@@ -634,7 +639,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     try {
       const [allBoms, activeShipTos, productColorResponse] = await Promise.all([
         listBoms(order.id),
-        listActiveShipTos(),
+        listActiveShipTos(buyerKey),
         listMasterData('productColor', { buyerKey, page: 0, size: 200 })
       ]);
       const submitted = (allBoms || []).filter((bom) => bom.status === 'SUBMITTED');
@@ -1209,6 +1214,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
 
       setMpr(result);
       setPreview(null);
+      onOrderStatusChange?.('MPR_DRAFT');
       // Clear the active source selection so the same BOMs are not accidentally
       // generated twice. Their last successful configuration remains persisted
       // in MPR Generation Batches and is restored when Configure is opened again.
@@ -1299,6 +1305,25 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
       notify(message, 'error');
     } finally {
       setMprUploading(false);
+    }
+  };
+
+  const confirmCurrentMpr = async () => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!mpr?.id || !order?.id || confirming) return;
+
+    setConfirming(true);
+    try {
+      const result = await confirmMpr(order.id);
+      setMpr(result);
+      setPreview(null);
+      setConfirmOpen(false);
+      onOrderStatusChange?.('MPR_COMPLETED');
+      notify('MPR confirmed. Order status changed to MPR COMPLETED.');
+    } catch (error) {
+      notify(getApiError(error, 'Unable to confirm MPR.'), 'error');
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -1565,6 +1590,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
     () => unfilteredVisibleLines.filter((line) => mprLineMatchesFilters(line, mprFilters)),
     [unfilteredVisibleLines, mprFilters]
   );
+  const { sortedRows: sortedVisibleLines, sortKey: mprSortKey, sortDirection: mprSortDirection, requestSort: requestMprSort } = useTableSort(visibleLines);
   const mprColumnTotals = useMemo(() => ({
     poQuantity: sumMprColumn(visibleLines, 'poQuantity'),
     matRequiredQuantity: sumMprColumn(visibleLines, 'matRequiredQuantity'),
@@ -1652,11 +1678,23 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
       || (bomStatusFilter === 'SELECTED' && isSelected);
     return matchesKeyword && matchesStatus;
   }), [boms, bomBatchCountById, bomSearch, bomStatusFilter, selection]);
+  const { sortedRows: sortedSourceBoms, sortKey: sourceSortKey, sortDirection: sourceSortDirection, requestSort: requestSourceSort } = useTableSort(filteredBoms, {
+    getValue: (bom, key) => {
+      const coreCount = Number(bom.coreLineCount ?? (bom.coreLines || []).length) || 0;
+      const totalCount = Number(bom.lineCount ?? ((bom.coreLines || []).length + (bom.packings || []).reduce((total, packing) => total + (packing.lineCount ?? (packing.lines || []).length), 0))) || 0;
+      if (key === 'bom') return `${bom.bomNo || ''} ${bom.bomName || ''}`;
+      if (key === 'core') return coreCount;
+      if (key === 'total') return totalCount;
+      if (key === 'packings') return (bom.packings || []).length;
+      if (key === 'mprStatus') return selection[bom.id]?.selected ? 'SELECTED' : ((bomBatchCountById.get(bom.id) || 0) > 0 ? 'ADDED' : 'NOT_ADDED');
+      return bom?.[key];
+    }
+  });
 
   const pagedBoms = useMemo(() => {
     const start = bomPage * bomRowsPerPage;
-    return filteredBoms.slice(start, start + bomRowsPerPage);
-  }, [filteredBoms, bomPage, bomRowsPerPage]);
+    return sortedSourceBoms.slice(start, start + bomRowsPerPage);
+  }, [sortedSourceBoms, bomPage, bomRowsPerPage]);
 
   const filteredBatches = useMemo(() => batchSummaries.filter((batch) => {
     const searchable = [
@@ -1719,7 +1757,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
 
   const generationBusy = generateProgress.status === 'processing';
   const exportBusy = exportProgress.status === 'processing';
-  const operationBusy = generationBusy || preflightBusy || exportBusy || mprUploading;
+  const operationBusy = generationBusy || preflightBusy || exportBusy || mprUploading || confirming;
+  const mprCompleted = String(mpr?.status || '').toUpperCase() === 'COMPLETED';
   const visibleMprColumns = useMemo(() => MPR_COLUMNS.filter(([field]) => mprVisibleFields.includes(field)), [mprVisibleFields]);
   const mprTableMinWidth = useMemo(() => Math.max(1500, visibleMprColumns.reduce((total, [, , minWidth]) => total + Number(minWidth || 100), 0) + 190), [visibleMprColumns]);
 
@@ -1818,6 +1857,24 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
                 </Button>
               </span>
             </Tooltip>
+
+            {mpr && (
+              <Tooltip title={!canWrite ? writeBlockedMessage : (mprCompleted ? 'This MPR has already been confirmed.' : 'Confirm the current MPR as completed')}>
+                <span>
+                  <Button
+                    size="small"
+                    variant={mprCompleted ? 'outlined' : 'contained'}
+                    color="success"
+                    startIcon={<CheckCircle />}
+                    onClick={() => setConfirmOpen(true)}
+                    disabled={!canWrite || operationBusy || mprCompleted}
+                    sx={{ ...mprActionButtonSx, minWidth: 124, boxShadow: 'none' }}
+                  >
+                    {mprCompleted ? 'Confirmed' : 'Confirm MPR'}
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
 
             {mpr && (
               <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete the entire MPR'}>
@@ -1930,13 +1987,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
                     <TableHead>
                       <TableRow>
                         <TableCell padding="checkbox" sx={{ width: 44, backgroundColor: '#f8fafc' }} />
-                        <TableCell align="center" sx={{ width: 56, fontWeight: 750, backgroundColor: '#f8fafc' }}>No.</TableCell>
-                        <TableCell sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }}>BOM</TableCell>
-                        <TableCell align="right" sx={{ width: 90, fontWeight: 750, backgroundColor: '#f8fafc' }}>Core</TableCell>
-                        <TableCell align="right" sx={{ width: 90, fontWeight: 750, backgroundColor: '#f8fafc' }}>Total</TableCell>
-                        <TableCell align="right" sx={{ width: 100, fontWeight: 750, backgroundColor: '#f8fafc' }}>Packings</TableCell>
-                        <TableCell sx={{ width: 150, fontWeight: 750, backgroundColor: '#f8fafc' }}>MPR Status</TableCell>
-                        <TableCell align="right" sx={{ width: 185, fontWeight: 750, backgroundColor: '#f8fafc' }}>Action</TableCell>
+                        <SortableTableCell label="No." sortable={false} align="center" sx={{ width: 56, fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                        <SortableTableCell label="BOM" columnKey="bom" sortKey={sourceSortKey} sortDirection={sourceSortDirection} onSort={requestSourceSort} sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                        <SortableTableCell label="Core" columnKey="core" sortKey={sourceSortKey} sortDirection={sourceSortDirection} onSort={requestSourceSort} align="right" sx={{ width: 90, fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                        <SortableTableCell label="Total" columnKey="total" sortKey={sourceSortKey} sortDirection={sourceSortDirection} onSort={requestSourceSort} align="right" sx={{ width: 90, fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                        <SortableTableCell label="Packings" columnKey="packings" sortKey={sourceSortKey} sortDirection={sourceSortDirection} onSort={requestSourceSort} align="right" sx={{ width: 100, fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                        <SortableTableCell label="MPR Status" columnKey="mprStatus" sortKey={sourceSortKey} sortDirection={sourceSortDirection} onSort={requestSourceSort} sx={{ width: 150, fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                        <SortableTableCell label="Action" sortable={false} align="right" sx={{ width: 185, fontWeight: 750, backgroundColor: '#f8fafc' }} />
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -2520,7 +2577,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
               </Box>
               {mpr && (
                 <Stack direction="row" spacing={0.8} alignItems="center">
-                  <StatusBadge status={mpr.status} />
+                  <StatusBadge status={mpr.status} label={String(mpr.status || '').toUpperCase() === 'DRAFT' ? 'IN PROGRESS' : undefined} />
                   <Typography sx={{ fontSize: '.7rem', color: '#94a3b8' }}>Updated {formatDateTime(mpr.updatedAt)}</Typography>
                 </Stack>
               )}
@@ -2617,12 +2674,15 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
             <Table stickyHeader size="small" sx={{ minWidth: mprTableMinWidth }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ minWidth: 64, width: 64, fontWeight: 750, backgroundColor: '#f8fafc', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 5, boxShadow: '1px 0 0 #e5e7eb' }}>
-                    No.
-                  </TableCell>
+                  <SortableTableCell label="No." sortable={false} sx={{ minWidth: 64, width: 64, fontWeight: 750, backgroundColor: '#f8fafc', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 5, boxShadow: '1px 0 0 #e5e7eb' }} />
                   {visibleMprColumns.map(([field, header, minWidth]) => (
-                    <TableCell
+                    <SortableTableCell
                       key={header}
+                      label={header}
+                      columnKey={field}
+                      sortKey={mprSortKey}
+                      sortDirection={mprSortDirection}
+                      onSort={requestMprSort}
                       sx={{
                         minWidth,
                         fontWeight: 750,
@@ -2630,9 +2690,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
                         whiteSpace: 'nowrap',
                         ...(field === 'styleDescription' ? { position: 'sticky', left: 64, zIndex: 5, boxShadow: '1px 0 0 #e5e7eb' } : {})
                       }}
-                    >
-                      {header}
-                    </TableCell>
+                    />
                   ))}
                   <TableCell sx={{ minWidth: 110, fontWeight: 750, backgroundColor: '#f8fafc', whiteSpace: 'nowrap', position: 'sticky', right: 0, zIndex: 5, boxShadow: '-1px 0 0 #e5e7eb' }}>
                     Actions
@@ -2647,7 +2705,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
                   const bomGroups = [];
                   const bomByKey = new Map();
 
-                  visibleLines.forEach((line) => {
+                  sortedVisibleLines.forEach((line) => {
                     const fallbackSelection = selectionByBom.get(String(line?.bomId || '')) || {};
                     const bomKey = String(line?.bomId || line?.bomNo || line?.bomName || 'UNKNOWN_BOM');
                     if (!bomByKey.has(bomKey)) {
@@ -3125,6 +3183,21 @@ export default function MprTab({ order, buyerKey: buyerKeyProp }) {
             sx={{ textTransform: 'none', ...(exportProgress.status === 'success' ? { backgroundColor: '#103B5C' } : {}) }}
           >
             {exportProgress.status === 'success' ? 'Done' : 'Close'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={canWrite && confirmOpen} onClose={confirming ? undefined : () => setConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Confirm MPR?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Confirm the current MPR as completed? This will change the Order status to <strong>MPR COMPLETED</strong>.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={confirming} onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button color="success" variant="contained" disabled={confirming} onClick={confirmCurrentMpr}>
+            {confirming ? 'Confirming...' : 'Confirm'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -95,6 +95,8 @@ import StatusBadge from '../../components/StatusBadge';
 import EmptyTableState from '../../components/EmptyTableState';
 import ColumnVisibilityMenu from '../../components/ColumnVisibilityMenu';
 import SectionHeader from '../../components/SectionHeader';
+import SortableTableCell from '../../components/SortableTableCell';
+import useTableSort from '../../utils/useTableSort';
 import { initialUploadProgress, startProcessingTicker, uploadProgressFromEvent, uploadStage } from '../../utils/uploadProgress';
 
 const blankLine = {
@@ -843,6 +845,8 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
   const [masterDetailLoading, setMasterDetailLoading] = useState(false);
   const [masterDetailError, setMasterDetailError] = useState('');
   const [childColorDeleteTarget, setChildColorDeleteTarget] = useState(null);
+  const editableChildColorRows = form.childColors.map((item, sourceIndex) => ({ ...item, __sourceIndex: sourceIndex }));
+  const { sortedRows: sortedEditableChildColors, sortKey: childSortKey, sortDirection: childSortDirection, requestSort: requestChildSort } = useTableSort(editableChildColorRows, { getValue: (item, key) => key === 'childColor' ? item.childColor : item?.[key] });
 
   useEffect(() => {
     if (!open) return;
@@ -1253,9 +1257,9 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
             <Table size="small" sx={{ minWidth: 620 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ width: 64, fontWeight: 750, backgroundColor: '#f8fafc' }}>No.</TableCell>
-                  <TableCell sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }}>Child Color / Comment</TableCell>
-                  <TableCell sx={{ width: 80, fontWeight: 750, backgroundColor: '#f8fafc' }} align="center">Action</TableCell>
+                  <SortableTableCell label="No." sortable={false} sx={{ width: 64, fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                  <SortableTableCell label="Child Color / Comment" columnKey="childColor" sortKey={childSortKey} sortDirection={childSortDirection} onSort={requestChildSort} sx={{ fontWeight: 750, backgroundColor: '#f8fafc' }} />
+                  <SortableTableCell label="Action" sortable={false} sx={{ width: 80, fontWeight: 750, backgroundColor: '#f8fafc' }} align="center" />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -1266,15 +1270,15 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
                     </TableCell>
                   </TableRow>
                 )}
-                {form.childColors.map((item, index) => (
-                  <TableRow key={item.id || `child-${index}`}>
+                {sortedEditableChildColors.map((item, index) => (
+                  <TableRow key={item.id || `child-${item.__sourceIndex}`}>
                     <TableCell sx={{ color: 'text.secondary', fontWeight: 700 }}>{index + 1}</TableCell>
                     <TableCell>
                       <TextField
                         size="small"
                         required
                         value={item.childColor}
-                        onChange={(event) => changeChildColor(index, event.target.value)}
+                        onChange={(event) => changeChildColor(item.__sourceIndex, event.target.value)}
                         placeholder="MINERAL GREY YKK#181"
                         fullWidth
                       />
@@ -1292,7 +1296,7 @@ function ProductColorDialog({ open, record, header = {}, productColorMasters = [
                           <IconButton
                             color="error"
                             size="small"
-                            onClick={() => removeChildColor(index)}
+                            onClick={() => removeChildColor(item.__sourceIndex)}
                             disabled={saving
                               || isChildColorLocked(item)
                               || (mode === 'MASTER' && clean(item?.id) && (masterDetailLoading || Boolean(masterDetailError)))}
@@ -1917,6 +1921,14 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
   ];
   const [visibleLabels, setVisibleLabels] = useState(BOM_LINE_OVERVIEW_COLUMNS);
   const visibleColumns = columns.filter(([label]) => visibleLabels.includes(label));
+  const { sortedRows, sortKey, sortDirection, requestSort } = useTableSort(rows, {
+    getValue: (line, key) => {
+      if (key === 'Material') return line.materialType || line.materialName || '';
+      if (key === 'Image') return line.primaryImage?.fileName || line.primaryImage?.originalFileName || '';
+      const column = columns.find(([label]) => label === key);
+      return column?.[1] ? column[1](line) : line?.[key];
+    }
+  });
   const tableMinWidth = Math.max(1010, visibleColumns.reduce((total, [label]) => total + Number(BOM_LINE_COLUMN_SIZES[label]?.minWidth || 110), 0) + 120);
 
   return (
@@ -1940,8 +1952,14 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
         <TableHead>
           <TableRow>
             {visibleColumns.map(([label]) => (
-              <TableCell
+              <SortableTableCell
                 key={label}
+                label={label}
+                columnKey={label}
+                sortKey={sortKey}
+                sortDirection={sortDirection}
+                onSort={requestSort}
+                sortable={label !== 'No.'}
                 sx={{
                   fontWeight: 750,
                   fontSize: '0.72rem',
@@ -1952,9 +1970,7 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
                   ...(label === 'No.' ? { position: 'sticky', left: 0, zIndex: 6, boxShadow: '1px 0 0 #e5e7eb' } : {}),
                   ...(label === 'Material' ? { position: 'sticky', left: 58, zIndex: 6, boxShadow: '1px 0 0 #e5e7eb' } : {})
                 }}
-              >
-                {label}
-              </TableCell>
+              />
             ))}
             <TableCell sx={{ minWidth: 112, fontWeight: 750, fontSize: '0.72rem', backgroundColor: '#f8fafc', whiteSpace: 'nowrap', position: 'sticky', right: 0, zIndex: 6, boxShadow: '-1px 0 0 #e5e7eb' }}>Actions</TableCell>
           </TableRow>
@@ -1962,7 +1978,7 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
         <TableBody>
           {!rows.length ? (
             <EmptyTableState colSpan={visibleColumns.length + 1} title={emptyText} description="" />
-          ) : rows.map((line) => (
+          ) : sortedRows.map((line) => (
             <TableRow key={line.id} hover data-bom-line-id={line.id} sx={{ scrollMarginTop: 96 }}>
               {visibleColumns.map(([label, render]) => (
                 <TableCell

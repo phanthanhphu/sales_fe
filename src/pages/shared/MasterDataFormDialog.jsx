@@ -224,7 +224,7 @@ export default function MasterDataFormDialog({
 
     let alive = true;
     setOptionLoading((current) => ({ ...current, shipTo: true }));
-    listActiveShipTos()
+    listActiveShipTos(scopeParams?.buyerKey)
       .then((items) => {
         if (alive) setShipToOptions(Array.isArray(items) ? items : []);
       })
@@ -239,7 +239,7 @@ export default function MasterDataFormDialog({
       });
 
     return () => { alive = false; };
-  }, [open, usesShipToOptions]);
+  }, [open, scopeParams?.buyerKey, usesShipToOptions]);
 
   useEffect(() => {
     if (!open || !usesSupplierOptions) return undefined;
@@ -247,7 +247,7 @@ export default function MasterDataFormDialog({
     let alive = true;
     const timer = window.setTimeout(() => {
       setOptionLoading((current) => ({ ...current, supplier: true }));
-      searchVendorCodeOptions(supplierSearch, 50)
+      searchVendorCodeOptions(supplierSearch, 50, scopeParams?.buyerKey)
         .then((items) => {
           if (alive) setSupplierOptions(Array.isArray(items) ? items : []);
         })
@@ -267,7 +267,7 @@ export default function MasterDataFormDialog({
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [open, supplierSearch, usesSupplierOptions]);
+  }, [open, scopeParams?.buyerKey, supplierSearch, usesSupplierOptions]);
 
   const getOptions = (field) => {
     if (field.optionSource === 'currency') return currencyOptions;

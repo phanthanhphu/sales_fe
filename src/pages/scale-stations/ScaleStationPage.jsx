@@ -32,6 +32,8 @@ import ScaleOutlinedIcon from '@mui/icons-material/ScaleOutlined';
 
 import { getApiError } from 'services/orderBomMprService';
 import { createScaleStation, listScaleStations, updateScaleStation } from 'services/cartonLoadingService';
+import SortableTableCell from 'components/SortableTableCell';
+import useTableSort from 'utils/useTableSort';
 
 const EMPTY_FORM = {
   stationCode: '',
@@ -57,6 +59,7 @@ const toForm = (row) => ({
 
 export default function ScaleStationPage() {
   const [rows, setRows] = useState([]);
+  const { sortedRows, sortKey, sortDirection, requestSort } = useTableSort(rows);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -130,19 +133,19 @@ export default function ScaleStationPage() {
         <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell align="center">No.</TableCell>
-              <TableCell>Station Code</TableCell>
-              <TableCell>Station Name</TableCell>
-              <TableCell>Location</TableCell>
-              <TableCell>PLC IP</TableCell>
-              <TableCell>Gateway IP</TableCell>
-              <TableCell>Online</TableCell>
-              <TableCell>Active</TableCell>
-              <TableCell align="right">Actions</TableCell>
+              <SortableTableCell label="No." sortable={false} align="center" />
+              <SortableTableCell label="Station Code" columnKey="stationCode" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} />
+              <SortableTableCell label="Station Name" columnKey="stationName" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} />
+              <SortableTableCell label="Location" columnKey="location" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} />
+              <SortableTableCell label="PLC IP" columnKey="plcIp" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} />
+              <SortableTableCell label="Gateway IP" columnKey="gatewayIp" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} />
+              <SortableTableCell label="Online" columnKey="online" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} />
+              <SortableTableCell label="Active" columnKey="active" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} />
+              <SortableTableCell label="Actions" sortable={false} align="right" />
             </TableRow>
           </TableHead>
           <TableBody>
-            {rows.map((row, index) => (
+            {sortedRows.map((row, index) => (
               <TableRow key={row.id || row.stationCode} hover>
                 <TableCell align="center" sx={{ width: 56, color: '#64748B', fontWeight: 650 }}>{index + 1}</TableCell>
                 <TableCell><Stack direction="row" alignItems="center" spacing={1}><ScaleOutlinedIcon fontSize="small" /><b>{row.stationCode}</b></Stack></TableCell>

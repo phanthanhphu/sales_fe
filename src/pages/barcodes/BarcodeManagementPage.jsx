@@ -43,6 +43,8 @@ import {
   voidFactoryBarcode
 } from 'services/factoryBarcodeService';
 import { buildCode128Svg } from 'utils/code128';
+import SortableTableCell from 'components/SortableTableCell';
+import useTableSort from 'utils/useTableSort';
 
 const getErrorMessage = (error, fallback) => (
   error?.response?.data?.message
@@ -59,6 +61,12 @@ const statusMeta = (value) => {
   if (status === 'ASSIGNED') return { label: 'Assigned', color: 'success' };
   if (status === 'VOID') return { label: 'Void', color: 'error' };
   return { label: 'Available', color: 'info' };
+};
+
+const barcodeSortValue = (row, key) => {
+  if (key === 'assignedCarton') return `${row.assignedCartonCode || ''} ${row.assignedCartonNumber || ''} ${row.assignedBuyerCode || ''} ${row.assignedOrderName || ''}`;
+  if (key === 'poArticle') return `${row.assignedPoNumber || ''} ${row.assignedArticleNumber || ''}`;
+  return row?.[key];
 };
 
 const dateTimeText = (value) => {
@@ -115,6 +123,7 @@ const makePrintHtml = (rows) => {
 
 export default function BarcodeManagementPage() {
   const [rows, setRows] = useState([]);
+  const { sortedRows, sortKey, sortDirection, requestSort } = useTableSort(rows, { getValue: barcodeSortValue });
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalElements, setTotalElements] = useState(0);
@@ -320,15 +329,37 @@ export default function BarcodeManagementPage() {
             <TableHead>
               <TableRow>
                 <TableCell padding="checkbox" sx={{ bgcolor: '#F8FAFC' }}><Checkbox checked={allPageSelected} onChange={(event) => toggleAll(event.target.checked)} /></TableCell>
-                {['No.', 'Factory Barcode', 'Status', 'Factory', 'Year', 'Running No.', 'Batch', 'Print', 'Assigned Carton', 'PO / Article', 'Created', 'Actions'].map((label) => (
-                  <TableCell key={label} sx={{ whiteSpace: 'nowrap' }}>{label}</TableCell>
+                {[
+                  { label: 'No.', sortable: false },
+                  { label: 'Factory Barcode', key: 'barcode' },
+                  { label: 'Status', key: 'status' },
+                  { label: 'Factory', key: 'factoryCode' },
+                  { label: 'Year', key: 'year' },
+                  { label: 'Running No.', key: 'runningNumber' },
+                  { label: 'Batch', key: 'batchId' },
+                  { label: 'Print', key: 'printCount' },
+                  { label: 'Assigned Carton', key: 'assignedCarton' },
+                  { label: 'PO / Article', key: 'poArticle' },
+                  { label: 'Created', key: 'createdAt' },
+                  { label: 'Actions', sortable: false }
+                ].map((column) => (
+                  <SortableTableCell
+                    key={column.label}
+                    label={column.label}
+                    columnKey={column.key}
+                    sortable={column.sortable !== false}
+                    sortKey={sortKey}
+                    sortDirection={sortDirection}
+                    onSort={requestSort}
+                    sx={{ whiteSpace: 'nowrap' }}
+                  />
                 ))}
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow><TableCell colSpan={13} align="center" sx={{ py: 8 }}><CircularProgress /></TableCell></TableRow>
-              ) : rows.length ? rows.map((row, index) => {
+              ) : sortedRows.length ? sortedRows.map((row, index) => {
                 const meta = statusMeta(row.status);
                 return (
                   <TableRow key={row.id || row.barcode} hover>

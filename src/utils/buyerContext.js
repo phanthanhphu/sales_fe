@@ -1,3 +1,5 @@
+export const SELECTED_BUYER_STORAGE_KEY = 'selectedBuyerKey';
+
 export const DEFAULT_BUYERS = Object.freeze([
   { buyerKey: 'LLBEAN', buyerName: 'L.L.BEAN', sequence: 1 },
   { buyerKey: 'TNF', buyerName: 'TNF', sequence: 2 },
@@ -70,7 +72,10 @@ const parseBuyerKeys = (value) => {
 };
 
 export const getAccessibleBuyerKeys = (user = readStoredUser()) => {
-  if (isAdminUser(user)) return DEFAULT_BUYERS.map((item) => item.buyerKey);
+  if (isAdminUser(user)) {
+    const stored = readStoredBuyerDefinitions().map((item) => normalizeBuyerKey(item?.buyerKey)).filter(Boolean);
+    return stored.length ? [...new Set(stored)] : DEFAULT_BUYERS.map((item) => item.buyerKey);
+  }
   return parseBuyerKeys(user?.buyerKeys ?? localStorage.getItem('buyerKeys'));
 };
 
@@ -94,9 +99,31 @@ export const getAccessibleBuyers = (user = readStoredUser()) => {
     .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
 };
 
-export const getDefaultBuyerKey = (user = readStoredUser()) => (
-  getAccessibleBuyerKeys(user)[0] || ''
-);
+export const getSelectedBuyerKey = (user = readStoredUser()) => {
+  const keys = getAccessibleBuyerKeys(user);
+  const stored = String(localStorage.getItem(SELECTED_BUYER_STORAGE_KEY) || '').trim();
+  if (stored) {
+    const normalized = normalizeBuyerKey(stored);
+    if (keys.includes(normalized)) return normalized;
+  }
+  return keys[0] || '';
+};
+
+export const setSelectedBuyerKey = (buyerKey, user = readStoredUser()) => {
+  const raw = String(buyerKey || '').trim();
+  if (!raw) return '';
+  const normalized = normalizeBuyerKey(raw);
+  if (!hasBuyerAccess(normalized, user)) return '';
+  localStorage.setItem(SELECTED_BUYER_STORAGE_KEY, normalized);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('buyer:changed', { detail: { buyerKey: normalized } }));
+  }
+  return normalized;
+};
+
+export const clearSelectedBuyerKey = () => localStorage.removeItem(SELECTED_BUYER_STORAGE_KEY);
+
+export const getDefaultBuyerKey = (user = readStoredUser()) => getSelectedBuyerKey(user);
 
 export const buyerPath = (buyerKey, child = 'orders') => (
   `/buyers/${encodeURIComponent(normalizeBuyerKey(buyerKey))}/${String(child || 'orders').replace(/^\/+/, '')}`

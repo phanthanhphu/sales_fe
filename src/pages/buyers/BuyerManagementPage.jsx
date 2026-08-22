@@ -38,6 +38,7 @@ import {
 import { normalizeBuyerKey } from '../../utils/buyerContext';
 import { PaginationBar } from '../shared/MasterDataTable';
 import StatusBadge from '../../components/StatusBadge';
+import SortableTableCell from '../../components/SortableTableCell';
 
 const emptyForm = {
   buyerKey: '',
@@ -153,6 +154,7 @@ export default function BuyerManagementPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalRows, setTotalRows] = useState(0);
+  const [sort, setSort] = useState({ key: 'createdAt', direction: 'desc' });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formRecord, setFormRecord] = useState(null);
@@ -165,6 +167,7 @@ export default function BuyerManagementPage() {
   const load = useCallback(async (overrides = {}) => {
     const requestedPage = Number.isInteger(overrides.page) ? Math.max(0, overrides.page) : page;
     const requestedSize = Number.isInteger(overrides.size) ? Math.max(1, overrides.size) : rowsPerPage;
+    const requestedSort = overrides.sort || sort;
     setLoading(true);
     try {
       const result = await listBuyers({
@@ -173,8 +176,8 @@ export default function BuyerManagementPage() {
         paged: true,
         page: requestedPage,
         size: requestedSize,
-        sortBy: 'createdAt',
-        sortDir: 'desc'
+        sortBy: requestedSort.key || 'createdAt',
+        sortDir: requestedSort.direction || 'desc'
       });
       const content = Array.isArray(result)
         ? result
@@ -194,9 +197,14 @@ export default function BuyerManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [applied, page, rowsPerPage]);
+  }, [applied, page, rowsPerPage, sort]);
 
   useEffect(() => { load(); }, [load]);
+
+  const changeSort = (key) => {
+    setPage(0);
+    setSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
+  };
 
   const save = async (payload) => {
     setSaving(true);
@@ -262,8 +270,16 @@ export default function BuyerManagementPage() {
           <Table size="small" sx={{ minWidth: 850 }}>
             <TableHead>
               <TableRow>
-                {['No.', 'Buyer Key', 'Buyer Name', 'Sequence', 'Status', 'Description', 'Actions'].map((label) => (
-                  <TableCell key={label} sx={{ fontWeight: 750, backgroundColor: '#F8FAFC' }}>{label}</TableCell>
+                {[
+                  { label: 'No.', sortable: false },
+                  { label: 'Buyer Key', key: 'buyerKey' },
+                  { label: 'Buyer Name', key: 'buyerName' },
+                  { label: 'Sequence', key: 'sequence' },
+                  { label: 'Status', key: 'active' },
+                  { label: 'Description', key: 'description' },
+                  { label: 'Actions', sortable: false }
+                ].map((column) => (
+                  <SortableTableCell key={column.label} label={column.label} columnKey={column.key} sortable={column.sortable !== false} sortKey={sort.key} sortDirection={sort.direction} onSort={changeSort} sx={{ fontWeight: 750, backgroundColor: '#F8FAFC' }} />
                 ))}
               </TableRow>
             </TableHead>

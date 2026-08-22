@@ -89,7 +89,7 @@ export default function OrderDetailPage() {
               {[order.style, order.customer, order.season].filter(Boolean).join(' · ')}
             </Typography>
           </Stack>
-          <StatusBadge status={order.status || 'DRAFT'} />
+          <StatusBadge status={order.status || 'DRAFT'} label={order.status === 'MPR_DRAFT' ? 'MPR IN PROGRESS' : undefined} />
         </Stack>
 
         <Tabs
@@ -107,7 +107,7 @@ export default function OrderDetailPage() {
         </Tabs>
 
         <Box sx={{ p: 0 }}>
-          {tab === 0 ? <BomTab order={order} buyerKey={buyerKey} /> : <MprTab order={order} buyerKey={buyerKey} />}
+          {tab === 0 ? <BomTab order={order} buyerKey={buyerKey} /> : <MprTab order={order} buyerKey={buyerKey} onOrderStatusChange={(status) => setOrder((current) => current ? { ...current, status } : current)} />}
         </Box>
       </Paper>
     </Box>

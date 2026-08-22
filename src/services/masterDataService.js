@@ -113,19 +113,21 @@ export const downloadMasterDataTemplate = (type, params = {}) => (
   apiRawClient.get(`${getEndpoint(type)}/template`, { responseType: 'blob', params: cleanParams(params) })
 );
 
-export const listActiveShipTos = () => apiClient.get(`${MASTER_DATA_ENDPOINTS.shipTo}/active`);
+export const listActiveShipTos = (buyerKey) => apiClient.get(`${MASTER_DATA_ENDPOINTS.shipTo}/active`, {
+  params: cleanParams({ buyerKey })
+});
 
 
-export const resolveVendorCode = (shortNameSupplier) => {
+export const resolveVendorCode = (shortNameSupplier, buyerKey) => {
   return apiClient.get(`${MASTER_DATA_ENDPOINTS.vendor}/resolve`, {
-    params: { shortNameSupplier }
+    params: cleanParams({ shortNameSupplier, buyerKey })
   });
 };
 
 
-export const searchVendorCodeOptions = (keyword = '', limit = 50) => {
+export const searchVendorCodeOptions = (keyword = '', limit = 50, buyerKey) => {
   return apiClient.get(`${MASTER_DATA_ENDPOINTS.vendor}/options`, {
-    params: cleanParams({ keyword, limit })
+    params: cleanParams({ keyword, limit, buyerKey })
   });
 };
 

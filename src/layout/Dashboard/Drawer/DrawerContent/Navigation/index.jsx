@@ -8,7 +8,7 @@ import NavItem from './NavItem';
 import { useGetMenuMaster } from 'api/menu';
 import { getDashboardMenu } from 'menu-items/dashboard';
 import { listAccessibleBuyers } from 'services/buyerService';
-import { getAccessibleBuyers } from 'utils/buyerContext';
+import { getAccessibleBuyers, getSelectedBuyerKey, normalizeBuyerKey } from 'utils/buyerContext';
 
 export default function Navigation() {
   const { pathname } = useLocation();
@@ -19,6 +19,7 @@ export default function Navigation() {
   const [selectedItems, setSelectedItems] = useState('');
   const [selectedLevel, setSelectedLevel] = useState(0);
   const [buyers, setBuyers] = useState(() => getAccessibleBuyers());
+  const [selectedBuyerKey, setSelectedBuyerKeyState] = useState(() => getSelectedBuyerKey());
 
   useEffect(() => {
     let active = true;
@@ -29,23 +30,33 @@ export default function Navigation() {
         const normalized = data
           .filter((item) => item?.active !== false)
           .map((item) => ({
-            buyerKey: item.buyerKey,
+            buyerKey: normalizeBuyerKey(item.buyerKey),
             buyerName: item.buyerName || item.buyerKey,
             sequence: Number(item.sequence || 0)
           }));
         setBuyers(normalized);
         localStorage.setItem('accessibleBuyers', JSON.stringify(normalized));
+        setSelectedBuyerKeyState(getSelectedBuyerKey());
       } catch {
         // Keep the permissions embedded in the current login response as fallback.
       }
     };
     loadBuyers();
     const refresh = () => loadBuyers();
+    const handleBuyerChanged = (event) => {
+      const nextBuyerKey = normalizeBuyerKey(event?.detail?.buyerKey || getSelectedBuyerKey());
+      setSelectedBuyerKeyState(nextBuyerKey);
+    };
     window.addEventListener('buyers:changed', refresh);
-    return () => { active = false; window.removeEventListener('buyers:changed', refresh); };
+    window.addEventListener('buyer:changed', handleBuyerChanged);
+    return () => {
+      active = false;
+      window.removeEventListener('buyers:changed', refresh);
+      window.removeEventListener('buyer:changed', handleBuyerChanged);
+    };
   }, []);
 
-  const menuItems = useMemo(() => getDashboardMenu(buyers), [buyers]);
+  const menuItems = useMemo(() => getDashboardMenu(buyers, selectedBuyerKey), [buyers, selectedBuyerKey]);
   const lastItem = null;
   let lastItemIndex = menuItems.items.length - 1;
   let remItems = [];

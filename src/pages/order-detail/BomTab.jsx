@@ -40,6 +40,8 @@ import {
 import { formatDateTime } from '../orders/orderUi';
 import StatusBadge from '../../components/StatusBadge';
 import EmptyTableState from '../../components/EmptyTableState';
+import SortableTableCell from '../../components/SortableTableCell';
+import useTableSort from '../../utils/useTableSort';
 import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
 import BomCreateDialog from './BomCreateDialog';
 
@@ -110,6 +112,12 @@ const bomMatchesFilters = (bom, filters) => {
   return true;
 };
 
+const bomSortValue = (bom, key) => {
+  if (key === 'colors') return productColorNames(bom).join(' ');
+  if (key === 'packings') return (bom?.packings || []).length;
+  return bom?.[key];
+};
+
 export default function BomTab({ order, buyerKey: buyerKeyProp }) {
   const buyerKey = normalizeBuyerKey(buyerKeyProp || order?.buyerKey);
   const navigate = useNavigate();
@@ -163,12 +171,18 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
     () => rows.filter((bom) => bomMatchesFilters(bom, appliedFilters)),
     [rows, appliedFilters]
   );
+  const { sortedRows: sortedFilteredRows, sortKey, sortDirection, requestSort } = useTableSort(filteredRows, { getValue: bomSortValue });
+
+  const handleBomSort = useCallback((key) => {
+    requestSort(key);
+    setPage(0);
+  }, [requestSort]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
   const pagedRows = useMemo(() => {
     const start = page * rowsPerPage;
-    return filteredRows.slice(start, start + rowsPerPage);
-  }, [filteredRows, page, rowsPerPage]);
+    return sortedFilteredRows.slice(start, start + rowsPerPage);
+  }, [sortedFilteredRows, page, rowsPerPage]);
 
   useEffect(() => {
     const maxPage = Math.max(0, Math.ceil(filteredRows.length / rowsPerPage) - 1);
@@ -274,8 +288,17 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
         <Table stickyHeader size="small">
           <TableHead>
             <TableRow>
-              {['No.', 'BOM No', 'BOM Name', 'Colors', 'Packings', 'Status', 'Updated At', 'Actions'].map((heading) => (
-                <TableCell key={heading} sx={{ fontWeight: 750, fontSize: '0.75rem', color: '#40566d', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }}>{heading}</TableCell>
+              {[
+                { label: 'No.', sortable: false },
+                { label: 'BOM No', key: 'bomNo' },
+                { label: 'BOM Name', key: 'bomName' },
+                { label: 'Colors', key: 'colors' },
+                { label: 'Packings', key: 'packings' },
+                { label: 'Status', key: 'status' },
+                { label: 'Updated At', key: 'updatedAt' },
+                { label: 'Actions', sortable: false }
+              ].map((column) => (
+                <SortableTableCell key={column.label} label={column.label} columnKey={column.key} sortable={column.sortable !== false} sortKey={sortKey} sortDirection={sortDirection} onSort={handleBomSort} sx={{ fontWeight: 750, fontSize: '0.75rem', color: '#40566d', backgroundColor: '#f8fafc', whiteSpace: 'nowrap' }} />
               ))}
             </TableRow>
           </TableHead>

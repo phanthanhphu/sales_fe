@@ -14,7 +14,7 @@ import {
   DashboardOutlined
 } from '@mui/icons-material';
 import { isAdmin } from 'utils/accessControl';
-import { buyerPath, getAccessibleBuyers } from 'utils/buyerContext';
+import { buyerPath, getAccessibleBuyers, getSelectedBuyerKey } from 'utils/buyerContext';
 
 const buyerMenu = (buyer) => ({
   id: `buyer-${buyer.buyerKey}`,
@@ -39,11 +39,27 @@ const buyerMenu = (buyer) => ({
       breadcrumbs: false
     },
     {
+      id: `${buyer.buyerKey}-vendor-codes`,
+      title: 'Vendor Code',
+      type: 'item',
+      url: buyerPath(buyer.buyerKey, 'vendor-codes'),
+      icon: StoreOutlined,
+      breadcrumbs: false
+    },
+    {
       id: `${buyer.buyerKey}-loss`,
       title: 'Loss',
       type: 'item',
       url: buyerPath(buyer.buyerKey, 'loss'),
       icon: PercentOutlined,
+      breadcrumbs: false
+    },
+    {
+      id: `${buyer.buyerKey}-ship-tos`,
+      title: 'Ship To',
+      type: 'item',
+      url: buyerPath(buyer.buyerKey, 'ship-tos'),
+      icon: LocalShippingOutlined,
       breadcrumbs: false
     },
     {
@@ -65,8 +81,11 @@ const buyerMenu = (buyer) => ({
   ]
 });
 
-const getDashboardMenu = (buyers = getAccessibleBuyers()) => ({
-  items: [
+const getDashboardMenu = (buyers = getAccessibleBuyers(), selectedBuyerKey = getSelectedBuyerKey()) => {
+  const availableBuyers = Array.isArray(buyers) ? buyers : getAccessibleBuyers();
+  const activeBuyer = availableBuyers.find((buyer) => buyer?.buyerKey === selectedBuyerKey) || availableBuyers[0] || null;
+
+  const items = [
     {
       id: 'group-overview',
       title: 'Overview',
@@ -74,41 +93,44 @@ const getDashboardMenu = (buyers = getAccessibleBuyers()) => ({
       children: [
         { id: 'dashboard', title: 'Dashboard', type: 'item', url: '/dashboard', icon: DashboardOutlined, breadcrumbs: false, exact: true }
       ]
-    },
-    {
+    }
+  ];
+
+  if (isAdmin()) {
+    items.push({
       id: 'group-management',
       title: 'Management',
       type: 'group',
       children: [
-        ...(isAdmin()
-          ? [
-              { id: 'users', title: 'Users', type: 'item', url: '/users', icon: GroupOutlined, breadcrumbs: false, exact: true },
-              { id: 'departments', title: 'Departments', type: 'item', url: '/departments', icon: BusinessOutlined, breadcrumbs: false, exact: true },
-              { id: 'buyers', title: 'Buyers', type: 'item', url: '/buyers', icon: ManageAccountsOutlined, breadcrumbs: false, exact: true },
-              { id: 'audit-logs', title: 'Audit Logs', type: 'item', url: '/audit-logs', icon: HistoryOutlined, breadcrumbs: false, exact: true },
-              { id: 'settings', title: 'Settings', type: 'item', url: '/settings/general', icon: SettingsOutlined, breadcrumbs: false, exact: true }
-            ]
-          : [])
+        { id: 'users', title: 'Users', type: 'item', url: '/users', icon: GroupOutlined, breadcrumbs: false, exact: true },
+        { id: 'departments', title: 'Departments', type: 'item', url: '/departments', icon: BusinessOutlined, breadcrumbs: false, exact: true },
+        { id: 'buyers', title: 'Buyers', type: 'item', url: '/buyers', icon: ManageAccountsOutlined, breadcrumbs: false, exact: true },
+        { id: 'audit-logs', title: 'Audit Logs', type: 'item', url: '/audit-logs', icon: HistoryOutlined, breadcrumbs: false, exact: true },
+        { id: 'settings', title: 'Settings', type: 'item', url: '/settings/general', icon: SettingsOutlined, breadcrumbs: false, exact: true }
       ]
-    },
-    {
-      id: 'group-master-data',
-      title: 'Master Data',
-      type: 'group',
-      children: [
-        { id: 'currencies', title: 'Currency', type: 'item', url: '/currencies', icon: CurrencyExchangeOutlined, breadcrumbs: false, exact: true },
-        { id: 'vendor-codes', title: 'Vendor Code', type: 'item', url: '/vendor-codes', icon: StoreOutlined, breadcrumbs: false, exact: true },
-        { id: 'ship-tos', title: 'Ship To', type: 'item', url: '/ship-tos', icon: LocalShippingOutlined, breadcrumbs: false, exact: true }
-      ]
-    },
-    {
+    });
+  }
+
+  items.push({
+    id: 'group-master-data',
+    title: 'Master Data',
+    type: 'group',
+    children: [
+      { id: 'currencies', title: 'Currency', type: 'item', url: '/currencies', icon: CurrencyExchangeOutlined, breadcrumbs: false, exact: true }
+    ]
+  });
+
+  if (activeBuyer) {
+    items.push({
       id: 'group-buyers',
-      title: 'Buyers',
+      title: 'Buyer Workspace',
       type: 'group',
-      children: (Array.isArray(buyers) ? buyers : getAccessibleBuyers()).map(buyerMenu)
-    }
-  ]
-});
+      children: [buyerMenu(activeBuyer)]
+    });
+  }
+
+  return { items };
+};
 
 const dashboard = getDashboardMenu();
 export default dashboard;

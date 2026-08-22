@@ -136,6 +136,9 @@ export default function TabContent({ onRequestClose }) {
       localStorage.removeItem('userId');
       localStorage.removeItem('role');
       localStorage.removeItem('isAuthenticated');
+      localStorage.removeItem('buyerKeys');
+      localStorage.removeItem('accessibleBuyers');
+      localStorage.removeItem('selectedBuyerKey');
 
       setSnackbarOpen(true);
 

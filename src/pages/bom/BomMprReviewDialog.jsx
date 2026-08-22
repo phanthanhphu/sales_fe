@@ -20,6 +20,8 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import SortableTableCell from '../../components/SortableTableCell';
+import useTableSort from '../../utils/useTableSort';
 
 const statusMeta = (status) => {
   switch (String(status || '').toUpperCase()) {
@@ -36,6 +38,38 @@ const formatDate = (value) => {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
 };
+
+function ReviewChangesTable({ review }) {
+  const changes = review?.changes || [];
+  const { sortedRows, sortKey, sortDirection, requestSort } = useTableSort(changes, {
+    getValue: (change, key) => key === 'field' ? (change.label || change.field) : change?.[key]
+  });
+
+  return (
+    <TableContainer sx={{ mt: 1.15, border: '1px solid #eef2f7', borderRadius: 1 }}>
+      <Table size="small">
+        <TableHead>
+          <TableRow sx={{ backgroundColor: '#f8fafc' }}>
+            <SortableTableCell label="No." sortable={false} align="center" sx={{ width: 52, fontWeight: 750 }} />
+            <SortableTableCell label="Field" columnKey="field" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} sx={{ fontWeight: 750 }} />
+            <SortableTableCell label="Current BOM" columnKey="bomValue" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} sx={{ fontWeight: 750 }} />
+            <SortableTableCell label="Sales Proposal" columnKey="salesValue" sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} sx={{ fontWeight: 750 }} />
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {sortedRows.map((change, changeIndex) => (
+            <TableRow key={`${review.id}-${change.field}`}>
+              <TableCell align="center" sx={{ color: '#64748B', fontWeight: 650 }}>{changeIndex + 1}</TableCell>
+              <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{change.label || change.field}</TableCell>
+              <TableCell>{change.bomValue || <em>Blank</em>}</TableCell>
+              <TableCell sx={{ fontWeight: 700, color: '#103B5C' }}>{change.salesValue || <em>Blank</em>}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
 
 export default function BomMprReviewDialog({
   open,
@@ -108,28 +142,7 @@ export default function BomMprReviewDialog({
                     )}
                   </Stack>
 
-                  <TableContainer sx={{ mt: 1.15, border: '1px solid #eef2f7', borderRadius: 1 }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow sx={{ backgroundColor: '#f8fafc' }}>
-                          <TableCell align="center" sx={{ width: 52, fontWeight: 750 }}>No.</TableCell>
-                          <TableCell sx={{ fontWeight: 750 }}>Field</TableCell>
-                          <TableCell sx={{ fontWeight: 750 }}>Current BOM</TableCell>
-                          <TableCell sx={{ fontWeight: 750 }}>Sales Proposal</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {(review.changes || []).map((change, changeIndex) => (
-                          <TableRow key={`${review.id}-${change.field}`}>
-                            <TableCell align="center" sx={{ color: '#64748B', fontWeight: 650 }}>{changeIndex + 1}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{change.label || change.field}</TableCell>
-                            <TableCell>{change.bomValue || <em>Blank</em>}</TableCell>
-                            <TableCell sx={{ fontWeight: 700, color: '#103B5C' }}>{change.salesValue || <em>Blank</em>}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                  <ReviewChangesTable review={review} />
 
                   {pending && (
                     <>

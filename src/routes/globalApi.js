@@ -14,6 +14,7 @@ const AUTH_KEYS = [
   'role',
   'buyerKeys',
   'accessibleBuyers',
+  'selectedBuyerKey',
   'approvePermission',
   'canApproveNotice',
   'canApproveDocument',
@@ -51,6 +52,10 @@ export const getStoredToken = () => {
     ''
   );
 };
+
+const getSelectedBuyerKey = () => String(
+  localStorage.getItem('selectedBuyerKey') || sessionStorage.getItem('selectedBuyerKey') || ''
+).trim().toUpperCase();
 
 const isBadUrl = (url) => {
   return (
@@ -111,6 +116,12 @@ const applyRequestAuth = (config = {}) => {
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+
+  const buyerKey = getSelectedBuyerKey();
+  const requestMethod = String(config.method || 'GET').toUpperCase();
+  if (buyerKey && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(requestMethod)) {
+    config.headers['X-Buyer-Key'] = buyerKey;
   }
 
   if (config.data instanceof FormData) {
@@ -210,6 +221,11 @@ if (!window.__BSL_FETCH_AUTH_INTERCEPTOR_INSTALLED__) {
 
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    const buyerKey = getSelectedBuyerKey();
+    if (buyerKey && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      headers.set('X-Buyer-Key', buyerKey);
     }
 
     const config = {

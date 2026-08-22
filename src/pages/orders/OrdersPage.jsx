@@ -53,6 +53,8 @@ export default function OrdersPage() {
   const [pageSize, setPageSize] = useState(25);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const [sortBy, setSortBy] = useState('updatedAt');
+  const [sortDirection, setSortDirection] = useState('desc');
   const [loading, setLoading] = useState(false);
   const [formRecord, setFormRecord] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -67,7 +69,7 @@ export default function OrdersPage() {
     const requestedSize = Number.isInteger(options.size) ? options.size : pageSize;
     setLoading(true);
     try {
-      const data = await listOrders({ ...applied, buyerKey, page: requestedPage, size: requestedSize });
+      const data = await listOrders({ ...applied, buyerKey, page: requestedPage, size: requestedSize, sortBy, sortDir: sortDirection });
       const nextRows = Array.isArray(data?.content) ? data.content : Array.isArray(data) ? data : [];
       setRows(nextRows);
       setTotalPages(Math.max(1, data?.totalPages || 1));
@@ -79,7 +81,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [applied, buyerKey, page, pageSize]);
+  }, [applied, buyerKey, page, pageSize, sortBy, sortDirection]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -177,6 +179,17 @@ export default function OrdersPage() {
     }
   };
 
+  const handleSort = useCallback((key) => {
+    if (!key) return;
+    setPage(0);
+    if (sortBy === key) {
+      setSortDirection((current) => current === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+    setSortBy(key);
+    setSortDirection('asc');
+  }, [sortBy]);
+
   const pageStart = total === 0 ? 0 : page * pageSize + 1;
   const pageEnd = Math.min(total, (page + 1) * pageSize);
 
@@ -201,6 +214,9 @@ export default function OrdersPage() {
           page={page}
           pageSize={pageSize}
           actionsDisabled={!canWrite}
+          sortKey={sortBy}
+          sortDirection={sortDirection}
+          onSort={handleSort}
           onOpen={(row) => navigate(buyerPath(buyerKey, `orders/${row.id}`))}
           onEdit={openEdit}
           onDelete={requestDelete}

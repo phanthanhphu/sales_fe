@@ -7,6 +7,10 @@ import 'react-toastify/dist/ReactToastify.css';
 import {
   Box,
   Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   IconButton,
   InputAdornment,
   Stack,
@@ -15,9 +19,13 @@ import {
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
+  ArrowForwardRounded,
+  CheckCircleRounded,
   EmailOutlined,
   LockOutlined,
   LoginRounded,
+  StorefrontOutlined,
+  SwapHorizRounded,
   Visibility,
   VisibilityOff
 } from '@mui/icons-material';
@@ -25,7 +33,8 @@ import {
 // Keep this file at: src/assets/images/background/background_login.png
 import backgroundLogin from '../assets/images/background/background_login.png';
 import { apiRawClient } from './globalApi';
-import { defaultAuthorizedPath } from '../utils/buyerContext';
+import { buyerPath, defaultAuthorizedPath, getAccessibleBuyers, normalizeBuyerKey, setSelectedBuyerKey } from '../utils/buyerContext';
+import { listAccessibleBuyers } from '../services/buyerService';
 
 const LOGIN_DRAFT_EMAIL_KEY = 'loginDraftEmail';
 const LOGIN_DRAFT_PASSWORD_KEY = 'loginDraftPassword';
@@ -152,6 +161,7 @@ const clearAuthSession = () => {
   localStorage.removeItem('role');
   localStorage.removeItem('buyerKeys');
   localStorage.removeItem('accessibleBuyers');
+  localStorage.removeItem('selectedBuyerKey');
   localStorage.removeItem('approvePermission');
   localStorage.removeItem('canApproveNotice');
   localStorage.removeItem('canApproveDocument');
@@ -250,6 +260,9 @@ export default function LoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [loginBuyers, setLoginBuyers] = useState([]);
+  const [buyerSelectionOpen, setBuyerSelectionOpen] = useState(false);
+  const [selectedLoginBuyer, setSelectedLoginBuyer] = useState('');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -285,6 +298,14 @@ export default function LoginPage() {
 
     navigate(redirectPath, { replace: true });
   }, [navigate]);
+
+  const continueWithBuyer = () => {
+    const buyerKey = normalizeBuyerKey(selectedLoginBuyer);
+    if (!buyerKey || !loginBuyers.some((item) => item.buyerKey === buyerKey)) return;
+    if (!setSelectedBuyerKey(buyerKey)) return;
+    setBuyerSelectionOpen(false);
+    window.location.replace(buyerPath(buyerKey, 'orders'));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -325,16 +346,54 @@ export default function LoginPage() {
         });
         clearLoginDraft();
 
-        const redirectPath = getPostLoginPath(loggedInUser, loggedInRole) || DEFAULT_PATH;
+        const sessionUser = { ...loggedInUser, role: loggedInRole };
 
+        if (!isAdminRole(loggedInRole)) {
+          let accessible = [];
+          try {
+            const response = await listAccessibleBuyers();
+            const rows = Array.isArray(response) ? response : Array.isArray(response?.data) ? response.data : [];
+            accessible = rows
+              .filter((item) => item?.active !== false)
+              .map((item) => ({
+                buyerKey: normalizeBuyerKey(item?.buyerKey),
+                buyerName: item?.buyerName || item?.buyerKey,
+                sequence: Number(item?.sequence || 0)
+              }))
+              .sort((left, right) => (left.sequence - right.sequence) || String(left.buyerName || '').localeCompare(String(right.buyerName || '')));
+          } catch {
+            accessible = getAccessibleBuyers(sessionUser);
+          }
+
+          if (accessible.length) {
+            const buyerKeys = accessible.map((item) => item.buyerKey);
+            localStorage.setItem('accessibleBuyers', JSON.stringify(accessible));
+            localStorage.setItem('buyerKeys', JSON.stringify(buyerKeys));
+            try {
+              const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+              localStorage.setItem('user', JSON.stringify({ ...storedUser, buyerKeys }));
+            } catch {
+              // buyerKeys in localStorage is still enough for Buyer access checks.
+            }
+          }
+
+          if (accessible.length > 1) {
+            setLoginBuyers(accessible);
+            setSelectedLoginBuyer('');
+            setBuyerSelectionOpen(true);
+            toast.success('Login successful. Select a Buyer to continue.');
+            return;
+          }
+
+          if (accessible.length === 1) {
+            setSelectedBuyerKey(accessible[0].buyerKey);
+          }
+        }
+
+        const redirectPath = getPostLoginPath(getStoredUserForRedirect(), loggedInRole) || DEFAULT_PATH;
         toast.success('Login successful! Redirecting...');
 
-        /*
-         * IMPORTANT:
-         * The sidebar menu is created from localStorage role/permission when the app loads.
-         * If we use react-router navigate() only, the menu module may not rebuild immediately.
-         * A full reload after storing role/user/permissions fixes that.
-         */
+        /* Full reload rebuilds the permission-aware sidebar from localStorage. */
         setTimeout(() => {
           window.location.replace(redirectPath);
         }, 300);
@@ -659,6 +718,189 @@ export default function LoginPage() {
           </Box>
         </Box>
       </Box>
+
+      <Dialog
+        open={buyerSelectionOpen}
+        maxWidth="sm"
+        fullWidth
+        disableEscapeKeyDown
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            overflow: 'hidden',
+            border: '1px solid #DFE8F1',
+            boxShadow: '0 24px 70px rgba(23, 59, 99, 0.2)'
+          }
+        }}
+      >
+        <DialogTitle sx={{ p: 0 }}>
+          <Box
+            sx={{
+              px: 3,
+              py: 2.5,
+              color: '#FFFFFF',
+              background: 'linear-gradient(135deg, #173B63 0%, #245F88 100%)'
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Box
+                sx={{
+                  width: 46,
+                  height: 46,
+                  borderRadius: 2,
+                  display: 'grid',
+                  placeItems: 'center',
+                  bgcolor: 'rgba(255,255,255,0.14)',
+                  border: '1px solid rgba(255,255,255,0.22)'
+                }}
+              >
+                <StorefrontOutlined sx={{ fontSize: 25 }} />
+              </Box>
+              <Box>
+                <Typography sx={{ fontSize: '1.15rem', lineHeight: 1.2, fontWeight: 800 }}>
+                  Choose your Buyer workspace
+                </Typography>
+                <Typography sx={{ mt: 0.45, fontSize: '0.82rem', color: 'rgba(255,255,255,0.78)', fontWeight: 550 }}>
+                  Select the Buyer you want to work with for this session.
+                </Typography>
+              </Box>
+            </Stack>
+          </Box>
+        </DialogTitle>
+
+        <DialogContent sx={{ px: 3, pt: '24px !important', pb: 1.5, bgcolor: '#FFFFFF' }}>
+          <Typography sx={{ mb: 1.15, color: '#6B7C90', fontSize: '0.75rem', fontWeight: 800, letterSpacing: 0.35, textTransform: 'uppercase' }}>
+            Assigned Buyers
+          </Typography>
+
+          <Stack spacing={1.05}>
+            {loginBuyers.map((buyer) => {
+              const selected = buyer.buyerKey === selectedLoginBuyer;
+              return (
+                <Button
+                  key={buyer.buyerKey}
+                  onClick={() => setSelectedLoginBuyer(buyer.buyerKey)}
+                  fullWidth
+                  disableRipple
+                  sx={{
+                    minHeight: 66,
+                    px: 1.55,
+                    py: 1.1,
+                    justifyContent: 'flex-start',
+                    textAlign: 'left',
+                    textTransform: 'none',
+                    borderRadius: 2.25,
+                    border: selected ? '1.5px solid #2563EB' : '1px solid #DFE7F0',
+                    bgcolor: selected ? '#F3F7FF' : '#FFFFFF',
+                    boxShadow: selected ? '0 5px 16px rgba(37, 99, 235, 0.08)' : 'none',
+                    '&:hover': {
+                      bgcolor: selected ? '#EEF4FF' : '#F8FAFC',
+                      borderColor: selected ? '#2563EB' : '#C7D4E2'
+                    }
+                  }}
+                >
+                  <Box
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      mr: 1.35,
+                      borderRadius: 1.75,
+                      display: 'grid',
+                      placeItems: 'center',
+                      flexShrink: 0,
+                      color: selected ? '#2563EB' : '#60758A',
+                      bgcolor: selected ? '#E7F0FF' : '#F1F5F9'
+                    }}
+                  >
+                    <StorefrontOutlined sx={{ fontSize: 22 }} />
+                  </Box>
+
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography sx={{ color: '#173B63', fontSize: '0.91rem', lineHeight: 1.25, fontWeight: 800 }}>
+                      {buyer.buyerName || buyer.buyerKey}
+                    </Typography>
+                    <Typography sx={{ mt: 0.35, color: '#7B8DA2', fontSize: '0.73rem', fontWeight: 650 }}>
+                      Buyer code: {buyer.buyerKey}
+                    </Typography>
+                  </Box>
+
+                  <Box
+                    sx={{
+                      width: 24,
+                      height: 24,
+                      ml: 1,
+                      borderRadius: '50%',
+                      display: 'grid',
+                      placeItems: 'center',
+                      flexShrink: 0,
+                      color: selected ? '#FFFFFF' : 'transparent',
+                      bgcolor: selected ? '#2563EB' : '#FFFFFF',
+                      border: selected ? '1px solid #2563EB' : '1.5px solid #C8D4E1'
+                    }}
+                  >
+                    {selected ? <CheckCircleRounded sx={{ fontSize: 18 }} /> : null}
+                  </Box>
+                </Button>
+              );
+            })}
+          </Stack>
+
+          <Box
+            sx={{
+              mt: 2,
+              px: 1.5,
+              py: 1.3,
+              borderRadius: 2,
+              bgcolor: '#F7FAFD',
+              border: '1px solid #E2EAF2'
+            }}
+          >
+            <Stack direction="row" spacing={1.1} alignItems="flex-start">
+              <Box
+                sx={{
+                  width: 31,
+                  height: 31,
+                  borderRadius: 1.4,
+                  display: 'grid',
+                  placeItems: 'center',
+                  flexShrink: 0,
+                  color: '#245F88',
+                  bgcolor: '#E8F2F8'
+                }}
+              >
+                <SwapHorizRounded sx={{ fontSize: 19 }} />
+              </Box>
+              <Box>
+                <Typography sx={{ color: '#355A7A', fontSize: '0.79rem', fontWeight: 800 }}>
+                  Need another Buyer later?
+                </Typography>
+                <Typography sx={{ mt: 0.2, color: '#6B7C90', fontSize: '0.76rem', lineHeight: 1.5, fontWeight: 550 }}>
+                  You can switch anytime from <b>Switch Buyer</b> in the header. The sidebar and Buyer data will follow the active Buyer.
+                </Typography>
+              </Box>
+            </Stack>
+          </Box>
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3, pt: 1, pb: 2.6, bgcolor: '#FFFFFF' }}>
+          <Button
+            variant="contained"
+            fullWidth
+            endIcon={<ArrowForwardRounded />}
+            onClick={continueWithBuyer}
+            disabled={!selectedLoginBuyer}
+            sx={{
+              minHeight: 44,
+              borderRadius: 2,
+              textTransform: 'none',
+              fontWeight: 800,
+              boxShadow: '0 7px 16px rgba(37, 99, 235, 0.18)'
+            }}
+          >
+            {selectedLoginBuyer ? 'Continue to selected Buyer' : 'Select a Buyer to continue'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

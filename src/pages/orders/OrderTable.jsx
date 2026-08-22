@@ -3,9 +3,20 @@ import { Delete, Edit, OpenInNew } from '@mui/icons-material';
 import { formatDateTime } from './orderUi';
 import StatusBadge from '../../components/StatusBadge';
 import EmptyTableState from '../../components/EmptyTableState';
+import SortableTableCell from '../../components/SortableTableCell';
 
-export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, actionsDisabled = false, embedded = false, page = 0, pageSize = 25 }) {
+export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, actionsDisabled = false, embedded = false, page = 0, pageSize = 25, sortKey = 'updatedAt', sortDirection = 'desc', onSort }) {
   const blockedMessage = 'Sales permission is required to modify orders.';
+  const columns = [
+    { label: 'No.', sortable: false },
+    { label: 'Order No', key: 'orderNo' },
+    { label: 'Style', key: 'style' },
+    { label: 'Customer', key: 'customer' },
+    { label: 'Season', key: 'season' },
+    { label: 'Status', key: 'status' },
+    { label: 'Updated At', key: 'updatedAt' },
+    { label: 'Actions', sortable: false }
+  ];
 
   return (
     <Box sx={{ border: embedded ? 0 : '1px solid #e5e7eb', borderRadius: embedded ? 0 : 2, overflow: 'hidden', bgcolor: '#FFFFFF' }}>
@@ -13,8 +24,17 @@ export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, ac
         <Table stickyHeader size="small">
           <TableHead>
             <TableRow>
-              {['No.', 'Order No', 'Style', 'Customer', 'Season', 'Status', 'Updated At', 'Actions'].map((head) => (
-                <TableCell key={head} sx={{ fontWeight: 800, fontSize: '0.75rem', color: '#40566d', backgroundColor: '#F8FAFC', whiteSpace: 'nowrap' }}>{head}</TableCell>
+              {columns.map((column) => (
+                <SortableTableCell
+                  key={column.label}
+                  label={column.label}
+                  columnKey={column.key}
+                  sortable={column.sortable !== false}
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                  onSort={onSort}
+                  sx={{ fontWeight: 800, fontSize: '0.75rem', color: '#40566d', backgroundColor: '#F8FAFC', whiteSpace: 'nowrap' }}
+                />
               ))}
             </TableRow>
           </TableHead>
@@ -28,7 +48,7 @@ export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, ac
                 <TableCell>{row.style}</TableCell>
                 <TableCell>{row.customer}</TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{row.season}</TableCell>
-                <TableCell><StatusBadge status={row.status || 'DRAFT'} /></TableCell>
+                <TableCell><StatusBadge status={row.status || 'DRAFT'} label={row.status === 'MPR_DRAFT' ? 'MPR IN PROGRESS' : undefined} /></TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(row.updatedAt)}</TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>
                   <Tooltip title="Open order"><IconButton size="small" color="primary" onClick={() => onOpen(row)}><OpenInNew fontSize="small" /></IconButton></Tooltip>

@@ -38,6 +38,8 @@ import UsbOutlinedIcon from '@mui/icons-material/UsbOutlined';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 
 import { getActiveBuyer } from 'utils/buyerAccess';
+import SortableTableCell from 'components/SortableTableCell';
+import useTableSort from 'utils/useTableSort';
 import { listPackingOrders } from 'services/packingListService';
 import { getApiError } from 'services/orderBomMprService';
 import {
@@ -155,6 +157,7 @@ export default function ZebraScanPage() {
   const [transaction, setTransaction] = useState(null);
   const [progress, setProgress] = useState(null);
   const [recent, setRecent] = useState([]);
+  const { sortedRows: sortedRecent, sortKey: recentSortKey, sortDirection: recentSortDirection, requestSort: requestRecentSort } = useTableSort(recent);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState({ open: false, severity: 'success', message: '' });
 
@@ -790,17 +793,17 @@ export default function ZebraScanPage() {
               <Table size="small">
                 <TableHead>
                   <TableRow sx={{ bgcolor: 'action.hover' }}>
-                    <TableCell sx={{ fontWeight: 900 }}>Carton No.</TableCell>
-                    <TableCell sx={{ fontWeight: 900 }}>Article</TableCell>
-                    <TableCell sx={{ fontWeight: 900 }}>QA Code</TableCell>
-                    <TableCell sx={{ fontWeight: 900 }}>Station</TableCell>
-                    <TableCell sx={{ fontWeight: 900 }}>Status</TableCell>
-                    <TableCell sx={{ fontWeight: 900 }} align="right">Weight</TableCell>
-                    <TableCell sx={{ fontWeight: 900 }}>Scanned at</TableCell>
+                    <SortableTableCell label="Carton No." columnKey="cartonSequence" sortKey={recentSortKey} sortDirection={recentSortDirection} onSort={requestRecentSort} sx={{ fontWeight: 900 }} />
+                    <SortableTableCell label="Article" columnKey="articleNumber" sortKey={recentSortKey} sortDirection={recentSortDirection} onSort={requestRecentSort} sx={{ fontWeight: 900 }} />
+                    <SortableTableCell label="QA Code" columnKey="barcode" sortKey={recentSortKey} sortDirection={recentSortDirection} onSort={requestRecentSort} sx={{ fontWeight: 900 }} />
+                    <SortableTableCell label="Station" columnKey="stationCode" sortKey={recentSortKey} sortDirection={recentSortDirection} onSort={requestRecentSort} sx={{ fontWeight: 900 }} />
+                    <SortableTableCell label="Status" columnKey="status" sortKey={recentSortKey} sortDirection={recentSortDirection} onSort={requestRecentSort} sx={{ fontWeight: 900 }} />
+                    <SortableTableCell label="Weight" columnKey="weightKg" sortKey={recentSortKey} sortDirection={recentSortDirection} onSort={requestRecentSort} sx={{ fontWeight: 900 }} align="right" />
+                    <SortableTableCell label="Scanned at" columnKey="scannedAt" sortKey={recentSortKey} sortDirection={recentSortDirection} onSort={requestRecentSort} sx={{ fontWeight: 900 }} />
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {recent.map((row) => (
+                  {sortedRecent.map((row) => (
                     <TableRow key={row.id} hover>
                       <TableCell sx={{ fontWeight: 850 }}>{row.cartonSequence ?? '—'}</TableCell>
                       <TableCell>{row.articleNumber || '—'}</TableCell>

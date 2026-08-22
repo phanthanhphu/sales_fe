@@ -38,6 +38,8 @@ import { getActiveBuyer } from 'utils/buyerAccess';
 import { getApiError } from 'services/orderBomMprService';
 import { createPackingOrder, deletePackingOrder, listPackingOrders, updatePackingOrder } from 'services/packingListService';
 import PackingOrderFormDialog from './PackingOrderFormDialog';
+import SortableTableCell from 'components/SortableTableCell';
+import useTableSort from 'utils/useTableSort';
 
 const emptyFilters = { orderDate: '', orderName: '', createdBy: '', status: '', completed: '' };
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
@@ -67,6 +69,7 @@ export default function PackingListPage() {
   const [filters, setFilters] = useState(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
   const [rows, setRows] = useState([]);
+  const { sortedRows, sortKey, sortDirection, requestSort } = useTableSort(rows);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
@@ -167,11 +170,19 @@ export default function PackingListPage() {
 
         <TableContainer sx={{ maxHeight: 'calc(100vh - 205px)', minHeight: 330 }}>
           <Table stickyHeader size="small" sx={{ minWidth: 900 }}>
-            <TableHead><TableRow>{['No.', 'Date', 'Order Name', 'Created By', 'Status', 'Completed', 'Actions'].map((head) => <TableCell key={head}>{head}</TableCell>)}</TableRow></TableHead>
+            <TableHead><TableRow>{[
+              { label: 'No.', sortable: false },
+              { label: 'Date', key: 'orderDate' },
+              { label: 'Order Name', key: 'orderName' },
+              { label: 'Created By', key: 'createdBy' },
+              { label: 'Status', key: 'status' },
+              { label: 'Completed', key: 'completed' },
+              { label: 'Actions', sortable: false }
+            ].map((column) => <SortableTableCell key={column.label} label={column.label} columnKey={column.key} sortable={column.sortable !== false} sortKey={sortKey} sortDirection={sortDirection} onSort={requestSort} />)}</TableRow></TableHead>
             <TableBody>
               {loading && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4 }}>Loading Orders...</TableCell></TableRow>}
               {!loading && rows.length === 0 && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>No Orders found.</TableCell></TableRow>}
-              {!loading && rows.map((row, index) => (
+              {!loading && sortedRows.map((row, index) => (
                 <TableRow key={row.id} hover onDoubleClick={() => openOrder(row)} sx={{ cursor: 'default' }}>
                   <TableCell align="center" sx={{ width: 56, color: '#64748B', fontWeight: 650 }}>{page * pageSize + index + 1}</TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDate(row.orderDate)}</TableCell>

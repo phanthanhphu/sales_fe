@@ -11,7 +11,7 @@ export const materialShipToConfig = {
   allowTemplate: true,
   allowEditWorkbook: true,
   excelSheetName: 'MATERIAL SHIP TO',
-  importHint: 'Download the template first. One material identity may have only one dedicated Ship To per Buyer. Upload New creates new rows only. Download Edit Excel to change existing data, then upload the edited file using CREATE, UPDATE or DELETE by Key.',
+  importHint: 'Download the template first. Ship To, Active and Action must be selected from the Excel drop-down lists. Ship To options contain only active records for the current Buyer; add new values in Ship To Master first. One material identity may have only one dedicated Ship To per Buyer.',
 
   defaultValues: {
     sapCode: '',
