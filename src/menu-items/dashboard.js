@@ -1,7 +1,6 @@
 import {
   AssignmentOutlined,
   BusinessOutlined,
-  CategoryOutlined,
   CurrencyExchangeOutlined,
   GroupOutlined,
   Inventory2Outlined,
@@ -60,14 +59,6 @@ const buyerMenu = (buyer) => ({
       type: 'item',
       url: buyerPath(buyer.buyerKey, 'ship-tos'),
       icon: LocalShippingOutlined,
-      breadcrumbs: false
-    },
-    {
-      id: `${buyer.buyerKey}-product-colors`,
-      title: 'Product Color',
-      type: 'item',
-      url: buyerPath(buyer.buyerKey, 'product-colors'),
-      icon: CategoryOutlined,
       breadcrumbs: false
     },
     {

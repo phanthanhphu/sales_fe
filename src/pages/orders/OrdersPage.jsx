@@ -147,7 +147,7 @@ export default function OrdersPage() {
     setSaving(true);
     try {
       let savedOrder = null;
-      const scopedPayload = { ...payload, buyerKey };
+      const scopedPayload = isCreate ? { ...payload, orderNo: '', buyerKey } : { ...payload, buyerKey };
       if (isCreate) savedOrder = await createOrder(scopedPayload);
       else await updateOrder(formRecord.id, scopedPayload);
       setFormOpen(false);

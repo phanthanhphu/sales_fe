@@ -3,10 +3,13 @@ import Chip from '@mui/material/Chip';
 
 const STATUS_STYLES = {
   DRAFT: { color: '#92400e', bg: '#fffbeb', border: '#fcd34d', dot: '#f59e0b' },
+  NOT_STARTED: { color: '#475569', bg: '#f8fafc', border: '#cbd5e1', dot: '#94a3b8' },
+  IN_PROGRESS: { color: '#7e22ce', bg: '#faf5ff', border: '#e9d5ff', dot: '#a855f7' },
   BOM_IN_PROGRESS: { color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', dot: '#3b82f6' },
   BOM_SUBMITTED: { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0', dot: '#22c55e' },
   SUBMITTED: { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0', dot: '#22c55e' },
   MPR_DRAFT: { color: '#7e22ce', bg: '#faf5ff', border: '#e9d5ff', dot: '#a855f7' },
+  MPR_IN_PROGRESS: { color: '#7e22ce', bg: '#faf5ff', border: '#e9d5ff', dot: '#a855f7' },
   MPR_COMPLETED: { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0', dot: '#22c55e' },
   COMPLETED: { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0', dot: '#22c55e' },
   ACTIVE: { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0', dot: '#22c55e' },

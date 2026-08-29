@@ -30,7 +30,15 @@ export default function OrderFormDialog({ open, record, saving, onClose, onSave 
       </DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-          <TextField required label="Order No" value={form.orderNo} onChange={set('orderNo')} fullWidth />
+          <TextField
+            required={Boolean(record)}
+            label="Order No"
+            value={record ? form.orderNo : 'Auto-generated'}
+            onChange={record ? set('orderNo') : undefined}
+            disabled={!record}
+            helperText={record ? 'Existing Order No can be updated.' : 'Generated automatically when the order is created (for example ORD000001).'}
+            fullWidth
+          />
           <TextField required label="Season" placeholder="F26" value={form.season} onChange={set('season')} fullWidth />
           <TextField required label="Style" value={form.style} onChange={set('style')} fullWidth />
           <TextField required label="Customer" value={form.customer} onChange={set('customer')} fullWidth />

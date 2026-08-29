@@ -52,7 +52,7 @@ const displayNumber = (value) => {
   return (Number.isFinite(numeric) ? numeric : 0).toLocaleString('en-US', { maximumFractionDigits: 6 });
 };
 
-export default function MprLineEditDialog({ open, line, productColorMasters = [], saving, onClose, onSave }) {
+export default function MprLineEditDialog({ open, line, productColors = [], saving, onClose, onSave }) {
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
 
@@ -84,20 +84,17 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
 
   const childColorOptions = useMemo(() => {
     const normalize = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
-    const styleColor = normalize(form.styleColor);
-    const styleDescription = normalize(form.styleDescription);
-    const safeProductColorMasters = Array.isArray(productColorMasters) ? productColorMasters : [];
-    const master = safeProductColorMasters.find((item) => (
-      normalize(item?.productColor) === styleColor && normalize(item?.styleName) === styleDescription
-    )) || safeProductColorMasters.find((item) => normalize(item?.productColor) === styleColor);
+    const safeProductColors = Array.isArray(productColors) ? productColors : [];
+    const linked = safeProductColors.find((item) => String(item?.id || '') === String(line?.productColorId || ''))
+      || safeProductColors.find((item) => normalize(item?.colorName) === normalize(form.styleColor));
     const unique = new Map();
-    (master?.childColors || []).forEach((item) => {
+    (linked?.childColors || []).forEach((item) => {
       const id = String(item?.id || '').trim();
       const childColor = String(item?.childColor || '').trim();
       if (id && childColor) unique.set(id, { id, childColor });
     });
     return Array.from(unique.values());
-  }, [form.styleColor, form.styleDescription, productColorMasters]);
+  }, [form.styleColor, line?.productColorId, productColors]);
 
   const change = (name, value) => {
     setForm((current) => ({ ...current, [name]: value }));
@@ -207,12 +204,12 @@ export default function MprLineEditDialog({ open, line, productColorMasters = []
                 const selected = childColorOptions.find((item) => item.id === event.target.value);
                 change('matColor', selected?.childColor || '');
               }}
-              helperText="Child Colors are filtered by STYLE COLOR."
+              helperText="Child Colors come from the Product Color stored in this BOM."
             >
               <MenuItem value=""><em>Select Child Color</em></MenuItem>
               {childColorOptions.map((item) => <MenuItem key={item.id} value={item.id}>{item.childColor}</MenuItem>)}
             </TextField>
-          ) : field('matColor', 'MAT Color (Child Color)', { helperText: 'No Child Color is available for this STYLE COLOR yet.' })}
+          ) : field('matColor', 'MAT Color (Child Color)', { helperText: 'No Child Color is configured for this Product Color in the source BOM.' })}
           {field('matUnit', 'MAT Unit', { required: true })}
           <Box sx={{ gridColumn: { sm: 'span 2' } }}>
             {field('salesComment', 'Sales Comment', { multiline: true, minRows: 2 })}

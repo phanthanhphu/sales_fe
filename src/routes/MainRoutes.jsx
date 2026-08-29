@@ -22,7 +22,6 @@ const VendorCodePage = Loadable(lazy(() => import('pages/vendor-code/VendorCodeP
 const MatInfoPage = Loadable(lazy(() => import('pages/mat-info/MatInfoPage')));
 const LossPage = Loadable(lazy(() => import('pages/loss/LossPage')));
 const ShipToPage = Loadable(lazy(() => import('pages/ship-to/ShipToPage')));
-const ProductColorPage = Loadable(lazy(() => import('pages/product-color/ProductColorPage')));
 const MaterialShipToPage = Loadable(lazy(() => import('pages/material-ship-to/MaterialShipToPage')));
 const OrdersPage = Loadable(lazy(() => import('pages/orders/OrdersPage')));
 const OrderDetailPage = Loadable(lazy(() => import('pages/order-detail/OrderDetailPage')));
@@ -116,13 +115,11 @@ const MainRoutes = {
             { path: 'buyers/:buyerKey/vendor-codes', element: <BuyerRoute><VendorCodePage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/ship-tos', element: <BuyerRoute><ShipToPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/loss', element: <BuyerRoute><LossPage /></BuyerRoute> },
-            { path: 'buyers/:buyerKey/product-colors', element: <BuyerRoute><ProductColorPage /></BuyerRoute> },
             { path: 'buyers/:buyerKey/material-ship-to', element: <BuyerRoute><MaterialShipToPage /></BuyerRoute> },
 
             { path: 'orders', element: <LegacyBuyerRedirect child="orders" /> },
             { path: 'orders/:orderId', element: <LegacyBuyerRedirect child="orders" /> },
             { path: 'mat-info', element: <LegacyBuyerRedirect child="mat-info" /> },
-            { path: 'product-colors', element: <LegacyBuyerRedirect child="product-colors" /> },
 
             { path: 'suppliers', element: <LegacyBuyerRedirect child="vendor-codes" /> },
             { path: 'vendor-code', element: <LegacyBuyerRedirect child="vendor-codes" /> },
@@ -133,7 +130,6 @@ const MainRoutes = {
             { path: 'master-data/mat-infos', element: <LegacyBuyerRedirect child="mat-info" /> },
             { path: 'master-data/loss', element: <LegacyBuyerRedirect child="loss" /> },
             { path: 'master-data/ship-tos', element: <LegacyBuyerRedirect child="ship-tos" /> },
-            { path: 'master-data/product-colors', element: <LegacyBuyerRedirect child="product-colors" /> },
             { path: '*', element: <DefaultAuthorizedRoute /> }
           ]
         }

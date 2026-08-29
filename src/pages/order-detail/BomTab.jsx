@@ -35,6 +35,7 @@ import {
   getApiError,
   getBomExportUrl,
   listBoms,
+  resubmitBom,
   submitBom
 } from '../../services/orderBomMprService';
 import { formatDateTime } from '../orders/orderUi';
@@ -121,8 +122,12 @@ const bomSortValue = (bom, key) => {
 export default function BomTab({ order, buyerKey: buyerKeyProp }) {
   const buyerKey = normalizeBuyerKey(buyerKeyProp || order?.buyerKey);
   const navigate = useNavigate();
-  const canWrite = canManageBom();
-  const writeBlockedMessage = 'BOM permission is required to modify BOM data.';
+  // MPR completed for this order -> every BOM action is locked until it is reopened.
+  const mprLocked = order?.status === 'MPR_COMPLETED';
+  const canWrite = canManageBom() && !mprLocked;
+  const writeBlockedMessage = mprLocked
+    ? 'BOM is locked because the MPR for this order has been completed. Reopen the MPR to make changes.'
+    : 'BOM permission is required to modify BOM data.';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -206,12 +211,21 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
 
   const submit = async (bom) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    const returningToDraft = bom.status === 'SUBMITTED';
     try {
-      await submitBom(bom.id);
-      notify('BOM submitted. Sales can now select it for MPR.');
+      const updated = returningToDraft
+        ? await resubmitBom(bom.id)
+        : await submitBom(bom.id);
+      // Merge the server response immediately. For Resubmit this changes the row
+      // from SUBMITTED -> DRAFT, so the next hover becomes "Submit BOM" and the
+      // BOM disappears from Sales/MPR sources after that tab reloads.
+      setRows((current) => current.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)));
+      notify(returningToDraft
+        ? 'BOM returned to DRAFT. Update it and Submit again when ready.'
+        : 'BOM submitted. Sales can now select it for MPR.');
       await load();
     } catch (error) {
-      notify(getApiError(error, 'Unable to submit BOM.'), 'error');
+      notify(getApiError(error, returningToDraft ? 'Unable to resubmit BOM.' : 'Unable to submit BOM.'), 'error');
     }
   };
 
@@ -237,6 +251,11 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
 
   return (
     <Box>
+      {mprLocked && (
+        <Alert severity="warning" sx={{ mx: 0.85, mt: 0.85 }}>
+          This order's MPR has been completed, so all BOM actions are locked. Reopen the MPR to make changes.
+        </Alert>
+      )}
       <Box
         sx={{
           px: 0.85,
@@ -295,6 +314,7 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
                 { label: 'Colors', key: 'colors' },
                 { label: 'Packings', key: 'packings' },
                 { label: 'Status', key: 'status' },
+                { label: 'Submitted At', key: 'submittedAt' },
                 { label: 'Updated At', key: 'updatedAt' },
                 { label: 'Actions', sortable: false }
               ].map((column) => (
@@ -303,10 +323,10 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {loading && <TableRow><TableCell colSpan={8} sx={{ py: 2.5, textAlign: 'center', color: 'text.secondary' }}>Loading...</TableCell></TableRow>}
+            {loading && <TableRow><TableCell colSpan={9} sx={{ py: 2.5, textAlign: 'center', color: 'text.secondary' }}>Loading...</TableCell></TableRow>}
             {!loading && filteredRows.length === 0 && (
               <EmptyTableState
-                colSpan={8}
+                colSpan={9}
                 title={rows.length ? 'No BOM matches the current filter' : 'No BOM yet'}
                 description=""
                 actionLabel={!rows.length && canWrite ? 'Add BOM' : ''}
@@ -321,15 +341,21 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
                   <TableCell sx={{ fontWeight: 750, color: '#173b63' }}>{bom.bomNo}</TableCell>
                   <TableCell>{bom.bomName}</TableCell>
                   <TableCell>
-                    {productColors.slice(0, 3).map((color) => <Chip key={color} size="small" label={color} sx={{ mr: .4, mb: .25, height: 22, fontSize: '.68rem' }} />)}
+                    {productColors.slice(0, 3).map((color, index) => <Chip key={`${color}-${index}`} size="small" label={color} sx={{ mr: .4, mb: .25, height: 22, fontSize: '.68rem' }} />)}
                     {productColors.length > 3 ? `+${productColors.length - 3}` : ''}
                   </TableCell>
                   <TableCell>{(bom.packings || []).length}</TableCell>
                   <TableCell><StatusBadge status={bom.status} /></TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(bom.submittedAt)}</TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(bom.updatedAt)}</TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>
                     <Tooltip title="Open BOM"><IconButton size="small" color="primary" onClick={() => navigate(buyerPath(buyerKey, `orders/${order.id}/boms/${bom.id}`))}><OpenInNew fontSize="small" /></IconButton></Tooltip>
-                    <Tooltip title={!canWrite ? writeBlockedMessage : (bom.status === 'SUBMITTED' ? 'BOM already submitted' : 'Submit BOM')}><span><IconButton size="small" color="success" disabled={!canWrite || bom.status === 'SUBMITTED'} onClick={() => submit(bom)}><Publish fontSize="small" /></IconButton></span></Tooltip>
+                    <Tooltip title={
+                      !canWrite ? writeBlockedMessage
+                        : bom.status !== 'SUBMITTED' ? 'Submit BOM'
+                        : bom.usedInMpr ? 'This BOM is already used in an MPR generation batch and cannot be resubmitted'
+                        : 'Resubmit BOM — return to DRAFT'
+                    }><span><IconButton size="small" color="success" disabled={!canWrite || (bom.status === 'SUBMITTED' && bom.usedInMpr)} onClick={() => submit(bom)}><Publish fontSize="small" /></IconButton></span></Tooltip>
                     <Tooltip title="Export"><IconButton size="small" onClick={() => downloadWithAuth(getBomExportUrl(bom.id), `BOM_${downloadFilePart(buyerKey, 'BUYER')}_${downloadFilePart(bom.bomNo, 'BOM')}_${downloadDate()}.xlsx`)}><FileUpload fontSize="small" /></IconButton></Tooltip>
                     <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete'}><span><IconButton size="small" color="error" disabled={!canWrite} onClick={() => setDeleteTarget(bom)}><Delete fontSize="small" /></IconButton></span></Tooltip>
                   </TableCell>

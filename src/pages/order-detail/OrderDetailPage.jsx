@@ -89,7 +89,7 @@ export default function OrderDetailPage() {
               {[order.style, order.customer, order.season].filter(Boolean).join(' · ')}
             </Typography>
           </Stack>
-          <StatusBadge status={order.status || 'DRAFT'} label={order.status === 'MPR_DRAFT' ? 'MPR IN PROGRESS' : undefined} />
+          <StatusBadge status={order.status || 'DRAFT'} label={['MPR_DRAFT', 'MPR_IN_PROGRESS'].includes(order.status) ? 'MPR IN PROGRESS' : undefined} />
         </Stack>
 
         <Tabs

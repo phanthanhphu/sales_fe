@@ -35,7 +35,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { CheckCircle, Delete, Download, Edit, ErrorOutline, ExpandMore, FileUpload, Preview, Refresh, RestartAlt, Save, Search as SearchIcon } from '@mui/icons-material';
+import { CheckCircle, Delete, Download, Edit, ErrorOutline, ExpandMore, FileUpload, LockOpen, Preview, Refresh, RestartAlt, Save, Search as SearchIcon } from '@mui/icons-material';
 import {
   confirmMpr,
   deleteMpr,
@@ -48,7 +48,11 @@ import {
   getMprExportUrl,
   listBoms,
   previewMpr,
+  reopenMpr,
+  refreshAllMprBomSources,
+  refreshMprBomSource,
   validateMpr,
+  validateMprMasterData,
   updateMprBatch,
   updateMprLine,
   uploadMprExcel
@@ -62,8 +66,8 @@ import ExcelUploadProgressDialog from '../../components/ExcelUploadProgressDialo
 import SortableTableCell from '../../components/SortableTableCell';
 import useTableSort from '../../utils/useTableSort';
 import { initialUploadProgress, startProcessingTicker, uploadProgressFromEvent, uploadStage } from '../../utils/uploadProgress';
-import { listActiveShipTos, listMasterData } from '../../services/masterDataService';
-import { canManageSales } from 'utils/accessControl';
+import { listActiveShipTos } from '../../services/masterDataService';
+import { canManageSales, canReopenCompletedMpr } from 'utils/accessControl';
 import { normalizeBuyerKey } from 'utils/buyerContext';
 
 const emptyBomSelection = () => ({
@@ -88,7 +92,8 @@ const productColorsForBom = (bom) => {
     id: color,
     colorName: color,
     patternNumber: safeBom.header?.patternNumber || '',
-    season: safeBom.header?.season || ''
+    season: safeBom.header?.season || '',
+    styleNumber: safeBom.header?.styleNumber || ''
   }));
 };
 
@@ -97,7 +102,8 @@ const productColorLabel = (item = {}) => {
   return [
     safeItem.colorName,
     safeItem.patternNumber,
-    safeItem.season
+    safeItem.season,
+    safeItem.styleNumber
   ].filter(Boolean).join(' · ');
 };
 
@@ -124,21 +130,84 @@ const downloadFilePart = (value, fallback) => {
 };
 
 
-const productColorKey = (item = {}) => item.id || item.colorName || '';
+const productColorBusinessKey = (item = {}) => [
+  item?.colorName,
+  item?.patternNumber,
+  item?.season,
+  item?.styleNumber
+].map(normalizedColorKey).join('|');
 
-const savedColorForOption = (savedColors = [], option = {}) => (
-  (savedColors || []).find((color) => (
-    normalizedColorKey(color) === normalizedColorKey(productColorKey(option))
-      || normalizedColorKey(color) === normalizedColorKey(option.colorName)
-  )) || ''
+const productColorKey = (item = {}) => item.id || productColorBusinessKey(item) || item.colorName || '';
+
+const sameVisibleColorCount = (options = [], option = {}) => (
+  (options || []).filter((item) => (
+    normalizedColorKey(item?.colorName) === normalizedColorKey(option?.colorName)
+  )).length
 );
 
-const mappedColorValue = (values = {}, option = {}, fallback = undefined) => {
-  const keys = [productColorKey(option), option.colorName].filter(Boolean);
-  const entry = Object.entries(values || {}).find(([key]) => (
-    keys.some((candidate) => normalizedColorKey(candidate) === normalizedColorKey(key))
+const batchLineProductColorIds = (mprDoc, batch) => {
+  const batchId = batch?.batchId;
+  if (!batchId) return new Set();
+
+  const ids = new Set();
+  (mprDoc?.lines || []).forEach((line) => {
+    const directBatchMatch = String(line?.generationBatchId || '') === String(batchId);
+    const traceBatchMatch = (line?.sourceTraces || []).some((trace) => (
+      String(trace?.generationBatchId || '') === String(batchId)
+    ));
+    if ((directBatchMatch || traceBatchMatch) && line?.productColorId) {
+      ids.add(String(line.productColorId));
+    }
+  });
+  return ids;
+};
+
+const savedColorForOption = (savedColors = [], option = {}, options = [], mprDoc = null, batch = null) => {
+  const optionId = String(productColorKey(option) || '');
+  const exact = (savedColors || []).find((color) => (
+    normalizedColorKey(color) === normalizedColorKey(optionId)
   ));
-  return entry ? entry[1] : fallback;
+  if (exact) return exact;
+
+  const generatedIds = batchLineProductColorIds(mprDoc, batch);
+  if (generatedIds.size && option?.id) {
+    return generatedIds.has(String(option.id)) ? option.id : '';
+  }
+
+  if (sameVisibleColorCount(options, option) !== 1) return '';
+  return (savedColors || []).find((color) => (
+    normalizedColorKey(color) === normalizedColorKey(option.colorName)
+  )) || '';
+};
+
+const mappedColorValue = (values = {}, option = {}, options = [], fallback = undefined) => {
+  const exactKey = productColorKey(option);
+  const exactEntry = Object.entries(values || {}).find(([key]) => (
+    normalizedColorKey(key) === normalizedColorKey(exactKey)
+  ));
+  if (exactEntry) return exactEntry[1];
+
+  if (sameVisibleColorCount(options, option) !== 1) return fallback;
+  const legacyEntry = Object.entries(values || {}).find(([key]) => (
+    normalizedColorKey(key) === normalizedColorKey(option.colorName)
+  ));
+  return legacyEntry ? legacyEntry[1] : fallback;
+};
+
+const productColorOptionForRef = (options = [], reference = '') => {
+  const ref = normalizedColorKey(reference);
+  if (!ref) return null;
+
+  const exact = (options || []).find((option) => (
+    normalizedColorKey(productColorKey(option)) === ref
+      || normalizedColorKey(productColorBusinessKey(option)) === ref
+  ));
+  if (exact) return exact;
+
+  const byName = (options || []).filter((option) => (
+    normalizedColorKey(option?.colorName) === ref
+  ));
+  return byName.length === 1 ? byName[0] : null;
 };
 
 const numberValue = (value) => {
@@ -154,6 +223,23 @@ const sumShipToQty = (shipToQty = {}, shipToIds = []) => (shipToIds || []).reduc
 
 const shipToDisplayLabel = (shipTo = {}) => [shipTo.shipToCode, shipTo.shipToName].filter(Boolean).join(' · ');
 
+const issueAllowedShipToIds = (issue = {}) => {
+  if (Array.isArray(issue.allowedShipToIds) && issue.allowedShipToIds.length) return issue.allowedShipToIds;
+  return issue.requiredShipToId ? [issue.requiredShipToId] : [];
+};
+
+const isValidationIssueResolved = (issue, selectedIds = []) =>
+  issueAllowedShipToIds(issue).some((id) => selectedIds.includes(id));
+
+const issueShipToLabel = (issue = {}) => {
+  const values = Array.isArray(issue.allowedShipToCodes) && issue.allowedShipToCodes.length
+    ? issue.allowedShipToCodes
+    : (Array.isArray(issue.allowedShipToNames) && issue.allowedShipToNames.length
+      ? issue.allowedShipToNames
+      : issueAllowedShipToIds(issue));
+  return values.filter(Boolean).join(' / ') || 'Dedicated Ship To';
+};
+
 const legacyAwareShipToQty = (savedQty = {}, shipToIds = [], legacyTotal = '') => {
   const selectedIds = (shipToIds || []).filter(Boolean);
   const current = savedQty && typeof savedQty === 'object' ? savedQty : {};
@@ -166,24 +252,24 @@ const legacyAwareShipToQty = (savedQty = {}, shipToIds = [], legacyTotal = '') =
   return Object.fromEntries(selectedIds.map((id) => [id, '']));
 };
 
-const sourceSelectionFromBatch = (bom, batch, selected = false) => {
+const sourceSelectionFromBatch = (bom, batch, selected = false, mprDoc = null) => {
   if (!bom || !batch) return { ...emptyBomSelection(), selected };
 
   const options = productColorsForBom(bom);
-  const selectedOptions = options.filter((option) => savedColorForOption(batch.colors, option));
+  const selectedOptions = options.filter((option) => savedColorForOption(batch.colors, option, options, mprDoc, batch));
   const colorKeys = selectedOptions.map(productColorKey).filter(Boolean);
 
   const shipToIdsByColor = Object.fromEntries(selectedOptions.map((option) => [
     productColorKey(option),
-    mappedColorValue(batch.shipToIdsByColor, option, []) || []
+    mappedColorValue(batch.shipToIdsByColor, option, options, []) || []
   ]));
   const shipToQtyByColor = Object.fromEntries(selectedOptions.map((option) => {
     const colorKey = productColorKey(option);
     const ids = shipToIdsByColor[colorKey] || [];
     return [colorKey, legacyAwareShipToQty(
-      mappedColorValue(batch.shipToQtyByColor, option, {}),
+      mappedColorValue(batch.shipToQtyByColor, option, options, {}),
       ids,
-      mappedColorValue(batch.poQtyByColor, option, '')
+      mappedColorValue(batch.poQtyByColor, option, options, '')
     )];
   }));
 
@@ -210,9 +296,18 @@ const batchesForBom = (mprDoc, bomId) => (mprDoc?.selections || [])
   });
 
 const generatedSourceInfoForColor = (mprDoc, bomId, productColor = {}) => {
-  const matchingBatches = batchesForBom(mprDoc, bomId).filter((batch) => (
-    Boolean(savedColorForOption(batch?.colors || [], productColor))
-  ));
+  const matchingBatches = batchesForBom(mprDoc, bomId).filter((batch) => {
+    const exact = (batch?.colors || []).some((color) => (
+      normalizedColorKey(color) === normalizedColorKey(productColorKey(productColor))
+    ));
+    if (exact) return true;
+
+    const generatedIds = batchLineProductColorIds(mprDoc, batch);
+    if (generatedIds.size && productColor?.id) {
+      return generatedIds.has(String(productColor.id));
+    }
+    return false;
+  });
 
   return {
     coreGenerated: matchingBatches.length > 0,
@@ -342,8 +437,16 @@ const renderMprCellValue = (field, value, row = {}) => {
   if (field === 'vendorCode') return vendorCodeValue(value);
   if (MPR_TEXT_FIELDS.has(field)) return textValue(value);
   const safeValue = MPR_NUMERIC_FIELDS.has(field) && (value === null || value === undefined || value === '') ? 0 : value;
-  if (field === 'matPriceWithoutTax' && String(row?.currency || '').trim().toUpperCase() === 'VND') {
-    return formatValue(safeValue, 0).replace(/,/g, '.');
+  if (field === 'matPriceWithoutTax') {
+    const currency = String(row?.currency || '').trim().toUpperCase();
+    if (currency === 'VND' || currency === 'USD' || currency === 'US') {
+      const numeric = Number(safeValue);
+      if (!Number.isFinite(numeric)) return String(safeValue ?? '');
+      return numeric.toLocaleString('en-US', {
+        minimumFractionDigits: 3,
+        maximumFractionDigits: 3
+      });
+    }
   }
   return formatValue(safeValue);
 };
@@ -563,6 +666,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   const [boms, setBoms] = useState([]);
   const [selection, setSelection] = useState({});
   const [mpr, setMpr] = useState(null);
+  const normalizedMprStatus = String(mpr?.status || '').trim().toUpperCase();
+  const mprStatus = !mpr?.id ? 'NOT_STARTED' : normalizedMprStatus === 'DRAFT' ? 'IN_PROGRESS' : normalizedMprStatus;
+  const mprCompleted = mprStatus === 'COMPLETED';
+  const canMutateMpr = canWrite && !mprCompleted;
+  const canReopenMpr = Boolean(mprCompleted && canReopenCompletedMpr());
+  const completedLockMessage = 'This MPR is completed and locked. Reopen it before changing MPR data.';
+  const mutationBlockedMessage = !canWrite ? writeBlockedMessage : completedLockMessage;
   const mprDownloadName = (mprDoc = mpr) => `MPR_FILE_${downloadFilePart(buyerKey, 'BUYER')}_${downloadFilePart(mprDoc?.mprNo, 'MPR')}_${downloadDate()}.xlsx`;
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -570,16 +680,20 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopening, setReopening] = useState(false);
   const [batchDeleteTarget, setBatchDeleteTarget] = useState(null);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [editingLine, setEditingLine] = useState(null);
   const [lineDeleteTarget, setLineDeleteTarget] = useState(null);
   const [lineSaving, setLineSaving] = useState(false);
   const [shipTos, setShipTos] = useState([]);
-  const [productColorMasters, setProductColorMasters] = useState([]);
   const [batchEditTarget, setBatchEditTarget] = useState(null);
   const [batchEditForm, setBatchEditForm] = useState({ colors: [], packingIds: [], poQtyByColor: {}, shipToIdsByColor: {}, shipToQtyByColor: {} });
   const [batchSaving, setBatchSaving] = useState(false);
+  const [sourceRefreshingBomId, setSourceRefreshingBomId] = useState('');
+  const [sourceRefreshingAll, setSourceRefreshingAll] = useState(false);
   const [mprFilters, setMprFilters] = useState(emptyMprFilters);
   const [mprUploading, setMprUploading] = useState(false);
   const [mprUploadProgress, setMprUploadProgress] = useState(initialUploadProgress());
@@ -593,6 +707,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   const [preflightBusy, setPreflightBusy] = useState(false);
   const [validationReview, setValidationReview] = useState({ open: false, issues: [] });
   const [focusedValidationIssue, setFocusedValidationIssue] = useState(null);
+  const [masterDataWarning, setMasterDataWarning] = useState({ open: false, issues: [], actionLabel: '' });
   const [batchSearch, setBatchSearch] = useState('');
   const [batchPage, setBatchPage] = useState(0);
   const [batchRowsPerPage, setBatchRowsPerPage] = useState(10);
@@ -601,6 +716,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   const mprUploadTickerRef = useRef(null);
   const progressTimerRef = useRef(null);
   const exportProgressTimerRef = useRef(null);
+  const masterDataWarningResolverRef = useRef(null);
   const [generateProgress, setGenerateProgress] = useState({
     open: false,
     status: 'idle',
@@ -637,17 +753,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     if (!order?.id) return;
     setLoading(true);
     try {
-      const [allBoms, activeShipTos, productColorResponse] = await Promise.all([
+      const [allBoms, activeShipTos] = await Promise.all([
         listBoms(order.id),
-        listActiveShipTos(buyerKey),
-        listMasterData('productColor', { buyerKey, page: 0, size: 200 })
+        listActiveShipTos(buyerKey)
       ]);
       const submitted = (allBoms || []).filter((bom) => bom.status === 'SUBMITTED');
       setBoms(submitted);
       setShipTos(activeShipTos || []);
-      setProductColorMasters(Array.isArray(productColorResponse)
-        ? productColorResponse
-        : (productColorResponse?.content || productColorResponse?.items || []));
       setSelection((previous) => {
         const next = initialSelection(submitted);
         submitted.forEach((bom) => {
@@ -681,7 +793,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   }, []);
 
   const toggleBom = (bomId, checked) => {
-    if (!canWrite) return;
+    if (!canMutateMpr) return;
     setSelection((current) => ({
       ...current,
       [bomId]: {
@@ -694,7 +806,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const toggleColor = (bomId, colorId) => {
-    if (!canWrite) return;
+    if (!canMutateMpr) return;
     setSelection((current) => {
       const item = current[bomId] || emptyBomSelection();
       const selectedColors = new Set(item.colors || []);
@@ -728,7 +840,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const changeShipToQty = (bomId, colorId, shipToId, value) => {
-    if (!canWrite) return;
+    if (!canMutateMpr) return;
     setSelection((current) => {
       const item = current[bomId] || emptyBomSelection();
       const selectedIds = item.shipToIdsByColor?.[colorId] || [];
@@ -745,7 +857,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const changeShipTos = (bomId, colorId, selected) => {
-    if (!canWrite) return;
+    if (!canMutateMpr) return;
     setSelection((current) => {
       const item = current[bomId] || emptyBomSelection();
       const selectedIds = (selected || []).map((shipTo) => shipTo.id).filter(Boolean);
@@ -764,7 +876,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const togglePacking = (bomId, packingId) => {
-    if (!canWrite) return;
+    if (!canMutateMpr) return;
     setSelection((current) => {
       const item = current[bomId] || emptyBomSelection();
       const packingIds = new Set(item.packingIds || []);
@@ -1095,14 +1207,32 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     return true;
   };
 
+  const isBlockingValidationIssue = (issue) => issue?.blocking !== false;
+  const isMasterDataWarningIssue = (issue) => issue?.blocking === false
+    && ['MAT_INFO_MISMATCH', 'MAT_INFO_NOT_FOUND'].includes(String(issue?.code || '').toUpperCase());
+
+  const requestMasterDataWarningConfirmation = (issues, actionLabel) => new Promise((resolve) => {
+    masterDataWarningResolverRef.current = resolve;
+    setMasterDataWarning({
+      open: true,
+      issues: Array.isArray(issues) ? issues : [],
+      actionLabel: actionLabel || 'Continue'
+    });
+  });
+
+  const resolveMasterDataWarning = (proceed) => {
+    const resolver = masterDataWarningResolverRef.current;
+    masterDataWarningResolverRef.current = null;
+    setMasterDataWarning((current) => ({ ...current, open: false }));
+    if (resolver) resolver(Boolean(proceed));
+  };
+
   const unresolvedValidationIssues = useMemo(() => (validationReview.issues || []).filter((issue) => {
     const state = selection[issue?.bomId] || emptyBomSelection();
     const colorId = issue?.productColorId || '';
     const selectedIds = state.shipToIdsByColor?.[colorId] || [];
-    return !selectedIds.includes(issue?.requiredShipToId);
+    return !isValidationIssueResolved(issue, selectedIds);
   }), [selection, validationReview.issues]);
-
-  const issueShipToLabel = (issue = {}) => issue.requiredShipToCode || issue.requiredShipToName || issue.requiredShipToId || 'required Ship To';
 
   const reviewValidationIssue = (issue) => {
     if (!issue?.bomId) return;
@@ -1133,17 +1263,24 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     }, 20);
   };
 
-  const runMprPreflight = async () => {
+  const runMprPreflight = async (actionLabel = 'Create MPR') => {
     setPreflightBusy(true);
     try {
       const result = await validateMpr(order.id, payload);
       const issues = Array.isArray(result?.issues) ? result.issues : [];
-      setValidationReview({ open: issues.length > 0, issues });
-      if (issues.length > 0) {
-        setFocusedValidationIssue(issues[0]);
+      const blockingIssues = issues.filter(isBlockingValidationIssue);
+      const warningIssues = issues.filter(isMasterDataWarningIssue);
+
+      setValidationReview({ open: blockingIssues.length > 0, issues: blockingIssues });
+      if (blockingIssues.length > 0) {
+        setFocusedValidationIssue(blockingIssues[0]);
         return false;
       }
       setFocusedValidationIssue(null);
+
+      if (warningIssues.length > 0) {
+        return await requestMasterDataWarningConfirmation(warningIssues, actionLabel);
+      }
       return true;
     } catch (error) {
       notify(getApiError(error, 'Unable to validate MPR setup.'), 'error');
@@ -1161,12 +1298,12 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const previewMprAction = async () => {
-    if (!canWrite || !llBeanMprEnabled) {
-      notify(!canWrite ? writeBlockedMessage : buyerStrategyMessage, 'warning');
+    if (!canMutateMpr || !llBeanMprEnabled) {
+      notify(!canMutateMpr ? mutationBlockedMessage : buyerStrategyMessage, 'warning');
       return;
     }
     if (!validateSelection()) return;
-    if (!(await runMprPreflight())) return;
+    if (!(await runMprPreflight('Preview MPR'))) return;
     try {
       const result = await previewMpr(order.id, payload);
       const currentLines = mpr?.lines || [];
@@ -1186,13 +1323,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const generate = async () => {
-    if (!canWrite || !llBeanMprEnabled) {
-      notify(!canWrite ? writeBlockedMessage : buyerStrategyMessage, 'warning');
+    if (!canMutateMpr || !llBeanMprEnabled) {
+      notify(!canMutateMpr ? mutationBlockedMessage : buyerStrategyMessage, 'warning');
       return;
     }
     if (generateProgress.status === 'processing' || preflightBusy) return;
     if (!validateSelection()) return;
-    if (!(await runMprPreflight())) return;
+    if (!(await runMprPreflight('Create MPR'))) return;
 
     startGenerateProgress();
 
@@ -1214,7 +1351,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
 
       setMpr(result);
       setPreview(null);
-      onOrderStatusChange?.('MPR_DRAFT');
+      onOrderStatusChange?.('MPR_IN_PROGRESS');
       // Clear the active source selection so the same BOMs are not accidentally
       // generated twice. Their last successful configuration remains persisted
       // in MPR Generation Batches and is restored when Configure is opened again.
@@ -1243,7 +1380,22 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       notify('Create MPR data before exporting Excel.', 'warning');
       return;
     }
-    if (generateProgress.status === 'processing' || exportProgress.status === 'processing') return;
+    if (generateProgress.status === 'processing' || exportProgress.status === 'processing' || preflightBusy) return;
+
+    setPreflightBusy(true);
+    try {
+      const validation = await validateMprMasterData(order.id);
+      const warningIssues = (Array.isArray(validation?.issues) ? validation.issues : []).filter(isMasterDataWarningIssue);
+      if (warningIssues.length > 0) {
+        const proceed = await requestMasterDataWarningConfirmation(warningIssues, 'Export MPR');
+        if (!proceed) return;
+      }
+    } catch (error) {
+      notify(getApiError(error, 'Unable to validate MAT Info before export.'), 'error');
+      return;
+    } finally {
+      setPreflightBusy(false);
+    }
 
     const fileName = mprDownloadName(mpr);
     startExportProgress();
@@ -1267,7 +1419,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     const file = event?.target?.files?.[0];
     if (event?.target) event.target.value = '';
     if (!file) return;
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     if (!mpr?.id || !order?.id) {
       notify('Create MPR and download the current MPR file before uploading changes.', 'warning');
       return;
@@ -1309,7 +1461,11 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const confirmCurrentMpr = async () => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
+    if ((mpr?.selections || []).some((item) => item?.bomSourceChanged)) {
+      notify('A source BOM has changed. Update the changed BOM source before confirming this MPR.', 'warning');
+      return;
+    }
     if (!mpr?.id || !order?.id || confirming) return;
 
     setConfirming(true);
@@ -1327,8 +1483,36 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     }
   };
 
+  const reopenCurrentMpr = async () => {
+    if (!canReopenMpr) {
+      notify('You do not have permission to reopen a completed MPR.', 'warning');
+      return;
+    }
+    const reason = reopenReason.trim();
+    if (!reason) {
+      notify('Enter a reason for reopening this MPR.', 'warning');
+      return;
+    }
+    if (!order?.id || reopening) return;
+
+    setReopening(true);
+    try {
+      const result = await reopenMpr(order.id, reason);
+      setMpr(result);
+      setPreview(null);
+      setReopenOpen(false);
+      setReopenReason('');
+      onOrderStatusChange?.('MPR_IN_PROGRESS');
+      notify('MPR reopened and changed back to IN PROGRESS.');
+    } catch (error) {
+      notify(getApiError(error, 'Unable to reopen MPR.'), 'error');
+    } finally {
+      setReopening(false);
+    }
+  };
+
   const remove = async () => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     try {
       await deleteMpr(order.id);
       setMpr(null);
@@ -1336,6 +1520,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       setDeleteOpen(false);
       setWorkspaceTab('sources');
       setExpandedBatchId(null);
+      onOrderStatusChange?.('BOM_SUBMITTED');
       notify('MPR deleted.');
     } catch (error) {
       notify(getApiError(error, 'Unable to delete MPR.'), 'error');
@@ -1343,7 +1528,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const removeMprBatch = async () => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     if (!mpr?.id || !batchDeleteTarget?.batchId) return;
 
     setBatchDeleting(true);
@@ -1359,6 +1544,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       if (result?.mprDeleted || !result?.mpr) {
         setMpr(null);
         setWorkspaceTab('sources');
+        onOrderStatusChange?.('BOM_SUBMITTED');
         notify(`Batch deleted. ${removed} source row(s) removed. The MPR is now empty.`);
       } else {
         setMpr(result.mpr);
@@ -1372,7 +1558,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const openBatchEdit = (batch) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     const bom = boms.find((item) => item.id === batch.bomId);
     if (!bom) {
       notify('The source BOM is no longer available for editing.', 'error');
@@ -1380,20 +1566,20 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     }
 
     const options = productColorsForBom(bom);
-    const selectedOptions = options.filter((option) => savedColorForOption(batch.colors, option));
+    const selectedOptions = options.filter((option) => savedColorForOption(batch.colors, option, options, mpr, batch));
     const colorKeys = selectedOptions.map(productColorKey).filter(Boolean);
 
     const shipToIdsByColor = Object.fromEntries(selectedOptions.map((option) => [
       productColorKey(option),
-      mappedColorValue(batch.shipToIdsByColor, option, []) || []
+      mappedColorValue(batch.shipToIdsByColor, option, options, []) || []
     ]));
     const shipToQtyByColor = Object.fromEntries(selectedOptions.map((option) => {
       const colorKey = productColorKey(option);
       const ids = shipToIdsByColor[colorKey] || [];
       return [colorKey, legacyAwareShipToQty(
-        mappedColorValue(batch.shipToQtyByColor, option, {}),
+        mappedColorValue(batch.shipToQtyByColor, option, options, {}),
         ids,
-        mappedColorValue(batch.poQtyByColor, option, '')
+        mappedColorValue(batch.poQtyByColor, option, options, '')
       )];
     }));
 
@@ -1411,7 +1597,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const toggleBatchColor = (colorId) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     setBatchEditForm((current) => {
       const colors = new Set(current.colors || []);
       const poQtyByColor = { ...(current.poQtyByColor || {}) };
@@ -1433,7 +1619,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const toggleBatchPacking = (packingId) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     setBatchEditForm((current) => {
       const packingIds = new Set(current.packingIds || []);
       if (packingIds.has(packingId)) packingIds.delete(packingId);
@@ -1443,7 +1629,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const changeBatchShipToQty = (color, shipToId, value) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     setBatchEditForm((current) => {
       const ids = current.shipToIdsByColor?.[color] || [];
       const nextColorQty = { ...(current.shipToQtyByColor?.[color] || {}), [shipToId]: value };
@@ -1456,7 +1642,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const changeBatchShipTos = (color, selected) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     setBatchEditForm((current) => {
       const selectedIds = (selected || []).map((item) => item.id).filter(Boolean);
       const previousQty = current.shipToQtyByColor?.[color] || {};
@@ -1471,7 +1657,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const saveBatchEdit = async () => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     if (!batchEditTarget?.batchId) return;
     const colors = batchEditForm.colors || [];
     if (!colors.length) {
@@ -1520,8 +1706,42 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     }
   };
 
+  const refreshChangedBomSource = async (bomId) => {
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
+    if (!order?.id || !bomId || sourceRefreshingBomId || sourceRefreshingAll) return;
+
+    setSourceRefreshingBomId(bomId);
+    try {
+      const result = await refreshMprBomSource(order.id, bomId);
+      setMpr(result);
+      setPreview(null);
+      notify('MPR was updated from the latest BOM while keeping MPR-owned Sales and stock inputs.');
+    } catch (error) {
+      notify(getApiError(error, 'Unable to update MPR from this BOM.'), 'error');
+    } finally {
+      setSourceRefreshingBomId('');
+    }
+  };
+
+  const refreshAllChangedBomSources = async () => {
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
+    if (!order?.id || sourceRefreshingAll || sourceRefreshingBomId) return;
+
+    setSourceRefreshingAll(true);
+    try {
+      const result = await refreshAllMprBomSources(order.id);
+      setMpr(result);
+      setPreview(null);
+      notify('All changed BOM sources were updated in the MPR.');
+    } catch (error) {
+      notify(getApiError(error, 'Unable to update all changed BOM sources.'), 'error');
+    } finally {
+      setSourceRefreshingAll(false);
+    }
+  };
+
   const saveMprLine = async (payload) => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     if (!mpr?.id || !editingLine?.id) return;
     setLineSaving(true);
     try {
@@ -1544,7 +1764,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   };
 
   const removeMprLine = async () => {
-    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     if (!mpr?.id || !lineDeleteTarget?.id) return;
     setLineSaving(true);
     try {
@@ -1552,7 +1772,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       setMpr(result);
       setPreview(result);
       setLineDeleteTarget(null);
-      notify('MPR item deleted.');
+      if (!result) {
+        setWorkspaceTab('sources');
+        onOrderStatusChange?.('BOM_SUBMITTED');
+        notify('The last MPR item was deleted. MPR status is now NOT STARTED.');
+      } else {
+        notify('MPR item deleted.');
+      }
     } catch (error) {
       notify(getApiError(error, 'Unable to delete MPR item.'), 'error');
     } finally {
@@ -1600,13 +1826,19 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     () => sumMprColumn(visibleLines, 'matAmountUsd'),
     [visibleLines]
   );
-  const canEditLines = Boolean(canWrite && mpr?.id && (!preview || preview?.id === mpr.id));
-  const canManageBatches = Boolean(canWrite && mpr?.id && (!preview || preview?.id === mpr.id));
+  const canEditLines = Boolean(canMutateMpr && mpr?.id && (!preview || preview?.id === mpr.id));
+  const canManageBatches = Boolean(canMutateMpr && mpr?.id && (!preview || preview?.id === mpr.id));
 
   const batchSummaries = useMemo(() => (
     (mpr?.selections || [])
       .filter((selectionItem) => selectionItem?.batchId)
       .map((selectionItem) => {
+        const sourceBom = (boms || []).find((bom) => String(bom?.id || '') === String(selectionItem?.bomId || ''));
+        const sourceProductColors = productColorsForBom(sourceBom);
+        const colorLabels = (selectionItem.colors || []).map((reference) => {
+          const option = productColorOptionForRef(sourceProductColors, reference);
+          return option ? productColorLabel(option) : reference;
+        });
         const representedLines = (mpr?.lines || []).filter((line) => mprLineHasBatch(line, selectionItem.batchId));
         const batchTraces = representedLines.flatMap((line) => (
           mprLineSourceTraces(line).filter((trace) => trace?.generationBatchId === selectionItem.batchId)
@@ -1625,6 +1857,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
           bomNo: selectionItem.bomNo || '',
           bomName: selectionItem.bomName || '',
           colors: selectionItem.colors || [],
+          colorLabels,
           packingIds: selectionItem.packingIds || [],
           packingNames,
           createdAt: selectionItem.createdAt,
@@ -1633,6 +1866,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
           shipToIdsByColor: selectionItem.shipToIdsByColor || {},
           shipToQtyByColor: selectionItem.shipToQtyByColor || {},
           shipToByColor: selectionItem.shipToByColor || {},
+          bomSourceRevision: selectionItem.bomSourceRevision ?? 0,
+          currentBomSourceRevision: selectionItem.currentBomSourceRevision ?? selectionItem.bomSourceRevision ?? 0,
+          currentBomSourceChangedAt: selectionItem.currentBomSourceChangedAt || null,
+          currentBomSourceChangedBy: selectionItem.currentBomSourceChangedBy || '',
+          currentBomSourceChangeSummary: selectionItem.currentBomSourceChangeSummary || '',
+          bomSourceChanged: Boolean(selectionItem.bomSourceChanged),
+          bomSourceMissing: Boolean(selectionItem.bomSourceMissing),
           sourceLineCount: batchTraces.length,
           lineCount: representedLines.length
         };
@@ -1644,7 +1884,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
         if (leftTime !== rightTime) return rightTime - leftTime;
         return String(right?.batchId || '').localeCompare(String(left?.batchId || ''));
       })
-  ), [mpr]);
+  ), [mpr, boms]);
 
   const bomBatchCountById = useMemo(() => {
     const counts = new Map();
@@ -1701,6 +1941,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       batch.bomNo,
       batch.bomName,
       ...(batch.colors || []),
+      ...(batch.colorLabels || []),
       ...(batch.packingNames || []),
       batch.createdBy
     ].filter(Boolean).join(' ');
@@ -1731,7 +1972,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   }, [filteredBatches.length, batchPage, batchRowsPerPage]);
 
   const openBomConfiguration = (bom) => {
-    if (!canWrite || !bom?.id) return;
+    if (!canMutateMpr || !bom?.id) return;
 
     // Keep already-generated selections visible as saved history, but do not
     // silently load them into the next Create MPR request. This prevents an
@@ -1755,10 +1996,38 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     [batchEditBom]
   );
 
+  const staleBomGroups = useMemo(() => {
+    const groups = new Map();
+    (mpr?.selections || []).forEach((item) => {
+      if (!item?.bomSourceChanged || !item?.bomId) return;
+      const existing = groups.get(item.bomId) || {
+        bomId: item.bomId,
+        bomNo: item.bomNo || '',
+        bomName: item.bomName || '',
+        batchCount: 0,
+        currentBomSourceRevision: item.currentBomSourceRevision ?? item.bomSourceRevision ?? 0,
+        changedAt: item.currentBomSourceChangedAt || null,
+        changedBy: item.currentBomSourceChangedBy || '',
+        summary: item.currentBomSourceChangeSummary || 'BOM source data changed',
+        missing: Boolean(item.bomSourceMissing)
+      };
+      existing.batchCount += 1;
+      existing.currentBomSourceRevision = item.currentBomSourceRevision ?? existing.currentBomSourceRevision;
+      existing.changedAt = item.currentBomSourceChangedAt || existing.changedAt;
+      existing.changedBy = item.currentBomSourceChangedBy || existing.changedBy;
+      existing.summary = item.currentBomSourceChangeSummary || existing.summary;
+      existing.missing = existing.missing || Boolean(item.bomSourceMissing);
+      groups.set(item.bomId, existing);
+    });
+    return Array.from(groups.values());
+  }, [mpr]);
+  const refreshableStaleBomGroups = useMemo(() => staleBomGroups.filter((item) => !item.missing), [staleBomGroups]);
+  const hasStaleBomSources = staleBomGroups.length > 0;
+  const sourceRefreshBusy = Boolean(sourceRefreshingBomId || sourceRefreshingAll);
+
   const generationBusy = generateProgress.status === 'processing';
   const exportBusy = exportProgress.status === 'processing';
-  const operationBusy = generationBusy || preflightBusy || exportBusy || mprUploading || confirming;
-  const mprCompleted = String(mpr?.status || '').toUpperCase() === 'COMPLETED';
+  const operationBusy = generationBusy || preflightBusy || exportBusy || mprUploading || confirming || reopening || sourceRefreshBusy;
   const visibleMprColumns = useMemo(() => MPR_COLUMNS.filter(([field]) => mprVisibleFields.includes(field)), [mprVisibleFields]);
   const mprTableMinWidth = useMemo(() => Math.max(1500, visibleMprColumns.reduce((total, [, , minWidth]) => total + Number(minWidth || 100), 0) + 190), [visibleMprColumns]);
 
@@ -1769,6 +2038,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
           <Box sx={{ minWidth: 220 }}>
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
               <Typography sx={{ fontWeight: 750, color: '#103B5C', fontSize: '1rem' }}>Sales / MPR</Typography>
+              <StatusBadge status={mprStatus} />
               {mpr && (
                 <Chip
                   size="small"
@@ -1803,14 +2073,14 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                 >
                   {exportBusy ? 'Exporting...' : 'Export MPR'}
                 </Button>
-                <Tooltip title={!canWrite ? writeBlockedMessage : 'Upload edited SAMPLE QTY, MCD STOCK, CMCD STOCK and NON SAP STOCK QTY values'}>
+                <Tooltip title={!canMutateMpr ? mutationBlockedMessage : 'Upload edited SAMPLE QTY, MCD STOCK, CMCD STOCK and NON SAP STOCK QTY values'}>
                   <span>
                     <Button
                       size="small"
                       variant="outlined"
                       startIcon={<FileUpload />}
                       onClick={() => mprUploadRef.current?.click()}
-                      disabled={loading || operationBusy || !canWrite}
+                      disabled={loading || operationBusy || !canMutateMpr}
                       sx={{ ...mprNeutralActionButtonSx, minWidth: 118 }}
                     >
                       {mprUploading ? 'Uploading...' : 'Upload MPR'}
@@ -1829,28 +2099,28 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
 
             <Box sx={{ display: { xs: 'none', md: 'block' }, height: 28, borderLeft: '1px solid #e2e8f0', mx: 0.25 }} />
 
-            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : (selectedSourceStatus.duplicateOnly ? 'This setup is already in MPR. Choose a new Product Color or Packing, or edit the existing batch.' : (selectedBomCount ? 'Preview selected BOM configuration' : 'Select at least one BOM first')))}>
+            <Tooltip title={!canMutateMpr ? mutationBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : (selectedSourceStatus.duplicateOnly ? 'This setup is already in MPR. Choose a new Product Color or Packing, or edit the existing batch.' : (selectedBomCount ? 'Preview selected BOM configuration' : 'Select at least one BOM first')))}>
               <span>
                 <Button
                   size="small"
                   variant="outlined"
                   startIcon={<Preview />}
                   onClick={previewMprAction}
-                  disabled={loading || operationBusy || !canWrite || !llBeanMprEnabled || selectedBomCount === 0 || selectedSourceStatus.duplicateOnly}
+                  disabled={loading || operationBusy || !canMutateMpr || !llBeanMprEnabled || selectedBomCount === 0 || selectedSourceStatus.duplicateOnly}
                   sx={mprPreviewActionButtonSx}
                 >
                   Preview{selectedBomCount > 0 ? ` (${selectedBomCount})` : ''}
                 </Button>
               </span>
             </Tooltip>
-            <Tooltip title={!canWrite ? writeBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : (selectedSourceStatus.duplicateOnly ? 'This setup is already in MPR. Choose a new Product Color or Packing, or edit the existing batch.' : (selectedBomCount ? (mpr ? 'Add selected BOMs to MPR' : 'Create MPR from selected BOMs') : 'Select at least one BOM first')))}>
+            <Tooltip title={!canMutateMpr ? mutationBlockedMessage : (!llBeanMprEnabled ? buyerStrategyMessage : (selectedSourceStatus.duplicateOnly ? 'This setup is already in MPR. Choose a new Product Color or Packing, or edit the existing batch.' : (selectedBomCount ? (mpr ? 'Add selected BOMs to MPR' : 'Create MPR from selected BOMs') : 'Select at least one BOM first')))}>
               <span>
                 <Button
                   size="small"
                   variant="contained"
                   startIcon={<Save />}
                   onClick={generate}
-                  disabled={loading || operationBusy || !canWrite || !llBeanMprEnabled || selectedBomCount === 0 || selectedSourceStatus.duplicateOnly}
+                  disabled={loading || operationBusy || !canMutateMpr || !llBeanMprEnabled || selectedBomCount === 0 || selectedSourceStatus.duplicateOnly}
                   sx={{ ...mprPrimaryActionButtonSx, minWidth: 126 }}
                 >
                   {preflightBusy ? 'Checking...' : generationBusy ? 'Creating...' : `${mpr ? 'Add To MPR' : 'Create MPR'}${selectedBomCount > 0 ? ` (${selectedBomCount})` : ''}`}
@@ -1859,7 +2129,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
             </Tooltip>
 
             {mpr && (
-              <Tooltip title={!canWrite ? writeBlockedMessage : (mprCompleted ? 'This MPR has already been confirmed.' : 'Confirm the current MPR as completed')}>
+              <Tooltip title={!canWrite ? writeBlockedMessage : (mprCompleted ? completedLockMessage : (hasStaleBomSources ? 'Update changed BOM sources before confirming this MPR.' : 'Confirm the current MPR as completed'))}>
                 <span>
                   <Button
                     size="small"
@@ -1867,7 +2137,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                     color="success"
                     startIcon={<CheckCircle />}
                     onClick={() => setConfirmOpen(true)}
-                    disabled={!canWrite || operationBusy || mprCompleted}
+                    disabled={!canMutateMpr || operationBusy || hasStaleBomSources}
                     sx={{ ...mprActionButtonSx, minWidth: 124, boxShadow: 'none' }}
                   >
                     {mprCompleted ? 'Confirmed' : 'Confirm MPR'}
@@ -1876,8 +2146,27 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
               </Tooltip>
             )}
 
+
+            {mprCompleted && (
+              <Tooltip title={canReopenMpr ? 'Reopen this MPR and change it back to In Progress' : 'Additional Reopen Completed MPR permission is required'}>
+                <span>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="warning"
+                    startIcon={<LockOpen />}
+                    onClick={() => setReopenOpen(true)}
+                    disabled={!canReopenMpr || operationBusy}
+                    sx={{ ...mprActionButtonSx, minWidth: 126, boxShadow: 'none' }}
+                  >
+                    Reopen MPR
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+
             {mpr && (
-              <Tooltip title={!canWrite ? writeBlockedMessage : 'Delete the entire MPR'}>
+              <Tooltip title={!canMutateMpr ? mutationBlockedMessage : 'Delete the entire MPR'}>
                 <span>
                   <Button
                     size="small"
@@ -1885,7 +2174,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                     color="error"
                     startIcon={<Delete />}
                     onClick={() => setDeleteOpen(true)}
-                    disabled={!canWrite || operationBusy}
+                    disabled={!canMutateMpr || operationBusy}
                     sx={{
                       ...mprActionButtonSx,
                       backgroundColor: '#ffffff',
@@ -1904,6 +2193,79 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       {!llBeanMprEnabled && (
         <Alert severity="info" sx={{ mb: 2 }}>
           {buyerStrategyMessage}
+        </Alert>
+      )}
+
+      {hasStaleBomSources && (
+        <Alert
+          severity={mprCompleted ? 'info' : 'warning'}
+          sx={{ mb: 0.8, alignItems: 'flex-start' }}
+        >
+          <Stack spacing={1} sx={{ width: '100%' }}>
+            <Box>
+              <Typography sx={{ fontWeight: 800, fontSize: '.85rem' }}>
+                {mprCompleted ? 'Source BOM changed after this MPR was completed' : 'Source BOM changed — MPR update required'}
+              </Typography>
+              <Typography sx={{ mt: 0.25, fontSize: '.76rem' }}>
+                {mprCompleted
+                  ? 'This completed MPR stays frozen. The BOM change is shown for information only until an authorized user reopens the MPR. After reopening, Update from BOM becomes available.'
+                  : 'One or more BOMs changed after this MPR was generated. Review the BOMs below and update the MPR before confirming.'}
+              </Typography>
+            </Box>
+
+            {staleBomGroups.map((item) => (
+              <Paper key={item.bomId} variant="outlined" sx={{ p: 1, borderColor: '#f59e0b', backgroundColor: '#fffdf7' }}>
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ md: 'center' }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ fontWeight: 800, fontSize: '.78rem', color: '#7c2d12' }}>
+                      {item.bomNo || 'BOM'}{item.bomName ? ` — ${item.bomName}` : ''}
+                    </Typography>
+                    <Typography sx={{ mt: 0.2, fontSize: '.72rem', color: '#78716c' }}>
+                      {item.missing ? 'Source BOM is no longer available.' : item.summary}
+                      {item.changedAt ? ` · ${formatDateTime(item.changedAt)}` : ''}
+                      {item.changedBy ? ` · ${item.changedBy}` : ''}
+                      {item.batchCount > 1 ? ` · ${item.batchCount} MPR batches affected` : ''}
+                    </Typography>
+                  </Box>
+                  {!mprCompleted && !item.missing && (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="warning"
+                      startIcon={<Refresh />}
+                      onClick={() => refreshChangedBomSource(item.bomId)}
+                      disabled={!canMutateMpr || sourceRefreshBusy}
+                      sx={{ textTransform: 'none', fontWeight: 800, whiteSpace: 'nowrap' }}
+                    >
+                      {sourceRefreshingBomId === item.bomId ? 'Updating...' : 'Update from BOM'}
+                    </Button>
+                  )}
+                </Stack>
+              </Paper>
+            ))}
+
+            {!mprCompleted && refreshableStaleBomGroups.length > 1 && (
+              <Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  startIcon={<Refresh />}
+                  onClick={refreshAllChangedBomSources}
+                  disabled={!canMutateMpr || sourceRefreshBusy}
+                  sx={{ textTransform: 'none', fontWeight: 800 }}
+                >
+                  {sourceRefreshingAll ? 'Updating all...' : `Update all changed BOMs (${refreshableStaleBomGroups.length})`}
+                </Button>
+              </Box>
+            )}
+          </Stack>
+        </Alert>
+      )}
+
+      {mprCompleted && (
+        <Alert severity="info" sx={{ mb: 0.8 }}>
+          This MPR is COMPLETED and read-only. Its saved data stays frozen until an authorized user explicitly reopens it with a reason.
         </Alert>
       )}
 
@@ -1967,7 +2329,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                   label={`${selectedBomCount} selected`}
                   sx={{ fontWeight: 700, color: selectedBomCount ? '#1d4ed8' : '#64748b', backgroundColor: selectedBomCount ? '#eff6ff' : '#f8fafc' }}
                 />
-                {selectedBomCount > 0 && canWrite && (
+                {selectedBomCount > 0 && canMutateMpr && (
                   <Button size="small" onClick={resetSelection} sx={{ textTransform: 'none', fontWeight: 700 }}>
                     Clear selection
                   </Button>
@@ -2030,7 +2392,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                 <Checkbox
                                   size="small"
                                   checked={Boolean(state.selected)}
-                                  disabled={!canWrite}
+                                  disabled={!canMutateMpr}
                                   onChange={(event) => toggleBom(bom.id, event.target.checked)}
                                 />
                               </TableCell>
@@ -2069,7 +2431,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                   size="small"
                                   variant="outlined"
                                   startIcon={<Edit sx={{ fontSize: '16px !important' }} />}
-                                  disabled={!canWrite}
+                                  disabled={!canMutateMpr}
                                   onClick={() => openBomConfiguration(bom)}
                                   sx={{
                                     minWidth: 148,
@@ -2167,7 +2529,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                         const selectedShipTos = shipTos.filter((item) => selectedShipToIds.includes(item.id));
                                         const generatedInfo = generatedSourceInfoForColor(mpr, bom.id, productColor);
                                         const savedState = generatedInfo.latestBatch
-                                          ? sourceSelectionFromBatch(bom, generatedInfo.latestBatch, false)
+                                          ? sourceSelectionFromBatch(bom, generatedInfo.latestBatch, false, mpr)
                                           : null;
                                         const savedShipToIds = savedState?.shipToIdsByColor?.[colorId] || [];
                                         const savedShipTos = shipTos.filter((item) => savedShipToIds.includes(item.id));
@@ -2179,7 +2541,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                         const colorIssues = (validationReview.issues || []).filter((issue) => (
                                           issue?.bomId === bom.id && issue?.productColorId === colorId
                                         ));
-                                        const unresolvedColorIssues = colorIssues.filter((issue) => !selectedShipToIds.includes(issue?.requiredShipToId));
+                                        const unresolvedColorIssues = colorIssues.filter((issue) => !isValidationIssueResolved(issue, selectedShipToIds));
                                         const isFocusedIssue = focusedValidationIssue?.bomId === bom.id && focusedValidationIssue?.productColorId === colorId;
                                         return (
                                           <Box
@@ -2199,7 +2561,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                               <Box sx={{ flex: '0 0 260px', minWidth: 0 }}>
                                                 <FormControlLabel
                                                   sx={{ mr: 0, mt: 0.15, alignItems: 'flex-start' }}
-                                                  control={<Checkbox size="small" checked={checked} disabled={!canWrite} onChange={() => toggleColor(bom.id, colorId)} />}
+                                                  control={<Checkbox size="small" checked={checked} disabled={!canMutateMpr} onChange={() => toggleColor(bom.id, colorId)} />}
                                                   label={(
                                                     <Stack direction="row" spacing={0.55} alignItems="center" flexWrap="wrap" useFlexGap sx={{ pt: 0.15 }}>
                                                       <Typography sx={{ fontSize: '.8rem', fontWeight: checked ? 800 : 600 }}>{productColorLabel(productColor)}</Typography>
@@ -2252,7 +2614,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                                     <Autocomplete
                                                       multiple
                                                       size="small"
-                                                      disabled={!canWrite}
+                                                      disabled={!canMutateMpr}
                                                       options={shipTos}
                                                       value={selectedShipTos}
                                                       onChange={(_, selected) => changeShipTos(bom.id, colorId, selected)}
@@ -2273,15 +2635,15 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                                     {colorIssues.length > 0 && (
                                                       <Stack spacing={0.5} sx={{ mt: 0.65 }}>
                                                         {colorIssues.map((issue) => {
-                                                          const resolved = selectedShipToIds.includes(issue?.requiredShipToId);
+                                                          const resolved = isValidationIssueResolved(issue, selectedShipToIds);
                                                           return (
                                                             <Alert
-                                                              key={`${issue?.bomId}-${issue?.productColorId}-${issue?.requiredShipToId}`}
+                                                              key={`${issue?.bomId}-${issue?.productColorId}-${issueAllowedShipToIds(issue).join('-')}`}
                                                               severity={resolved ? 'success' : 'error'}
                                                               sx={{ py: 0, '& .MuiAlert-message': { py: 0.45, width: '100%' } }}
                                                             >
                                                               <Typography sx={{ fontSize: '.72rem', fontWeight: 700 }}>
-                                                                {resolved ? 'Resolved' : `Missing Ship To: ${issueShipToLabel(issue)}`}
+                                                                {resolved ? 'Resolved' : `Select at least one: ${issueShipToLabel(issue)}`}
                                                                 {!resolved && Array.isArray(issue?.materials) && issue.materials.length > 0 ? ` · ${issue.materials.slice(0, 2).join(', ')}${issue.materials.length > 2 ? ` +${issue.materials.length - 2}` : ''}` : ''}
                                                               </Typography>
                                                             </Alert>
@@ -2301,7 +2663,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                                             value={state.shipToQtyByColor?.[colorId]?.[shipTo.id] ?? ''}
                                                             onChange={(event) => changeShipToQty(bom.id, colorId, shipTo.id, event.target.value)}
                                                             inputProps={{ min: 0, step: 'any' }}
-                                                            disabled={!canWrite}
+                                                            disabled={!canMutateMpr}
                                                             helperText={shipTo.shipToCode && shipTo.shipToName ? shipTo.shipToName : ''}
                                                             sx={{ width: { xs: '100%', sm: 190 } }}
                                                           />
@@ -2342,7 +2704,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                             <Box key={packing.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.35, mr: 1 }}>
                                               <FormControlLabel
                                                 sx={{ mr: 0 }}
-                                                control={<Checkbox size="small" checked={(state.packingIds || []).includes(packing.id)} disabled={!canWrite} onChange={() => togglePacking(bom.id, packing.id)} />}
+                                                control={<Checkbox size="small" checked={(state.packingIds || []).includes(packing.id)} disabled={!canMutateMpr} onChange={() => togglePacking(bom.id, packing.id)} />}
                                                 label={<Typography sx={{ fontSize: '.78rem' }}>{packing.packingName} ({Number(packing.lineCount ?? (packing.lines || []).length) || 0})</Typography>}
                                               />
                                               {(usedForAllSelected || (!selectedOptions.length && usedBefore)) && (
@@ -2462,6 +2824,14 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                         >
                           <Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 0.5, md: 1.5 }} alignItems={{ md: 'center' }} sx={{ width: '100%', minWidth: 0, pr: 1 }}>
                             <Chip size="small" label={`Batch ${batchNumber}`} sx={{ fontWeight: 700, color: '#103B5C', backgroundColor: '#eef6ff' }} />
+                            {batch.bomSourceChanged && (
+                              <Chip
+                                size="small"
+                                color="warning"
+                                label={mprCompleted ? 'BOM changed after completion' : 'BOM update required'}
+                                sx={{ fontWeight: 800 }}
+                              />
+                            )}
                             <Box sx={{ flex: 1, minWidth: 0 }}>
                               <Typography noWrap sx={{ fontWeight: 750, color: '#0f172a', fontSize: '.83rem' }}>
                                 {batch.bomNo || 'BOM'}{batch.bomName ? ` — ${batch.bomName}` : ''}
@@ -2481,13 +2851,14 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                           <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ pt: 1.25 }}>
                             <Box sx={{ flex: 1, minWidth: 0 }}>
                               <Typography sx={{ fontSize: '.78rem' }}>
-                                <strong>Product Color:</strong> {batch.colors.length ? batch.colors.join(', ') : '-'}
+                                <strong>Product Color:</strong> {batch.colorLabels?.length ? batch.colorLabels.join(', ') : '-'}
                               </Typography>
                               <Typography sx={{ mt: 0.3, fontSize: '.78rem' }}>
                                 <strong>Sources:</strong> {batch.packingNames.length ? batch.packingNames.join(', ') : '-'}
                               </Typography>
-                              {(batch.colors || []).map((color) => {
+                              {(batch.colors || []).map((color, colorIndex) => {
                                 const selectedIds = batch.shipToIdsByColor?.[color] || [];
+                                const displayColor = batch.colorLabels?.[colorIndex] || color;
                                 const qtyMap = batch.shipToQtyByColor?.[color] || {};
                                 const details = selectedIds.map((shipToId) => {
                                   const shipTo = shipTos.find((item) => item.id === shipToId);
@@ -2498,7 +2869,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                 return (
                                   <Box key={color} sx={{ mt: 0.65, p: 0.85, border: '1px solid #e2e8f0', borderRadius: 1, backgroundColor: '#ffffff' }}>
                                     <Typography sx={{ fontSize: '.75rem', fontWeight: 700, color: '#334155' }}>
-                                      {color} · Total PO Qty {formatValue(batch.poQtyByColor?.[color] ?? 0)}
+                                      {displayColor} · Total PO Qty {formatValue(batch.poQtyByColor?.[color] ?? 0)}
                                     </Typography>
                                     <Typography sx={{ mt: 0.15, fontSize: '.73rem', color: 'text.secondary' }}>
                                       Ship To: {details || batch.shipToByColor?.[color] || '-'}
@@ -2577,7 +2948,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
               </Box>
               {mpr && (
                 <Stack direction="row" spacing={0.8} alignItems="center">
-                  <StatusBadge status={mpr.status} label={String(mpr.status || '').toUpperCase() === 'DRAFT' ? 'IN PROGRESS' : undefined} />
+                  <StatusBadge status={mprStatus} />
                   <Typography sx={{ fontSize: '.7rem', color: '#94a3b8' }}>Updated {formatDateTime(mpr.updatedAt)}</Typography>
                 </Stack>
               )}
@@ -2865,14 +3236,14 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                         </Tooltip>
                                       ) : null;
                                     })()}
-                                    <Tooltip title={canEditLines ? 'Edit MPR Item' : (!canWrite ? writeBlockedMessage : 'Create MPR First')}>
+                                    <Tooltip title={canEditLines ? 'Edit MPR Item' : (!canMutateMpr ? mutationBlockedMessage : 'Create MPR First')}>
                                       <span>
                                         <IconButton size="small" disabled={!canEditLines} onClick={() => setEditingLine(line)}>
                                           <Edit fontSize="small" />
                                         </IconButton>
                                       </span>
                                     </Tooltip>
-                                    <Tooltip title={canEditLines ? 'Delete MPR Item' : (!canWrite ? writeBlockedMessage : 'Create MPR First')}>
+                                    <Tooltip title={canEditLines ? 'Delete MPR Item' : (!canMutateMpr ? mutationBlockedMessage : 'Create MPR First')}>
                                       <span>
                                         <IconButton size="small" color="error" disabled={!canEditLines} onClick={() => setLineDeleteTarget(line)}>
                                           <Delete fontSize="small" />
@@ -2923,9 +3294,9 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
             {(validationReview.issues || []).map((issue, index) => {
               const state = selection[issue?.bomId] || emptyBomSelection();
               const selectedIds = state.shipToIdsByColor?.[issue?.productColorId] || [];
-              const resolved = selectedIds.includes(issue?.requiredShipToId);
+              const resolved = isValidationIssueResolved(issue, selectedIds);
               return (
-                <Box key={`${issue?.bomId}-${issue?.productColorId}-${issue?.requiredShipToId}-${index}`} sx={{ px: 1.5, py: 1.1, borderBottom: index < validationReview.issues.length - 1 ? '1px solid #eef2f7' : 0, bgcolor: resolved ? '#f8fff9' : '#fff' }}>
+                <Box key={`${issue?.bomId}-${issue?.productColorId}-${issueAllowedShipToIds(issue).join('-')}-${index}`} sx={{ px: 1.5, py: 1.1, borderBottom: index < validationReview.issues.length - 1 ? '1px solid #eef2f7' : 0, bgcolor: resolved ? '#f8fff9' : '#fff' }}>
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ sm: 'center' }}>
                     <Box sx={{ minWidth: 0 }}>
                       <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -2934,7 +3305,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                         <Typography sx={{ fontSize: '.82rem', fontWeight: 700 }}>{issue?.productColor || '-'}</Typography>
                         <Chip
                           size="small"
-                          label={resolved ? 'Resolved' : `Missing ${issueShipToLabel(issue)}`}
+                          label={resolved ? 'Resolved' : `Select one: ${issueShipToLabel(issue)}`}
                           color={resolved ? 'success' : 'error'}
                           variant="outlined"
                           sx={{ height: 22, fontSize: '.68rem', fontWeight: 700 }}
@@ -2967,6 +3338,98 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
             sx={{ textTransform: 'none', fontWeight: 700 }}
           >
             Review Issues
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={masterDataWarning.open}
+        onClose={() => resolveMasterDataWarning(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle sx={{ fontWeight: 750, color: '#9a6700' }}>Master Data Warning</DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          <Box sx={{ p: 1.5, borderBottom: '1px solid #e5e7eb', bgcolor: '#fffbeb' }}>
+            <Stack direction="row" spacing={1} alignItems="flex-start">
+              <ErrorOutline sx={{ fontSize: 26, color: '#d97706', mt: 0.15 }} />
+              <Box>
+                <Typography sx={{ fontWeight: 800 }}>
+                  {(masterDataWarning.issues || []).length} material line(s) do not exactly match MAT Info
+                </Typography>
+                <Typography sx={{ mt: 0.25, fontSize: '.78rem', color: '#6b7280' }}>
+                  You can continue, but Currency, MAT Price or Supplier may be blank. Review the 4-key Master Data: Material Type + MAT Full Description + MAT Color + MAT Unit.
+                </Typography>
+              </Box>
+            </Stack>
+          </Box>
+
+          <Stack spacing={0}>
+            {(masterDataWarning.issues || []).map((issue, index) => {
+              const mismatchSet = new Set(Array.isArray(issue?.mismatchFields) ? issue.mismatchFields : []);
+              const pairs = [
+                ['Material Type', issue?.materialType, issue?.masterMaterialType],
+                ['MAT Full Description', issue?.matFullDescription, issue?.masterMatFullDescription],
+                ['MAT Color', issue?.matColor, issue?.masterMatColor],
+                ['MAT Unit', issue?.matUnit, issue?.masterMatUnit]
+              ];
+              const hasPossibleMatch = String(issue?.code || '').toUpperCase() === 'MAT_INFO_MISMATCH';
+              return (
+                <Box
+                  key={`${issue?.bomId || ''}-${issue?.productColorId || ''}-${issue?.sourceRowNumber || index}-${issue?.matFullDescription || ''}`}
+                  sx={{ px: 1.5, py: 1.25, borderBottom: index < masterDataWarning.issues.length - 1 ? '1px solid #eef2f7' : 0 }}
+                >
+                  <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography sx={{ fontSize: '.8rem', fontWeight: 800, color: '#102a43' }}>BOM {issue?.bomNo || '-'}</Typography>
+                    {issue?.productColor && <Typography sx={{ fontSize: '.76rem', color: '#64748b' }}>· {issue.productColor}</Typography>}
+                    {issue?.sourceRowNumber && <Chip size="small" label={`Source row ${issue.sourceRowNumber}`} variant="outlined" sx={{ height: 21, fontSize: '.66rem' }} />}
+                    <Chip
+                      size="small"
+                      label={hasPossibleMatch ? 'Possible mismatch' : 'MAT Info not found'}
+                      sx={{ height: 21, fontSize: '.66rem', fontWeight: 700, bgcolor: '#fff7ed', color: '#9a3412' }}
+                    />
+                  </Stack>
+
+                  <Typography sx={{ mt: 0.55, fontSize: '.79rem', fontWeight: 700, color: '#334155' }}>
+                    {issue?.matFullDescription || issue?.materials?.[0] || '-'}
+                  </Typography>
+
+                  <Box sx={{ mt: 0.8, border: '1px solid #e5e7eb', borderRadius: 1, overflow: 'hidden' }}>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: '145px minmax(0,1fr) minmax(0,1fr)', bgcolor: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
+                      <Typography sx={{ px: 1, py: 0.6, fontSize: '.69rem', fontWeight: 800 }}>4-key field</Typography>
+                      <Typography sx={{ px: 1, py: 0.6, fontSize: '.69rem', fontWeight: 800 }}>BOM / MPR value</Typography>
+                      <Typography sx={{ px: 1, py: 0.6, fontSize: '.69rem', fontWeight: 800 }}>Possible MAT Info value</Typography>
+                    </Box>
+                    {pairs.map(([label, sourceValue, masterValue]) => {
+                      const mismatch = mismatchSet.has(label);
+                      return (
+                        <Box key={label} sx={{ display: 'grid', gridTemplateColumns: '145px minmax(0,1fr) minmax(0,1fr)', borderBottom: label !== 'MAT Unit' ? '1px solid #f1f5f9' : 0, bgcolor: mismatch ? '#fff7ed' : '#fff' }}>
+                          <Typography sx={{ px: 1, py: 0.55, fontSize: '.69rem', fontWeight: mismatch ? 800 : 600, color: mismatch ? '#9a3412' : '#475569' }}>{label}</Typography>
+                          <Typography sx={{ px: 1, py: 0.55, fontSize: '.69rem', wordBreak: 'break-word' }}>{sourceValue || '-'}</Typography>
+                          <Typography sx={{ px: 1, py: 0.55, fontSize: '.69rem', wordBreak: 'break-word', color: mismatch ? '#9a3412' : '#475569' }}>{hasPossibleMatch ? (masterValue || '-') : 'No close 3/4-key match'}</Typography>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </Box>
+              );
+            })}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 1.5, justifyContent: 'space-between' }}>
+          <Button
+            onClick={() => resolveMasterDataWarning(false)}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            Review Master Data
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => resolveMasterDataWarning(true)}
+            sx={{ textTransform: 'none', fontWeight: 800 }}
+          >
+            Continue & {masterDataWarning.actionLabel || 'Proceed'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3187,7 +3650,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
         </DialogActions>
       </Dialog>
 
-      <Dialog open={canWrite && confirmOpen} onClose={confirming ? undefined : () => setConfirmOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog open={canMutateMpr && confirmOpen} onClose={confirming ? undefined : () => setConfirmOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Confirm MPR?</DialogTitle>
         <DialogContent>
           <Typography>
@@ -3202,7 +3665,35 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
         </DialogActions>
       </Dialog>
 
-      <Dialog open={canWrite && deleteOpen} onClose={() => setDeleteOpen(false)}>
+      <Dialog open={canReopenMpr && reopenOpen} onClose={reopening ? undefined : () => setReopenOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Reopen completed MPR?</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+            <Alert severity="warning">
+              Reopening changes the status from COMPLETED to IN PROGRESS and enables MPR data changes again. If a source BOM changed while this MPR was completed, update it from BOM after reopening.
+            </Alert>
+            <TextField
+              autoFocus
+              required
+              multiline
+              minRows={3}
+              label="Reason for reopening"
+              value={reopenReason}
+              onChange={(event) => setReopenReason(event.target.value)}
+              inputProps={{ maxLength: 1000 }}
+              helperText={`${reopenReason.length}/1000 · This reason is saved in MPR history.`}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={reopening} onClick={() => setReopenOpen(false)}>Cancel</Button>
+          <Button color="warning" variant="contained" disabled={reopening || !reopenReason.trim()} onClick={reopenCurrentMpr}>
+            {reopening ? 'Reopening...' : 'Reopen MPR'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={canMutateMpr && deleteOpen} onClose={() => setDeleteOpen(false)}>
         <DialogTitle>Delete MPR?</DialogTitle>
         <DialogContent>Each order has one current MPR. Delete it and return the order to BOM status?</DialogContent>
         <DialogActions>
@@ -3212,7 +3703,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       </Dialog>
 
       <Dialog
-        open={canWrite && Boolean(batchEditTarget)}
+        open={canMutateMpr && Boolean(batchEditTarget)}
         onClose={batchSaving ? undefined : () => setBatchEditTarget(null)}
         fullWidth
         maxWidth="md"
@@ -3331,7 +3822,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       </Dialog>
 
       <Dialog
-        open={canWrite && Boolean(batchDeleteTarget)}
+        open={canMutateMpr && Boolean(batchDeleteTarget)}
         onClose={batchDeleting ? undefined : () => setBatchDeleteTarget(null)}
         fullWidth
         maxWidth="xs"
@@ -3359,15 +3850,15 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       </Dialog>
 
       <MprLineEditDialog
-        open={canWrite && Boolean(editingLine)}
+        open={canMutateMpr && Boolean(editingLine)}
         line={editingLine}
-        productColorMasters={productColorMasters}
+        productColors={productColorsForBom((boms || []).find((bom) => String(bom?.id || '') === String(editingLine?.bomId || '')))}
         saving={lineSaving}
         onClose={() => setEditingLine(null)}
         onSave={saveMprLine}
       />
 
-      <Dialog open={canWrite && Boolean(lineDeleteTarget)} onClose={lineSaving ? undefined : () => setLineDeleteTarget(null)}>
+      <Dialog open={canMutateMpr && Boolean(lineDeleteTarget)} onClose={lineSaving ? undefined : () => setLineDeleteTarget(null)}>
         <DialogTitle>Delete MPR Item?</DialogTitle>
         <DialogContent>
           Delete <strong>{lineDeleteTarget?.matFullDescription || 'this MPR item'}</strong>? This only removes the selected row from the current MPR.

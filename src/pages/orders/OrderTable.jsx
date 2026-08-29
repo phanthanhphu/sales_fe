@@ -48,7 +48,7 @@ export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, ac
                 <TableCell>{row.style}</TableCell>
                 <TableCell>{row.customer}</TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{row.season}</TableCell>
-                <TableCell><StatusBadge status={row.status || 'DRAFT'} label={row.status === 'MPR_DRAFT' ? 'MPR IN PROGRESS' : undefined} /></TableCell>
+                <TableCell><StatusBadge status={row.status || 'DRAFT'} label={['MPR_DRAFT', 'MPR_IN_PROGRESS'].includes(row.status) ? 'MPR IN PROGRESS' : undefined} /></TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(row.updatedAt)}</TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>
                   <Tooltip title="Open order"><IconButton size="small" color="primary" onClick={() => onOpen(row)}><OpenInNew fontSize="small" /></IconButton></Tooltip>

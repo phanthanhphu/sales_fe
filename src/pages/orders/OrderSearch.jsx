@@ -28,7 +28,7 @@ export default function OrderSearch({ filters, onChange, onSearch, onReset, onAd
         <MenuItem value="DRAFT">Draft</MenuItem>
         <MenuItem value="BOM_IN_PROGRESS">BOM in progress</MenuItem>
         <MenuItem value="BOM_SUBMITTED">BOM submitted</MenuItem>
-        <MenuItem value="MPR_DRAFT">MPR in progress</MenuItem>
+        <MenuItem value="MPR_IN_PROGRESS">MPR in progress</MenuItem>
         <MenuItem value="MPR_COMPLETED">MPR completed</MenuItem>
       </TextField>
       <Button size="small" variant="contained" startIcon={<Search fontSize="small" />} onClick={onSearch} disabled={loading} sx={{ ...buttonSx, backgroundColor: '#103B5C' }}>Search</Button>

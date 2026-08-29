@@ -11,7 +11,7 @@ export const materialShipToConfig = {
   allowTemplate: true,
   allowEditWorkbook: true,
   excelSheetName: 'MATERIAL SHIP TO',
-  importHint: 'Download the template first. Ship To, Active and Action must be selected from the Excel drop-down lists. Ship To options contain only active records for the current Buyer; add new values in Ship To Master first. One material identity may have only one dedicated Ship To per Buyer.',
+  importHint: 'Download the template first. Dedicated Ship To contains only active records for the current Buyer. Repeating the same material on multiple rows is allowed: Ship To values are merged into one Dedicated Ship To list. You can also separate several Ship To names with ; (example: US; JAPAN). If the material already exists, newly imported Ship To values are appended without duplicating existing values.',
 
   defaultValues: {
     sapCode: '',
@@ -19,7 +19,7 @@ export const materialShipToConfig = {
     matFullDescription: '',
     matColor: '',
     matUnit: '',
-    shipToId: '',
+    shipToIds: [],
     active: 'true',
     remark: ''
   },
@@ -39,7 +39,7 @@ export const materialShipToConfig = {
     }
   ],
 
-  formHint: 'This Buyer-specific rule is checked when MPR is previewed/generated. If a material is mapped, its MPR line uses only the mapped Ship To and only that Ship To quantity.',
+  formHint: 'This Buyer-specific list is checked when MPR is previewed/generated. A mapped material uses only the intersection between selected Ship To and Dedicated Ship To, with the matching PO Qty values added together.',
 
   formFields: [
     { name: 'sapCode', label: 'SAP Code', grid: 6, maxLength: 120, placeholder: 'Preferred material identity when available' },
@@ -48,9 +48,9 @@ export const materialShipToConfig = {
     { name: 'matColor', label: 'MAT Color', grid: 6, maxLength: 200 },
     { name: 'matUnit', label: 'MAT Unit', grid: 6, required: true, maxLength: 80 },
     {
-      name: 'shipToId', label: 'Dedicated Ship To', type: 'autocomplete', optionSource: 'shipTo',
+      name: 'shipToIds', label: 'Dedicated Ship To', type: 'autocomplete', optionSource: 'shipTo', multiple: true,
       optionValue: 'id', optionLabel: (item) => [item?.shipToCode, item?.shipToName].filter(Boolean).join(' · '),
-      required: true, grid: 8, placeholder: 'Select one Ship To'
+      required: true, grid: 8, placeholder: 'Select one or more Ship To'
     },
     {
       name: 'active', label: 'Status', type: 'select', required: true, grid: 4,
@@ -70,8 +70,15 @@ export const materialShipToConfig = {
     { label: 'MAT Color', key: 'matColor', minWidth: 130 },
     { label: 'Unit', key: 'matUnit', minWidth: 90 },
     {
-      label: 'Dedicated Ship To', key: 'shipToName', minWidth: 220,
-      render: (row) => [row.shipToCode, row.shipToName].filter(Boolean).join(' · ') || '-'
+      label: 'Dedicated Ship To', key: 'shipToNames', minWidth: 260,
+      render: (row) => {
+        const ids = Array.isArray(row?.shipToIds) && row.shipToIds.length ? row.shipToIds : [row?.shipToId].filter(Boolean);
+        const codes = Array.isArray(row?.shipToCodes) ? row.shipToCodes : [];
+        const names = Array.isArray(row?.shipToNames) && row.shipToNames.length ? row.shipToNames : [row?.shipToName].filter(Boolean);
+        return ids.map((_, index) => [codes[index], names[index]].filter(Boolean).join(' · '))
+          .filter(Boolean)
+          .join(' + ') || '-';
+      }
     },
     { label: 'Status', key: 'active', minWidth: 95, render: (row) => row.active === false ? 'Inactive' : 'Active' },
     { label: 'Remark', key: 'remark', minWidth: 220, hideOnSmall: true },
@@ -83,13 +90,18 @@ export const materialShipToConfig = {
     const sapCode = trimText(values.sapCode);
     if (!sapCode && !trimText(values.materialType)) errors.materialType = 'Material Type is required when SAP Code is blank.';
     if (!sapCode && !trimText(values.matFullDescription)) errors.matFullDescription = 'MAT Full Description is required when SAP Code is blank.';
+    if (!Array.isArray(values.shipToIds) || values.shipToIds.filter(Boolean).length === 0) {
+      errors.shipToIds = 'Select at least one Dedicated Ship To.';
+    }
     return errors;
   },
 
   toFormValues: (record, defaults) => ({
     ...defaults,
     ...record,
-    shipToId: record?.shipToId || '',
+    shipToIds: Array.isArray(record?.shipToIds) && record.shipToIds.length
+      ? record.shipToIds
+      : [record?.shipToId].filter(Boolean),
     active: record?.active === false ? 'false' : 'true'
   }),
 
@@ -99,7 +111,7 @@ export const materialShipToConfig = {
     matFullDescription: trimText(values.matFullDescription),
     matColor: trimText(values.matColor),
     matUnit: trimText(values.matUnit),
-    shipToId: trimText(values.shipToId),
+    shipToIds: Array.from(new Set((values.shipToIds || []).map(trimText).filter(Boolean))),
     active: String(values.active) !== 'false',
     remark: trimText(values.remark)
   })

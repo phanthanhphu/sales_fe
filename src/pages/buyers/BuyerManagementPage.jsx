@@ -44,7 +44,6 @@ const emptyForm = {
   buyerKey: '',
   buyerName: '',
   active: true,
-  sequence: 0,
   description: ''
 };
 
@@ -58,7 +57,6 @@ function BuyerFormDialog({ open, record, saving, onClose, onSave }) {
       buyerKey: record.buyerKey || '',
       buyerName: record.buyerName || '',
       active: record.active ?? true,
-      sequence: Number(record.sequence || 0),
       description: record.description || ''
     } : emptyForm);
     setErrors({});
@@ -80,7 +78,6 @@ function BuyerFormDialog({ open, record, saving, onClose, onSave }) {
       buyerKey,
       buyerName: form.buyerName.trim(),
       active: Boolean(form.active),
-      sequence: Math.max(0, Number(form.sequence || 0)),
       description: form.description.trim()
     });
   };
@@ -108,24 +105,13 @@ function BuyerFormDialog({ open, record, saving, onClose, onSave }) {
             helperText={errors.buyerName}
             disabled={saving}
           />
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <TextField
-              type="number"
-              label="Sequence"
-              value={form.sequence}
-              onChange={(event) => update('sequence', event.target.value)}
-              inputProps={{ min: 0 }}
-              disabled={saving}
-              fullWidth
-            />
-            <FormControl fullWidth disabled={saving}>
-              <InputLabel>Status</InputLabel>
-              <Select value={form.active ? 'true' : 'false'} label="Status" onChange={(event) => update('active', event.target.value === 'true')}>
-                <MenuItem value="true">Active</MenuItem>
-                <MenuItem value="false">Inactive</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
+          <FormControl fullWidth disabled={saving}>
+            <InputLabel>Status</InputLabel>
+            <Select value={form.active ? 'true' : 'false'} label="Status" onChange={(event) => update('active', event.target.value === 'true')}>
+              <MenuItem value="true">Active</MenuItem>
+              <MenuItem value="false">Inactive</MenuItem>
+            </Select>
+          </FormControl>
           <TextField
             label="Description"
             value={form.description}
@@ -274,7 +260,6 @@ export default function BuyerManagementPage() {
                   { label: 'No.', sortable: false },
                   { label: 'Buyer Key', key: 'buyerKey' },
                   { label: 'Buyer Name', key: 'buyerName' },
-                  { label: 'Sequence', key: 'sequence' },
                   { label: 'Status', key: 'active' },
                   { label: 'Description', key: 'description' },
                   { label: 'Actions', sortable: false }
@@ -285,13 +270,12 @@ export default function BuyerManagementPage() {
             </TableHead>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}><CircularProgress size={28} /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5 }}><CircularProgress size={28} /></TableCell></TableRow>
               ) : rows.length ? rows.map((row, index) => (
                 <TableRow key={row.id || row.buyerKey} hover>
                   <TableCell>{page * rowsPerPage + index + 1}</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>{row.buyerKey}</TableCell>
                   <TableCell>{row.buyerName}</TableCell>
-                  <TableCell>{row.sequence ?? 0}</TableCell>
                   <TableCell><StatusBadge status={row.active ? 'ACTIVE' : 'INACTIVE'} /></TableCell>
                   <TableCell>{row.description || '—'}</TableCell>
                   <TableCell>
@@ -302,7 +286,7 @@ export default function BuyerManagementPage() {
                   </TableCell>
                 </TableRow>
               )) : (
-                <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: 'text.secondary' }}>No Buyer found.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: 'text.secondary' }}>No Buyer found.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

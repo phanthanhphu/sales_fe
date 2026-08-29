@@ -15,7 +15,7 @@ import Profile from './Profile';
 import { listAccessibleBuyers } from 'services/buyerService';
 import { buyerPath, getAccessibleBuyers, getSelectedBuyerKey, normalizeBuyerKey, setSelectedBuyerKey } from 'utils/buyerContext';
 
-const BUYER_WORKSPACE_SECTIONS = new Set(['orders', 'mat-info', 'vendor-codes', 'loss', 'ship-tos', 'product-colors', 'material-ship-to']);
+const BUYER_WORKSPACE_SECTIONS = new Set(['orders', 'mat-info', 'vendor-codes', 'loss', 'ship-tos', 'material-ship-to']);
 
 const buyerSwitchTarget = (pathname, targetBuyerKey) => {
   const parts = String(pathname || '').split('/').filter(Boolean);
@@ -44,7 +44,6 @@ const getPageMeta = (pathname = '') => {
     { match: '/buyers/:buyerKey/vendor-codes', title: 'Vendor Code', section: 'Buyer Workspace' },
     { match: '/buyers/:buyerKey/ship-tos', title: 'Ship To', section: 'Buyer Workspace' },
     { match: '/buyers/:buyerKey/loss', title: 'Loss', section: 'Buyer Workspace' },
-    { match: '/buyers/:buyerKey/product-colors', title: 'Product Color', section: 'Buyer Workspace' },
     { match: '/buyers/:buyerKey/material-ship-to', title: 'Material Ship To', section: 'Buyer Workspace' }
   ];
 

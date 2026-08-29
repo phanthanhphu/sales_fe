@@ -39,7 +39,12 @@ const createFormValues = (config, record) => {
 
   (config.formFields || []).forEach((field) => {
     const value = fromConfig?.[field.name];
-    defaults[field.name] = field.type === 'number' ? textValue(value) : (value ?? defaults[field.name] ?? '');
+    if (field.multiple === true) {
+      const source = value ?? defaults[field.name];
+      defaults[field.name] = Array.isArray(source) ? source : (source ? [source] : []);
+    } else {
+      defaults[field.name] = field.type === 'number' ? textValue(value) : (value ?? defaults[field.name] ?? '');
+    }
   });
 
   return defaults;
@@ -52,7 +57,7 @@ const validate = (config, values) => {
     const rawValue = values?.[field.name];
     const value = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
 
-    if (field.required && (value === '' || value === null || value === undefined)) {
+    if (field.required && (value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0))) {
       errors[field.name] = `${field.label} is required.`;
       return;
     }
@@ -286,6 +291,13 @@ export default function MasterDataFormDialog({
       || { [field.optionValue || 'value']: value };
   };
 
+  const selectedAutocompleteOptions = (field, rawValues, options) => {
+    const values = Array.isArray(rawValues) ? rawValues : (rawValues ? [rawValues] : []);
+    return values
+      .map((value) => selectedAutocompleteOption(field, value, options))
+      .filter(Boolean);
+  };
+
   const selectedCurrency = useMemo(() => {
     const code = String(values?.currency || '').trim().toUpperCase();
     if (!code) return null;
@@ -437,7 +449,7 @@ export default function MasterDataFormDialog({
 
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(12, minmax(0, 1fr))' }, gap: 1.25 }}>
             {formFields.map((field) => {
-              const value = values?.[field.name] ?? '';
+              const value = values?.[field.name] ?? (field.multiple === true ? [] : '');
               const error = errors?.[field.name];
               const grid = field.grid || 6;
               const options = getOptions(field);
@@ -447,11 +459,16 @@ export default function MasterDataFormDialog({
               const fieldHelper = helperText(field, error, loadingOptions);
 
               if (field.type === 'autocomplete') {
-                const selectedOption = selectedAutocompleteOption(field, value, options);
+                const multiple = field.multiple === true;
+                const selectedOption = multiple
+                  ? selectedAutocompleteOptions(field, value, options)
+                  : selectedAutocompleteOption(field, value, options);
 
                 return (
                   <Box key={field.name} sx={{ gridColumn: { xs: 'span 1', sm: `span ${grid}` } }}>
                     <Autocomplete
+                      multiple={multiple}
+                      filterSelectedOptions={multiple}
                       size="small"
                       freeSolo={field.freeSolo === true}
                       fullWidth
@@ -464,7 +481,9 @@ export default function MasterDataFormDialog({
                       getOptionLabel={(option) => optionLabel(field, option)}
                       filterOptions={field.optionSource === 'shipTo' ? undefined : ((items) => items)}
                       onChange={(_, nextOption) => {
-                        const nextValue = nextOption ? optionValue(field, nextOption) : '';
+                        const nextValue = multiple
+                          ? (nextOption || []).map((item) => optionValue(field, item)).filter(Boolean)
+                          : (nextOption ? optionValue(field, nextOption) : '');
                         if (field.optionSource === 'supplier') setSupplierSearch(String(nextValue || ''));
                         handleChange(field, nextValue);
                       }}

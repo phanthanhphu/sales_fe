@@ -8,7 +8,6 @@ export const MASTER_DATA_ENDPOINTS = {
   matInfo: `${MASTER_DATA_ROOT}/mat-infos`,
   loss: `${MASTER_DATA_ROOT}/loss`,
   shipTo: `${MASTER_DATA_ROOT}/ship-tos`,
-  productColor: `${MASTER_DATA_ROOT}/product-colors`,
   materialShipTo: `${MASTER_DATA_ROOT}/material-ship-to-mappings`
 };
 
@@ -53,26 +52,6 @@ export const deleteMasterData = (type, id, params = {}) => {
   return apiClient.delete(`${getEndpoint(type)}/${encodeURIComponent(id)}`, { params: cleanParams(params) });
 };
 
-
-/** Product Color images are owned by Product Color Master, never by an individual BOM. */
-const productColorImageEndpoint = (id) => `${MASTER_DATA_ENDPOINTS.productColor}/${encodeURIComponent(id)}/image`;
-
-export const uploadProductColorImage = (id, file) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  return apiClient.post(productColorImageEndpoint(id), formData);
-};
-
-export const deleteProductColorImage = (id) => apiClient.delete(productColorImageEndpoint(id));
-
-export const getProductColorImageBlob = (id, signal) => (
-  apiClient.get(productColorImageEndpoint(id), { responseType: 'blob', signal })
-);
-
-export const getProductColorImageObjectUrl = async (id, signal) => {
-  const blob = await getProductColorImageBlob(id, signal);
-  return URL.createObjectURL(blob);
-};
 
 const masterExcelUploadConfig = (file, params = {}, options = {}) => ({
   params: cleanParams(params),

@@ -10,7 +10,12 @@ const OPTIONS = [
   {
     value: 'SALES',
     label: 'Sales / MPR & Master Data',
-    description: 'Manage orders, MPR, Vendor Code, MAT Info, Ship To, Loss and other master data.'
+    description: 'Manage orders, MPR, BOM, Vendor Code, MAT Info, Ship To, Loss and other master data.'
+  },
+  {
+    value: 'REOPEN_COMPLETED_MPR',
+    label: 'Reopen Completed MPR',
+    description: 'Additional permission to move a completed MPR back to In Progress. Requires Sales / MPR access.'
   },
   {
     value: 'VIEW_SYSTEM',
@@ -21,7 +26,7 @@ const OPTIONS = [
 
 export const normalizeAccess = (value, role) => {
   if (String(role || '').toUpperCase() === 'ADMIN') {
-    return ['BOM', 'SALES'];
+    return ['BOM', 'SALES', 'REOPEN_COMPLETED_MPR'];
   }
 
   const raw = Array.isArray(value) ? value : String(value || '').split(/[,;|]/);
@@ -35,7 +40,9 @@ export const normalizeAccess = (value, role) => {
     return ['VIEW_SYSTEM'];
   }
 
-  return [...selected];
+  if (!selected.has('SALES')) selected.delete('REOPEN_COMPLETED_MPR');
+
+  return selected.size ? [...selected] : ['VIEW_SYSTEM'];
 };
 
 export default function AccessPermissionSelector({ role, value, onChange, disabled = false, error = '' }) {
@@ -54,6 +61,8 @@ export default function AccessPermissionSelector({ role, value, onChange, disabl
 
     const next = new Set(permissions.filter((item) => item !== 'VIEW_SYSTEM'));
     next.has(permission) ? next.delete(permission) : next.add(permission);
+    if (permission === 'REOPEN_COMPLETED_MPR' && next.has(permission)) next.add('SALES');
+    if (permission === 'SALES' && !next.has('SALES')) next.delete('REOPEN_COMPLETED_MPR');
     onChange?.(next.size ? [...next] : ['VIEW_SYSTEM']);
   };
 
@@ -73,8 +82,8 @@ export default function AccessPermissionSelector({ role, value, onChange, disabl
       </Typography>
       <Typography sx={{ mt: 0.2, color: '#73859A', fontSize: '0.73rem' }}>
         {isAdmin
-          ? 'Admin receives full access to BOM, Sales / MPR, master data and system administration.'
-          : 'Choose BOM, Sales / MPR & Master Data, both, or View System.'}
+          ? 'Admin receives full access, including permission to reopen a completed MPR.'
+          : 'Sales / MPR access also includes BOM management. Reopen Completed MPR is an additional permission.'}
       </Typography>
       <FormGroup row sx={{ mt: 0.55, gap: { xs: 0, md: 1.1 } }}>
         {OPTIONS.map((option) => (

@@ -36,6 +36,7 @@ export const createBom = (orderId, payload) => unwrap(apiRawClient.post(`/api/or
 export const updateBom = (id, payload) => unwrap(apiRawClient.put(`/api/boms/${encodeURIComponent(id)}`, payload, withAuth()));
 export const deleteBom = (id) => unwrap(apiRawClient.delete(`/api/boms/${encodeURIComponent(id)}`, withAuth()));
 export const submitBom = (id) => unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(id)}/submit`, {}, withAuth()));
+export const resubmitBom = (id) => unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(id)}/resubmit`, {}, withAuth()));
 
 const excelUploadConfig = (file, onUploadProgress) => withAuth({
   onUploadProgress,
@@ -199,9 +200,11 @@ export const openBomAttachment = async (bomId, attachmentId) => {
 
 export const getMpr = (orderId) => unwrap(apiRawClient.get(`/api/orders/${encodeURIComponent(orderId)}/mpr`, withAuth()));
 export const validateMpr = (orderId, payload) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/validate`, payload, withAuth()));
+export const validateMprMasterData = (orderId) => unwrap(apiRawClient.get(`/api/orders/${encodeURIComponent(orderId)}/mpr/validate-master-data`, withAuth()));
 export const previewMpr = (orderId, payload) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/preview`, payload, withAuth()));
 export const generateMpr = (orderId, payload) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/generate`, payload, withAuth()));
 export const confirmMpr = (orderId) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/confirm`, null, withAuth()));
+export const reopenMpr = (orderId, reason) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/reopen`, { reason }, withAuth()));
 export const deleteMpr = (orderId) => unwrap(apiRawClient.delete(`/api/orders/${encodeURIComponent(orderId)}/mpr`, withAuth()));
 export const updateMprLine = (orderId, lineId, payload) => unwrap(
   apiRawClient.put(
@@ -222,6 +225,22 @@ export const updateMprBatch = (orderId, batchId, payload) => unwrap(
   apiRawClient.put(
     `/api/orders/${encodeURIComponent(orderId)}/mpr/batches/${encodeURIComponent(batchId)}`,
     payload,
+    withAuth()
+  )
+);
+
+export const refreshMprBomSource = (orderId, bomId) => unwrap(
+  apiRawClient.post(
+    `/api/orders/${encodeURIComponent(orderId)}/mpr/refresh-bom/${encodeURIComponent(bomId)}`,
+    null,
+    withAuth()
+  )
+);
+
+export const refreshAllMprBomSources = (orderId) => unwrap(
+  apiRawClient.post(
+    `/api/orders/${encodeURIComponent(orderId)}/mpr/refresh-sources`,
+    null,
     withAuth()
   )
 );

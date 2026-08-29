@@ -6,6 +6,35 @@ import useMasterDataPage from './useMasterDataPage';
 import { downloadMasterDataEditWorkbook, downloadMasterDataTemplate, getMasterDataErrorMessage } from '../../services/masterDataService';
 import { canManageSales } from 'utils/accessControl';
 
+const padTimestampPart = (value) => String(value).padStart(2, '0');
+
+const downloadTimestamp = () => {
+  const now = new Date();
+  return `${padTimestampPart(now.getDate())}${padTimestampPart(now.getMonth() + 1)}${now.getFullYear()}_${padTimestampPart(now.getHours())}${padTimestampPart(now.getMinutes())}${padTimestampPart(now.getSeconds())}`;
+};
+
+const downloadFilePart = (value, fallback) => {
+  const clean = String(value || '').trim().toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return clean || fallback;
+};
+
+const MANAGER_FILE_CODES = {
+  vendor: 'VENDORCODE',
+  matInfo: 'MATINFO',
+  loss: 'LOSS',
+  shipTo: 'SHIPTO',
+  materialShipTo: 'MATERIALSHIPTO'
+};
+
+const managerDownloadName = (config, scopeParams, template = false) => {
+  const buyer = downloadFilePart(scopeParams?.buyerKey, 'BUYER');
+  const manager = MANAGER_FILE_CODES[config?.type]
+    || downloadFilePart(config?.menuTitle || config?.type, 'MANAGER');
+  return `${buyer}_${manager}${template ? '_TEMPLATE' : ''}_${downloadTimestamp()}.xlsx`;
+};
+
 /**
  * Shared master-data shell.
  * The former page introduction card was removed to keep every master screen
@@ -43,7 +72,7 @@ export default function MasterDataFeaturePage({
         : new Blob([response?.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const disposition = response?.headers?.['content-disposition'] || '';
       const match = /filename="?([^";]+)"?/i.exec(disposition);
-      const filename = match?.[1] || `${config.type || 'master-data'}-edit.xlsx`;
+      const filename = match?.[1] || managerDownloadName(config, scopeParams);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -72,7 +101,7 @@ export default function MasterDataFeaturePage({
         : new Blob([response?.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const disposition = response?.headers?.['content-disposition'] || '';
       const match = /filename="?([^";]+)"?/i.exec(disposition);
-      const filename = match?.[1] || `${config.type || 'master-data'}-template.xlsx`;
+      const filename = match?.[1] || managerDownloadName(config, scopeParams, true);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;

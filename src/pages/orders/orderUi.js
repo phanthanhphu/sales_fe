@@ -19,6 +19,7 @@ export const statusSx = (status) => {
     BOM_SUBMITTED: { color: '#166534', bg: '#dcfce7' },
     SUBMITTED: { color: '#166534', bg: '#dcfce7' },
     MPR_DRAFT: { color: '#7e22ce', bg: '#f3e8ff' },
+    MPR_IN_PROGRESS: { color: '#7e22ce', bg: '#f3e8ff' },
     MPR_COMPLETED: { color: '#166534', bg: '#dcfce7' },
     COMPLETED: { color: '#166534', bg: '#dcfce7' }
   };
