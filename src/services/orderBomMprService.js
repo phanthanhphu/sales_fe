@@ -49,10 +49,15 @@ const excelUploadConfig = (file, onUploadProgress) => withAuth({
 export const replaceBomExcel = (bomId, file, options = {}) => {
   const formData = new FormData();
   formData.append('file', file);
+  const config = excelUploadConfig(file, options?.onUploadProgress);
+  config.params = {
+    ...(config.params || {}),
+    keepFirstDuplicateProductColors: Boolean(options?.keepFirstDuplicateProductColors)
+  };
   return unwrap(apiRawClient.post(
     `/api/boms/${encodeURIComponent(bomId)}/replace-excel`,
     formData,
-    excelUploadConfig(file, options?.onUploadProgress)
+    config
   ));
 };
 

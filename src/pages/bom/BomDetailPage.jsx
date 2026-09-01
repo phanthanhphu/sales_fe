@@ -258,6 +258,24 @@ const asDecimalValue = (value) => {
 
 const normalized = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
 
+const DUPLICATE_PRODUCT_COLOR_CONFIRMATION_CODE = 'DUPLICATE_PRODUCT_COLOR_CONFIRMATION_REQUIRED';
+
+const duplicateProductColorWarningFrom = (error) => {
+  const data = error?.response?.data;
+  if (Number(error?.response?.status) !== 409 || data?.code !== DUPLICATE_PRODUCT_COLOR_CONFIRMATION_CODE) {
+    return null;
+  }
+  return {
+    message: data?.message || 'Duplicate Product Color detected in BOM Excel.',
+    duplicates: Array.isArray(data?.duplicates) ? data.duplicates : []
+  };
+};
+
+const duplicateColumnCount = (duplicates = []) => duplicates.reduce(
+  (total, item) => total + (Array.isArray(item?.duplicateColumns) ? item.duplicateColumns.length : 0),
+  0
+);
+
 const productColorsForBom = (bom) => {
   // During the first render, BOM data has not returned from the API yet.
   // A default parameter only protects `undefined`, not an explicit `null`.
@@ -775,7 +793,7 @@ function PackingDialog({ open, record, saving, onClose, onSave }) {
     </Dialog>
   );
 }
-function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment, saving, onClose, onSave }) {
+function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment, productColors = [], saving, onClose, onSave }) {
   const blankChildColor = () => ({ id: '', childColor: '' });
   const clean = (value) => String(value || '').trim();
   const mapChildColors = (source = []) => (
@@ -864,8 +882,27 @@ function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment,
   const duplicateChildColor = normalizedChildColors.some((item, index, items) => (
     items.findIndex((candidate) => normalized(candidate.childColor) === normalized(item.childColor)) !== index
   ));
-  const canSave = Boolean(clean(form.colorName) && clean(form.patternNumber) && clean(form.season) && clean(form.styleNumber))
-    && !hasBlankChildColor && !duplicateChildColor;
+
+  const normalizeIdentityPart = (value) => clean(value)
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+  const productColorBusinessKey = (item) => [
+    normalizeIdentityPart(item?.colorName),
+    normalizeIdentityPart(item?.patternNumber),
+    normalizeIdentityPart(item?.season),
+    normalizeIdentityPart(item?.styleNumber)
+  ].join('\u001F');
+  const currentBusinessKey = productColorBusinessKey(form);
+  const hasCompleteBusinessKey = Boolean(
+    clean(form.colorName) && clean(form.patternNumber) && clean(form.season) && clean(form.styleNumber)
+  );
+  const duplicateProductColor = hasCompleteBusinessKey && productColors.some((item) => (
+    item?.id !== record?.id && productColorBusinessKey(item) === currentBusinessKey
+  ));
+
+  const canSave = hasCompleteBusinessKey
+    && !hasBlankChildColor && !duplicateChildColor && !duplicateProductColor;
 
   const submit = () => onSave?.({
     imageFile,
@@ -964,6 +1001,12 @@ function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment,
               </Button>
             </Stack>
 
+            {duplicateProductColor && (
+              <Alert severity="error" sx={{ py: 0.4 }}>
+                Duplicate Product Color detected. This BOM already contains the same Product / Style Color + Pattern Number + Season + Style Number:
+                {' '}<b>{clean(form.colorName)} · {clean(form.patternNumber)} · {clean(form.season)} · {clean(form.styleNumber)}</b>.
+              </Alert>
+            )}
             {duplicateChildColor && <Alert severity="error" sx={{ py: 0.4 }}>Duplicate Child Colors are not allowed.</Alert>}
             <Alert severity="info" sx={{ py: 0.4 }}>
               A Child Color that is already used by a Core or Packing material line cannot be deleted until that line is changed.
@@ -1742,6 +1785,12 @@ export default function BomDetailPage() {
   const [imagePreviewLine, setImagePreviewLine] = useState(null);
   const [attachmentPreview, setAttachmentPreview] = useState(null);
   const [excelUploadProgress, setExcelUploadProgress] = useState(initialUploadProgress());
+  const [duplicateExcelWarning, setDuplicateExcelWarning] = useState({
+    open: false,
+    file: null,
+    message: '',
+    duplicates: []
+  });
 
   const notify = useCallback((message, severity = 'success') => setNotice({ open: true, severity, message }), []);
 
@@ -1933,7 +1982,7 @@ export default function BomDetailPage() {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     try {
       setSaving(true);
-      await updateBom(bomId, { bomNo: bom.bomNo, bomName: bom.bomName, header: headerForm });
+      await updateBom(bomId, { bomName: bom.bomName, header: headerForm });
       setHeaderOpen(false);
       notify('BOM Header Saved.');
       await reloadWithoutJump();
@@ -2095,8 +2144,10 @@ export default function BomDetailPage() {
     excelUploadTickerRef.current = null;
   };
 
-  const executeExcelReplacement = async (file) => {
+  const executeExcelReplacement = async (file, options = {}) => {
     if (!file) return;
+    const keepFirstDuplicateProductColors = Boolean(options?.keepFirstDuplicateProductColors);
+    const confirmedDuplicates = Array.isArray(options?.confirmedDuplicates) ? options.confirmedDuplicates : [];
     setSaving(true);
     setExcelUploadProgress(initialUploadProgress(file, 'Preparing BOM Excel replacement...'));
     stopExcelUploadTicker();
@@ -2104,6 +2155,7 @@ export default function BomDetailPage() {
 
     try {
       await replaceBomExcel(bomId, file, {
+        keepFirstDuplicateProductColors,
         onUploadProgress: (event) => {
           const nextValue = uploadProgressFromEvent(event);
           setExcelUploadProgress((current) => ({
@@ -2122,13 +2174,33 @@ export default function BomDetailPage() {
         file,
         progress: 100,
         status: 'BOM Excel replacement completed.',
-        detail: 'Product Colors, Child Colors, materials and packing data were re-imported successfully.',
+        detail: keepFirstDuplicateProductColors && confirmedDuplicates.length
+          ? `${duplicateColumnCount(confirmedDuplicates)} duplicate Product Color column(s) were removed. The first occurrence of each duplicate was kept.`
+          : 'Product Colors, Child Colors, materials and packing data were re-imported successfully.',
         state: 'success'
       });
-      notify('BOM Excel replaced. Product / Style Colors, Child Colors, images, materials and packings were imported into this BOM.');
+      if (keepFirstDuplicateProductColors && confirmedDuplicates.length) {
+        notify(
+          `BOM Excel replaced. ${duplicateColumnCount(confirmedDuplicates)} duplicate Product Color column(s) were removed; the first occurrence was kept.`,
+          'warning'
+        );
+      } else {
+        notify('BOM Excel replaced. Product / Style Colors, Child Colors, images, materials and packings were imported into this BOM.');
+      }
       await reloadWithoutJump();
     } catch (error) {
       stopExcelUploadTicker();
+      const duplicateWarning = duplicateProductColorWarningFrom(error);
+      if (duplicateWarning && !keepFirstDuplicateProductColors) {
+        setExcelUploadProgress(initialUploadProgress());
+        setDuplicateExcelWarning({
+          open: true,
+          file,
+          message: duplicateWarning.message,
+          duplicates: duplicateWarning.duplicates
+        });
+        return;
+      }
       const message = getApiError(error, 'Unable to replace BOM Excel.');
       setExcelUploadProgress((current) => ({
         ...current,
@@ -2136,7 +2208,9 @@ export default function BomDetailPage() {
         file,
         status: 'BOM Excel replacement failed.',
         detail: message,
-        state: 'error'
+        state: 'error',
+        keepFirstDuplicateProductColors,
+        confirmedDuplicates
       }));
       notify(message, 'error');
     } finally {
@@ -2154,6 +2228,21 @@ export default function BomDetailPage() {
     event.target.value = '';
     if (!file) return;
     await executeExcelReplacement(file);
+  };
+
+  const cancelDuplicateExcelReplacement = () => {
+    setDuplicateExcelWarning({ open: false, file: null, message: '', duplicates: [] });
+    notify('BOM Excel replacement was cancelled. No BOM data was changed.', 'info');
+  };
+
+  const continueDuplicateExcelReplacement = async () => {
+    const file = duplicateExcelWarning.file;
+    const duplicates = duplicateExcelWarning.duplicates;
+    setDuplicateExcelWarning({ open: false, file: null, message: '', duplicates: [] });
+    await executeExcelReplacement(file, {
+      keepFirstDuplicateProductColors: true,
+      confirmedDuplicates: duplicates
+    });
   };
 
   const uploadLineImage = async (line, file) => {
@@ -2906,8 +2995,91 @@ export default function BomDetailPage() {
         detail={excelUploadProgress.detail}
         state={excelUploadProgress.state}
         onClose={() => setExcelUploadProgress(initialUploadProgress())}
-        onRetry={excelUploadProgress.state === 'error' ? () => executeExcelReplacement(excelUploadProgress.file) : undefined}
+        onRetry={excelUploadProgress.state === 'error' ? () => executeExcelReplacement(
+          excelUploadProgress.file,
+          {
+            keepFirstDuplicateProductColors: Boolean(excelUploadProgress.keepFirstDuplicateProductColors),
+            confirmedDuplicates: excelUploadProgress.confirmedDuplicates || []
+          }
+        ) : undefined}
       />
+
+      <Dialog
+        open={Boolean(duplicateExcelWarning.open)}
+        onClose={saving ? undefined : cancelDuplicateExcelReplacement}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle sx={{ pr: 6, fontWeight: 750, color: '#9a3412' }}>
+          Duplicate Product Color detected
+          <Typography sx={{ mt: 0.35, fontSize: '0.78rem', color: 'text.secondary', fontWeight: 400 }}>
+            The BOM has not been updated. Choose Continue to keep the first occurrence, or Cancel to check the Excel file.
+          </Typography>
+          <IconButton
+            aria-label="Close duplicate warning"
+            onClick={cancelDuplicateExcelReplacement}
+            disabled={saving}
+            sx={{ position: 'absolute', right: 14, top: 14 }}
+          >
+            <Close />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent dividers>
+          <Stack spacing={1.25}>
+            <Alert severity="warning">
+              Duplicate comparison uses only these four keys: Product / Style Color + Pattern Number + Season + Style Number.
+              Child Color values are not used for duplicate detection.
+            </Alert>
+
+            {(duplicateExcelWarning.duplicates || []).map((item, index) => {
+              const duplicateColumns = Array.isArray(item?.duplicateColumns) ? item.duplicateColumns : [];
+              const allColumns = [item?.keptColumn, ...duplicateColumns].filter(Boolean);
+              return (
+                <Paper
+                  key={`${item?.keptColumn || 'duplicate'}-${index}`}
+                  elevation={0}
+                  sx={{ p: 1.25, border: '1px solid #fed7aa', borderRadius: 1.5, backgroundColor: '#fffaf5' }}
+                >
+                  <Typography sx={{ fontWeight: 750, color: '#7c2d12' }}>
+                    {item?.colorName || 'Product Color'}
+                  </Typography>
+                  <Typography sx={{ mt: 0.3, fontSize: '0.78rem', color: 'text.secondary' }}>
+                    Pattern Number: <b>{item?.patternNumber || '—'}</b>
+                    {' · '}Season: <b>{item?.season || '—'}</b>
+                    {' · '}Style Number: <b>{item?.styleNumber || '—'}</b>
+                  </Typography>
+                  <Typography sx={{ mt: 0.55, fontSize: '0.78rem' }}>
+                    Duplicate Excel columns: <b>{allColumns.join(', ') || '—'}</b>
+                  </Typography>
+                  <Typography sx={{ mt: 0.25, fontSize: '0.76rem', color: '#9a3412' }}>
+                    Continue will keep column <b>{item?.keptColumn || 'the first column'}</b> and remove {duplicateColumns.length === 1 ? 'column' : 'columns'} <b>{duplicateColumns.join(', ') || 'to the right'}</b>.
+                  </Typography>
+                </Paper>
+              );
+            })}
+
+            {!(duplicateExcelWarning.duplicates || []).length && (
+              <Alert severity="warning">{duplicateExcelWarning.message}</Alert>
+            )}
+          </Stack>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={cancelDuplicateExcelReplacement} disabled={saving} sx={{ textTransform: 'none' }}>
+            Cancel — Check File
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={continueDuplicateExcelReplacement}
+            disabled={saving || !duplicateExcelWarning.file}
+            sx={{ textTransform: 'none', fontWeight: 750 }}
+          >
+            Continue — Keep One
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <BomAttachmentImagePreviewDialog
         open={Boolean(attachmentPreview)}
@@ -2958,6 +3130,7 @@ export default function BomDetailPage() {
         header={bom?.header}
         bomId={bomId}
         imageAttachment={productColorImageAttachment(bom, productColorCtx?.record?.id)}
+        productColors={productColors}
         saving={saving}
         onClose={() => setProductColorCtx(null)}
         onSave={saveProductColor}

@@ -177,10 +177,10 @@ export default function ScaleStationPage() {
               <TextField fullWidth label="Location" value={form.location} onChange={(e) => setForm((v) => ({ ...v, location: e.target.value }))} placeholder="Loading Door 01" />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField fullWidth label="PLC IP" value={form.plcIp} onChange={(e) => setForm((v) => ({ ...v, plcIp: e.target.value }))} placeholder="10.232.132.50" />
+              <TextField fullWidth label="PLC IP" value={form.plcIp} onChange={(e) => setForm((v) => ({ ...v, plcIp: e.target.value }))} placeholder="10.232.132.2050" />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField fullWidth label="Gateway IP" value={form.gatewayIp} onChange={(e) => setForm((v) => ({ ...v, gatewayIp: e.target.value }))} placeholder="10.232.132.60" />
+              <TextField fullWidth label="Gateway IP" value={form.gatewayIp} onChange={(e) => setForm((v) => ({ ...v, gatewayIp: e.target.value }))} placeholder="10.232.132.2060" />
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField fullWidth type="number" inputProps={{ step: '0.01', min: '0.01' }} label="Minimum Weight (kg)" value={form.minimumWeightKg} onChange={(e) => setForm((v) => ({ ...v, minimumWeightKg: e.target.value }))} />
