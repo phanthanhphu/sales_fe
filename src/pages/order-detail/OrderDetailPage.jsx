@@ -16,6 +16,7 @@ import { Link as RouterLink, useParams } from 'react-router-dom';
 import { getApiError, getOrder } from '../../services/orderBomMprService';
 import StatusBadge from '../../components/StatusBadge';
 import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
+import { formatDate } from '../orders/orderUi';
 import BomTab from './BomTab';
 import MprTab from './MprTab';
 
@@ -86,7 +87,7 @@ export default function OrderDetailPage() {
             </Typography>
             <Typography sx={{ color: '#718096', fontSize: '0.8rem' }}>•</Typography>
             <Typography sx={{ color: '#4f647a', fontSize: '0.82rem', fontWeight: 600 }}>
-              {[order.style, order.customer, order.season].filter(Boolean).join(' · ')}
+              {[order.orderName, `${formatDate(order.startDate)} → ${formatDate(order.endDate)}`].filter(Boolean).join(' · ')}
             </Typography>
           </Stack>
           <StatusBadge status={order.status || 'DRAFT'} label={['MPR_DRAFT', 'MPR_IN_PROGRESS'].includes(order.status) ? 'MPR IN PROGRESS' : undefined} />

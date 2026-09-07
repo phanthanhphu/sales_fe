@@ -22,7 +22,6 @@ export default function OrderSearch({ filters, onChange, onSearch, onReset, onAd
       }}
     >
       <TextField size="small" label="Keyword" value={filters.keyword} onChange={(event) => onChange('keyword', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onSearch()} sx={{ ...fieldSx, minWidth: { xs: '100%', md: 280 }, flex: 1 }} />
-      <TextField size="small" label="Season" value={filters.season} onChange={(event) => onChange('season', event.target.value)} sx={{ ...fieldSx, width: { xs: '100%', sm: 135 } }} />
       <TextField size="small" select label="Status" value={filters.status} onChange={(event) => onChange('status', event.target.value)} sx={{ ...fieldSx, width: { xs: '100%', sm: 170 } }}>
         <MenuItem value="">All status</MenuItem>
         <MenuItem value="DRAFT">Draft</MenuItem>

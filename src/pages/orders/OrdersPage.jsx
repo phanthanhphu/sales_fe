@@ -8,7 +8,7 @@ import OrderFormDialog from './OrderFormDialog';
 import OrderSearch from './OrderSearch';
 import OrderTable from './OrderTable';
 
-const emptyFilters = { keyword: '', season: '', status: '' };
+const emptyFilters = { keyword: '', status: '' };
 const SALES_WRITE_MESSAGE = 'Sales permission is required to create, edit, or delete orders.';
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
@@ -33,9 +33,8 @@ const resolveCreatedOrderId = (created, rows = [], payload = {}) => {
   const directId = responseRecordId(created);
   if (directId) return directId;
   const matches = rows.filter((row) => (
-    normalizeText(row?.orderNo) === normalizeText(payload.orderNo)
-    && normalizeText(row?.style) === normalizeText(payload.style)
-    && normalizeText(row?.customer) === normalizeText(payload.customer)
+    normalizeText(row?.orderName) === normalizeText(payload.orderName)
+    && String(row?.endDate || '') === String(payload.endDate || '')
   ));
   return String((lastOf(matches) || lastOf(rows) || {})?.id || '');
 };
@@ -147,7 +146,7 @@ export default function OrdersPage() {
     setSaving(true);
     try {
       let savedOrder = null;
-      const scopedPayload = isCreate ? { ...payload, orderNo: '', buyerKey } : { ...payload, buyerKey };
+      const scopedPayload = { ...payload, buyerKey };
       if (isCreate) savedOrder = await createOrder(scopedPayload);
       else await updateOrder(formRecord.id, scopedPayload);
       setFormOpen(false);

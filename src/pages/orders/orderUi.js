@@ -35,6 +35,20 @@ export const statusSx = (status) => {
   };
 };
 
+export const todayLocalDate = () => {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+};
+
+export const formatDate = (value) => {
+  if (!value) return '—';
+  const raw = String(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  return raw;
+};
+
 export const emptyOrder = {
-  orderNo: '', style: '', customer: '', season: '', comment: ''
+  orderName: '', startDate: '', endDate: ''
 };

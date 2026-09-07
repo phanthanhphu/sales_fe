@@ -1,6 +1,6 @@
 import { Box, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from '@mui/material';
 import { Delete, Edit, OpenInNew } from '@mui/icons-material';
-import { formatDateTime } from './orderUi';
+import { formatDate, formatDateTime } from './orderUi';
 import StatusBadge from '../../components/StatusBadge';
 import EmptyTableState from '../../components/EmptyTableState';
 import SortableTableCell from '../../components/SortableTableCell';
@@ -10,9 +10,9 @@ export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, ac
   const columns = [
     { label: 'No.', sortable: false },
     { label: 'Order No', key: 'orderNo' },
-    { label: 'Style', key: 'style' },
-    { label: 'Customer', key: 'customer' },
-    { label: 'Season', key: 'season' },
+    { label: 'Order Name', key: 'orderName' },
+    { label: 'Start Date', key: 'startDate' },
+    { label: 'End Date', key: 'endDate' },
     { label: 'Status', key: 'status' },
     { label: 'Updated At', key: 'updatedAt' },
     { label: 'Actions', sortable: false }
@@ -45,9 +45,9 @@ export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, ac
               <TableRow hover key={row.id} data-order-row-id={row.id} sx={{ scrollMarginTop: 96, '&:last-child td': { borderBottom: 0 }, '&:hover': { bgcolor: '#FAFCFF' } }}>
                 <TableCell align="center" sx={{ width: 56, color: '#64748b', fontWeight: 650 }}>{page * pageSize + index + 1}</TableCell>
                 <TableCell sx={{ fontWeight: 800, color: '#103B5C', whiteSpace: 'nowrap' }}>{row.orderNo}</TableCell>
-                <TableCell>{row.style}</TableCell>
-                <TableCell>{row.customer}</TableCell>
-                <TableCell sx={{ whiteSpace: 'nowrap' }}>{row.season}</TableCell>
+                <TableCell>{row.orderName || '—'}</TableCell>
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDate(row.startDate)}</TableCell>
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDate(row.endDate)}</TableCell>
                 <TableCell><StatusBadge status={row.status || 'DRAFT'} label={['MPR_DRAFT', 'MPR_IN_PROGRESS'].includes(row.status) ? 'MPR IN PROGRESS' : undefined} /></TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(row.updatedAt)}</TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>
