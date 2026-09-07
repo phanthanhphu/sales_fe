@@ -329,7 +329,7 @@ export default function MasterDataTable({
                         : '';
                       const actionLocked = locked || actionsDisabled;
                       const reason = actionsDisabled
-                        ? 'Sales permission is required to modify master data.'
+                        ? (config?.writePermissionMessage || 'Sales permission is required to modify master data.')
                         : (lockMessage || 'This record is locked.');
                       return (
                         <Stack direction="row" spacing={0.4} justifyContent="center">

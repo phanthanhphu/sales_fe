@@ -50,7 +50,7 @@ export default function MasterDataSearchPanel({
   const writeDisabled = disabled || actionsDisabled;
   const [excelAnchorEl, setExcelAnchorEl] = useState(null);
   const hasExcelActions = showTemplate || showEditWorkbook || showUpload;
-  const noWriteMessage = 'Sales permission is required to modify master data.';
+  const noWriteMessage = config?.writePermissionMessage || 'Sales permission is required to modify master data.';
 
   const handleKeyDown = useCallback(
     (event) => {

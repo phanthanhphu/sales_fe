@@ -1,6 +1,7 @@
 export const ACCESS_PERMISSION = Object.freeze({
   BOM: 'BOM',
   SALES: 'SALES',
+  CURRENCY: 'CURRENCY',
   REOPEN_COMPLETED_MPR: 'REOPEN_COMPLETED_MPR',
   VIEW_SYSTEM: 'VIEW_SYSTEM'
 });
@@ -23,7 +24,7 @@ export const isAdmin = () => normalizeRole(readStoredUser().role || localStorage
 const normalizePermissionValue = (value) => String(value || '').trim().toUpperCase();
 
 export const normalizeAccessPermissions = (value, role = normalizeRole(readStoredUser().role || localStorage.getItem('role'))) => {
-  if (role === 'ADMIN') return [ACCESS_PERMISSION.BOM, ACCESS_PERMISSION.SALES, ACCESS_PERMISSION.REOPEN_COMPLETED_MPR];
+  if (role === 'ADMIN') return [ACCESS_PERMISSION.BOM, ACCESS_PERMISSION.SALES, ACCESS_PERMISSION.CURRENCY, ACCESS_PERMISSION.REOPEN_COMPLETED_MPR];
 
   let source = value;
   if (source === undefined || source === null || source === '') {
@@ -42,7 +43,7 @@ export const normalizeAccessPermissions = (value, role = normalizeRole(readStore
   const set = new Set(
     (Array.isArray(source) ? source : [])
       .map(normalizePermissionValue)
-      .filter((item) => [ACCESS_PERMISSION.BOM, ACCESS_PERMISSION.SALES, ACCESS_PERMISSION.REOPEN_COMPLETED_MPR, ACCESS_PERMISSION.VIEW_SYSTEM].includes(item))
+      .filter((item) => [ACCESS_PERMISSION.BOM, ACCESS_PERMISSION.SALES, ACCESS_PERMISSION.CURRENCY, ACCESS_PERMISSION.REOPEN_COMPLETED_MPR, ACCESS_PERMISSION.VIEW_SYSTEM].includes(item))
   );
 
   if (set.has(ACCESS_PERMISSION.VIEW_SYSTEM)) return [ACCESS_PERMISSION.VIEW_SYSTEM];
@@ -54,6 +55,7 @@ export const normalizeAccessPermissions = (value, role = normalizeRole(readStore
 export const getAccessPermissions = () => normalizeAccessPermissions();
 export const canManageBom = () => isAdmin() || getAccessPermissions().some((item) => [ACCESS_PERMISSION.BOM, ACCESS_PERMISSION.SALES].includes(item));
 export const canManageSales = () => isAdmin() || getAccessPermissions().includes(ACCESS_PERMISSION.SALES);
+export const canManageCurrency = () => isAdmin() || getAccessPermissions().some((item) => [ACCESS_PERMISSION.SALES, ACCESS_PERMISSION.CURRENCY].includes(item));
 export const canReopenCompletedMpr = () => isAdmin() || (canManageSales() && getAccessPermissions().includes(ACCESS_PERMISSION.REOPEN_COMPLETED_MPR));
 export const isViewOnly = () => !isAdmin() && getAccessPermissions().length === 1 && getAccessPermissions()[0] === ACCESS_PERMISSION.VIEW_SYSTEM;
 export const canManageAdministration = () => isAdmin();
@@ -64,6 +66,7 @@ export const getAccessLabel = (permissions, role) => {
   const labels = {
     [ACCESS_PERMISSION.BOM]: 'BOM',
     [ACCESS_PERMISSION.SALES]: 'Sales / MPR',
+    [ACCESS_PERMISSION.CURRENCY]: 'Currency Action',
     [ACCESS_PERMISSION.REOPEN_COMPLETED_MPR]: 'Reopen Completed MPR'
   };
   return values.map((item) => labels[item] || item).join(' + ');

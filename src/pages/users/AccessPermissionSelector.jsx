@@ -13,6 +13,11 @@ const OPTIONS = [
     description: 'Manage orders, MPR, BOM, Vendor Code, MAT Info, Ship To, Loss and other master data.'
   },
   {
+    value: 'CURRENCY',
+    label: 'Currency Action',
+    description: 'Add, edit and delete Currency Master records without granting Sales / MPR write access.'
+  },
+  {
     value: 'REOPEN_COMPLETED_MPR',
     label: 'Reopen Completed MPR',
     description: 'Additional permission to move a completed MPR back to In Progress. Requires Sales / MPR access.'
@@ -26,7 +31,7 @@ const OPTIONS = [
 
 export const normalizeAccess = (value, role) => {
   if (String(role || '').toUpperCase() === 'ADMIN') {
-    return ['BOM', 'SALES', 'REOPEN_COMPLETED_MPR'];
+    return ['BOM', 'SALES', 'CURRENCY', 'REOPEN_COMPLETED_MPR'];
   }
 
   const raw = Array.isArray(value) ? value : String(value || '').split(/[,;|]/);
@@ -82,8 +87,8 @@ export default function AccessPermissionSelector({ role, value, onChange, disabl
       </Typography>
       <Typography sx={{ mt: 0.2, color: '#73859A', fontSize: '0.73rem' }}>
         {isAdmin
-          ? 'Admin receives full access, including permission to reopen a completed MPR.'
-          : 'Sales / MPR access also includes BOM management. Reopen Completed MPR is an additional permission.'}
+          ? 'Admin receives full access, including Currency and permission to reopen a completed MPR.'
+          : 'Currency Action can be granted independently. Sales / MPR still includes Currency and BOM management.'}
       </Typography>
       <FormGroup row sx={{ mt: 0.55, gap: { xs: 0, md: 1.1 } }}>
         {OPTIONS.map((option) => (

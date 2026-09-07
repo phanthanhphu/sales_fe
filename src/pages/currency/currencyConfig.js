@@ -29,6 +29,7 @@ export const currencyConfig = {
   menuTitle: 'Currency',
   pageTitle: 'Currency Master',
   singular: 'Currency',
+  writePermissionMessage: 'Currency Action or Sales permission is required to modify Currency.',
   allowUpload: false,
   primaryField: 'currencyCode',
   minTableWidth: 1080,

@@ -4,7 +4,7 @@ import MasterDataUploadDialog from './MasterDataUploadDialog';
 import ConfirmDeleteDialog from './ConfirmDeleteDialog';
 import useMasterDataPage from './useMasterDataPage';
 import { downloadMasterDataEditWorkbook, downloadMasterDataTemplate, getMasterDataErrorMessage } from '../../services/masterDataService';
-import { canManageSales } from 'utils/accessControl';
+import { canManageCurrency, canManageSales } from 'utils/accessControl';
 
 const padTimestampPart = (value) => String(value).padStart(2, '0');
 
@@ -50,7 +50,7 @@ export default function MasterDataFeaturePage({
   scopeTitle = ''
 }) {
   const page = useMasterDataPage(config, scopeParams);
-  const canWrite = canManageSales();
+  const canWrite = config?.type === 'currency' ? canManageCurrency() : canManageSales();
   const [editUploadOpen, setEditUploadOpen] = useState(false);
   const [downloadingEdit, setDownloadingEdit] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
