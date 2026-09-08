@@ -8,9 +8,10 @@ export const shipToConfig = {
   primaryField: 'shipToName',
   minTableWidth: 1080,
   allowUpload: true,
+  allowTemplate: true,
   allowEditWorkbook: true,
   excelSheetName: 'SHIP TO',
-  importHint: 'Expected columns: Ship To Code, Ship To Name, Active and Remark. Ship To Code and Ship To Name must be unique. Edited files support CREATE, UPDATE and DELETE with Row Version validation.',
+  importHint: 'Upload New accepts BOTH Ship To formats automatically: (1) Template: Action, Ship To Code, Ship To Name, Active, Remark; and (2) downloaded Edit Excel: Key, Action, Ship To Code, Ship To Name, Active, Remark. Template rows use CREATE (or blank). Edit rows use Key + CREATE/UPDATE/DELETE.',
 
   defaultValues: {
     shipToName: '',

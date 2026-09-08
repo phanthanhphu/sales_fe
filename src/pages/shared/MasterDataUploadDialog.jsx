@@ -194,6 +194,8 @@ export default function MasterDataUploadDialog({ config, open, onClose, onImport
               <>Use the downloaded <b>{sheetName}</b> edit file. Keep Key to update; leave Key blank to create a new row.</>
             ) : config.type === 'materialShipTo' ? (
               <>Use the <b>{sheetName}</b> sheet and the expected header columns. Repeated materials are merged and their Ship To values are appended to the same mapping.</>
+            ) : config.type === 'shipTo' ? (
+              <>Upload New accepts either the Ship To template without <b>Key</b> or the downloaded Edit Excel file with <b>Key</b>. The system detects the format automatically.</>
             ) : (
               <>Use the <b>{sheetName}</b> sheet and the expected header columns. This upload only creates new rows.</>
             )}

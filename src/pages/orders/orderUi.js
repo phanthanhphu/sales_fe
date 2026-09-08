@@ -41,6 +41,36 @@ export const todayLocalDate = () => {
   return local.toISOString().slice(0, 10);
 };
 
+
+export const isCompletedOrderStatus = (status) => {
+  const value = String(status || '').trim().toUpperCase();
+  return value === 'COMPLETED' || value === 'MPR_COMPLETED';
+};
+
+const parseDateOnlyUtc = (value) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const parsed = new Date(timestamp);
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return null;
+  return timestamp;
+};
+
+export const getOrderOverdueDays = (endDate, status) => {
+  if (!endDate || isCompletedOrderStatus(status)) return 0;
+
+  const end = parseDateOnlyUtc(endDate);
+  const today = parseDateOnlyUtc(todayLocalDate());
+  if (end === null || today === null || end >= today) return 0;
+
+  return Math.floor((today - end) / 86_400_000);
+};
+
+export const isOrderOverdue = (endDate, status) => getOrderOverdueDays(endDate, status) > 0;
+
 export const formatDate = (value) => {
   if (!value) return '—';
   const raw = String(value);
