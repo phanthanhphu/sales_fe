@@ -550,7 +550,9 @@ export default function MasterDataFormDialog({
                       maxLength: field.maxLength,
                       min: field.min,
                       max: field.max,
-                      step: field.step
+                      step: field.step,
+                      inputMode: field.inputMode,
+                      pattern: field.pattern
                     }}
                     sx={{
                       '& .MuiOutlinedInput-root': { borderRadius: 1.25 },
