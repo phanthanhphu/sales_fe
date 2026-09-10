@@ -1773,6 +1773,7 @@ export default function BomDetailPage() {
   const [headerOpen, setHeaderOpen] = useState(false);
   const [downloadAnchorEl, setDownloadAnchorEl] = useState(null);
   const [headerForm, setHeaderForm] = useState({});
+  const [bomNameForm, setBomNameForm] = useState('');
   const [lineCtx, setLineCtx] = useState(null);
   const [packingCtx, setPackingCtx] = useState(null);
   const [productColorCtx, setProductColorCtx] = useState(null);
@@ -1825,6 +1826,7 @@ export default function BomDetailPage() {
       setBom(nextBom);
       setLinePages(nextPages);
       setHeaderForm(data?.header || {});
+      setBomNameForm(String(data?.bomName || ''));
       return nextBom;
     } catch (error) {
       notify(getApiError(error, 'Unable to load BOM.'), 'error');
@@ -1980,14 +1982,18 @@ export default function BomDetailPage() {
 
   const saveHeader = async () => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    const nextBomName = String(bomNameForm || '').trim();
+    if (!nextBomName) { notify('BOM Name is required.', 'warning'); return; }
+    if (nextBomName.length > 200) { notify('BOM Name must not exceed 200 characters.', 'warning'); return; }
+
     try {
       setSaving(true);
-      await updateBom(bomId, { bomName: bom.bomName, header: headerForm });
+      await updateBom(bomId, { bomName: nextBomName, header: headerForm });
       setHeaderOpen(false);
-      notify('BOM Header Saved.');
+      notify('BOM information saved.');
       await reloadWithoutJump();
     } catch (error) {
-      notify(getApiError(error, 'Unable to save BOM header.'), 'error');
+      notify(getApiError(error, 'Unable to save BOM information.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -2544,17 +2550,21 @@ export default function BomDetailPage() {
             </Tooltip>
             <input ref={fileRef} type="file" accept=".xls,.xlsx" hidden onChange={uploadExcel} />
             <input ref={lineAttachmentInputRef} type="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" hidden onChange={uploadPendingLineAttachment} />
-            <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit BOM header'}>
+            <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit BOM information'}>
               <span>
                 <Button
                   size="small"
                   variant="contained"
                   startIcon={<Edit />}
-                  onClick={() => setHeaderOpen(true)}
+                  onClick={() => {
+                    setBomNameForm(String(bom?.bomName || ''));
+                    setHeaderForm(bom?.header || {});
+                    setHeaderOpen(true);
+                  }}
                   disabled={!canWrite}
                   sx={{ backgroundColor: '#0b3a5b', '&:hover': { backgroundColor: '#082f4b' } }}
                 >
-                  Edit Header
+                  Edit BOM
                 </Button>
               </span>
             </Tooltip>
@@ -3097,11 +3107,21 @@ export default function BomDetailPage() {
 
       <Dialog open={canWrite && headerOpen} onClose={saving ? undefined : () => setHeaderOpen(false)} fullWidth maxWidth="md">
         <DialogTitle sx={{ pr: 6, fontWeight: 750, color: '#103B5C' }}>
-          Edit BOM Header
+          Edit BOM Information
           <IconButton onClick={() => setHeaderOpen(false)} disabled={saving} sx={{ position: 'absolute', right: 14, top: 14 }}>×</IconButton>
         </DialogTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' }, gap: 1.5 }}>
+            <TextField
+              required
+              autoFocus
+              label="BOM Name"
+              value={bomNameForm}
+              onChange={(event) => setBomNameForm(event.target.value)}
+              inputProps={{ maxLength: 200 }}
+              helperText={`${bomNameForm.length}/200 · BOM No. ${bom?.bomNo || '-'} cannot be changed`}
+              sx={{ gridColumn: { xs: '1', sm: '1 / -1' } }}
+            />
             {['buyer', 'revStage', 'season', 'styleNumber', 'styleName', 'markerDate', 'markerMaker', 'factoryProduct', 'patternNumber', 'patternMaker', 'bomMaker', 'size', 'bomDate', 'patternDate', 'patternRevisedDate', 'comments'].map((key) => (
               <TextField
                 key={key}
@@ -3116,7 +3136,7 @@ export default function BomDetailPage() {
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setHeaderOpen(false)} disabled={saving} sx={{ textTransform: 'none' }}>Cancel</Button>
-          <Button variant="contained" onClick={saveHeader} disabled={saving} sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}>
+          <Button variant="contained" onClick={saveHeader} disabled={saving || !bomNameForm.trim()} sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}>
             {saving ? 'Saving...' : 'Save Changes'}
           </Button>
         </DialogActions>

@@ -25,7 +25,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { Add, Delete, FileUpload, OpenInNew, Publish, Refresh, RestartAlt, Search } from '@mui/icons-material';
+import { Add, Delete, Edit, FileUpload, OpenInNew, Publish, Refresh, RestartAlt, Search } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { canManageBom } from 'utils/accessControl';
 import {
@@ -36,7 +36,8 @@ import {
   getBomExportUrl,
   listBoms,
   resubmitBom,
-  submitBom
+  submitBom,
+  updateBom
 } from '../../services/orderBomMprService';
 import { formatDateTime } from '../orders/orderUi';
 import StatusBadge from '../../components/StatusBadge';
@@ -133,6 +134,8 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
   const [addOpen, setAddOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
+  const [editBomName, setEditBomName] = useState('');
   const [filters, setFilters] = useState(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
   const [notice, setNotice] = useState({ open: false, severity: 'success', message: '' });
@@ -204,6 +207,36 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
       navigate(buyerPath(buyerKey, `orders/${order.id}/boms/${bom.id}`));
     } catch (error) {
       notify(getApiError(error, 'Unable to create BOM.'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEditBom = (bom) => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    setEditTarget(bom);
+    setEditBomName(String(bom?.bomName || ''));
+  };
+
+  const saveBomName = async () => {
+    if (!canWrite || !editTarget?.id) return;
+    const nextName = String(editBomName || '').trim();
+    if (!nextName) { notify('BOM Name is required.', 'warning'); return; }
+    if (nextName.length > 200) { notify('BOM Name must not exceed 200 characters.', 'warning'); return; }
+
+    setSaving(true);
+    try {
+      const updated = await updateBom(editTarget.id, {
+        bomName: nextName,
+        header: editTarget.header || {}
+      });
+      setRows((current) => current.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)));
+      setEditTarget(null);
+      setEditBomName('');
+      notify('BOM Name updated.');
+      await load();
+    } catch (error) {
+      notify(getApiError(error, 'Unable to update BOM Name.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -350,6 +383,7 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(bom.updatedAt)}</TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>
                     <Tooltip title="Open BOM"><IconButton size="small" color="primary" onClick={() => navigate(buyerPath(buyerKey, `orders/${order.id}/boms/${bom.id}`))}><OpenInNew fontSize="small" /></IconButton></Tooltip>
+                    <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit BOM Name'}><span><IconButton size="small" disabled={!canWrite} onClick={() => openEditBom(bom)}><Edit fontSize="small" /></IconButton></span></Tooltip>
                     <Tooltip title={
                       !canWrite ? writeBlockedMessage
                         : bom.status !== 'SUBMITTED' ? 'Submit BOM'
@@ -402,6 +436,38 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
           boundaryCount={1}
         />
       </Stack>
+
+      <Dialog open={canWrite && Boolean(editTarget)} onClose={saving ? undefined : () => setEditTarget(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 750, color: '#103B5C' }}>Edit BOM Name</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1.5}>
+            <TextField
+              required
+              autoFocus
+              label="BOM Name"
+              value={editBomName}
+              onChange={(event) => setEditBomName(event.target.value)}
+              inputProps={{ maxLength: 200 }}
+              helperText={`${editBomName.length}/200`}
+              fullWidth
+            />
+            <Typography variant="body2" color="text.secondary">
+              BOM No. {editTarget?.bomNo || '-'} remains unchanged.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setEditTarget(null)} disabled={saving} sx={{ textTransform: 'none' }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveBomName}
+            disabled={saving || !editBomName.trim()}
+            sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}
+          >
+            {saving ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <BomCreateDialog open={canWrite && addOpen} saving={saving} onClose={() => setAddOpen(false)} onSave={create} />
       <Dialog open={canWrite && Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)}>
