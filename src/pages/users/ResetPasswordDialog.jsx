@@ -54,7 +54,7 @@ export default function ResetPasswordDialog({ open, onClose, onUpdate, user }) {
     const next = {};
     if (!formData.email.trim()) next.email = 'User email is missing.';
     if (!formData.newPassword) next.newPassword = 'New password is required.';
-    else if (formData.newPassword.length < 6) next.newPassword = 'Password must contain at least 6 characters.';
+    else if (formData.newPassword.length < 8) next.newPassword = 'New password must be at least 8 characters long.';
     if (!formData.confirmNewPassword) next.confirmNewPassword = 'Confirm the new password.';
     else if (formData.newPassword !== formData.confirmNewPassword) next.confirmNewPassword = 'Passwords do not match.';
     setErrors(next);
@@ -82,13 +82,30 @@ export default function ResetPasswordDialog({ open, onClose, onUpdate, user }) {
       });
       if (!response.ok) {
         const raw = await response.text();
-        let message = `Password reset failed (${response.status}).`;
+        let payload = {};
+
         try {
-          message = JSON.parse(raw)?.message || message;
+          payload = raw ? JSON.parse(raw) : {};
         } catch {
-          message = raw || message;
+          payload = { message: raw };
         }
-        throw new Error(message);
+
+        const responseFieldErrors =
+          payload?.fieldErrors && typeof payload.fieldErrors === 'object'
+            ? payload.fieldErrors
+            : {};
+        const fieldMessages = Object.values(responseFieldErrors).filter(Boolean);
+        const message =
+          fieldMessages.join(' • ') ||
+          payload?.message ||
+          `Password reset failed (${response.status}).`;
+
+        if (Object.keys(responseFieldErrors).length > 0) {
+          setErrors((previous) => ({ ...previous, ...responseFieldErrors }));
+        }
+
+        setNotice({ open: true, message, severity: 'error' });
+        return;
       }
       const data = await response.json();
       onUpdate?.(data);
@@ -125,7 +142,7 @@ export default function ResetPasswordDialog({ open, onClose, onUpdate, user }) {
               onChange={(event) => update('newPassword', event.target.value)}
               disabled={saving}
               error={Boolean(errors.newPassword)}
-              helperText={errors.newPassword}
+              helperText={errors.newPassword || 'Password requirement: at least 8 characters.'}
               sx={{ ...stableFieldSx, gridColumn: { xs: 'span 1', sm: 'span 6' } }}
             />
             <TextField

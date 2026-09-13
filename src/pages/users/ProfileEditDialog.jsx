@@ -130,7 +130,7 @@ export default function ProfileEditDialog({ open, onClose, onUpdate, user }) {
       const payload = new FormData();
       ['username', 'address', 'phone'].forEach((key) => payload.append(key, formData[key].trim()));
       if (newImage) payload.append('profileImage', newImage);
-      if (imageToDelete) payload.append('imageToDelete', imageToDelete);
+      if (imageToDelete && !newImage) payload.append('removeProfileImage', 'true');
 
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/api/users/${user.id}`, {

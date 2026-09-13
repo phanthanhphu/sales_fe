@@ -167,12 +167,18 @@ export default function MasterDataFormDialog({
   const [snack, setSnack] = useState({ open: false, severity: 'error', message: '' });
 
   const isEditing = mode === 'edit';
-  const recordLocked = Boolean(
+  const legacyRecordLocked = Boolean(
     isEditing && typeof config.isRecordLocked === 'function' && config.isRecordLocked(record)
   );
-  const recordLockMessage = recordLocked && typeof config.recordLockMessage === 'function'
-    ? config.recordLockMessage(record)
-    : '';
+  const editRecordLocked = Boolean(
+    isEditing && typeof config.isEditLocked === 'function' && config.isEditLocked(record)
+  );
+  const recordLocked = legacyRecordLocked || editRecordLocked;
+  const recordLockMessage = editRecordLocked && typeof config.editLockMessage === 'function'
+    ? config.editLockMessage(record)
+    : legacyRecordLocked && typeof config.recordLockMessage === 'function'
+      ? config.recordLockMessage(record)
+      : '';
   const title = `${isEditing ? 'Edit' : 'Add'} ${config.menuTitle}`;
   const formFields = config.formFields || [];
   const usesCurrencyOptions = Boolean(config.needsCurrencyOptions || formFields.some((field) => field.optionSource === 'currency'));

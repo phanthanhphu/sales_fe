@@ -115,6 +115,7 @@ export const vendorCodeConfig = {
       render: (row) => (row.pendingCompletion ? 'Pending completion' : 'Complete')
     },
     { label: 'Remark', key: 'remark', minWidth: 220, hideOnSmall: true },
+    { label: 'Usage', key: 'used', minWidth: 115, sortable: false, render: (row) => row?.editLocked ? 'MPR locked' : row?.used ? 'Referenced' : 'Available' },
     {
       label: 'Updated At',
       key: 'updatedAt',
@@ -124,6 +125,18 @@ export const vendorCodeConfig = {
       render: (row) => formatDateTime(row.updatedAt)
     }
   ],
+
+  isEditLocked: (record) => Boolean(record?.editLocked),
+  editLockMessage: (record) => record?.lockReason || 'This Vendor Code is used by MPR and cannot be edited.',
+  isDeleteLocked: (record) => Boolean(record?.deleteLocked),
+  deleteLockMessage: (record) => record?.lockReason || 'This Vendor Code is in use and cannot be deleted.',
+  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && field.name === 'shortNameSupplier',
+  getFieldHelperText: ({ field, mode, record }) => {
+    if (mode === 'edit' && record?.used && field.name === 'shortNameSupplier') {
+      return record?.editLocked ? 'Short Name Supplier is locked because MPR is using this Vendor Code.' : 'Short Name Supplier is locked because MAT_INFO is referencing this Vendor Code. Other Vendor fields remain editable.';
+    }
+    return field.helperText || '';
+  },
 
   toPayload: (values) => ({
     shortNameSupplier: trimText(values.shortNameSupplier),

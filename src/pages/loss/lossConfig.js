@@ -205,6 +205,7 @@ export const lossConfig = {
       sortValue: (row) => Number(row.factorGte3001 || 0),
       render: (row) => row.factorGte3001 ?? '-'
     },
+    { label: 'Usage', key: 'used', minWidth: 115, sortable: false, render: (row) => row?.editLocked ? 'MPR locked' : row?.used ? 'Referenced' : 'Available' },
     {
       label: 'Updated At',
       key: 'updatedAt',
@@ -214,6 +215,18 @@ export const lossConfig = {
       render: (row) => formatDateTime(row.updatedAt)
     }
   ],
+
+  isEditLocked: (record) => Boolean(record?.editLocked),
+  editLockMessage: (record) => record?.lockReason || 'This Loss record is used by MPR and cannot be edited.',
+  isDeleteLocked: (record) => Boolean(record?.deleteLocked),
+  deleteLockMessage: (record) => record?.lockReason || 'This Loss record is in use and cannot be deleted.',
+  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && field.name === 'materialGroup',
+  getFieldHelperText: ({ field, mode, record }) => {
+    if (mode === 'edit' && record?.used && field.name === 'materialGroup') {
+      return record?.editLocked ? 'Material Group is locked because MPR is using this Loss record.' : 'Material Group is locked because MAT_INFO or BOM is referencing this Loss record. Loss rates remain editable.';
+    }
+    return field.helperText || '';
+  },
 
   toFormValues: (record, defaults) => ({
     ...defaults,

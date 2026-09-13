@@ -17,6 +17,7 @@ import {
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import { useTheme } from '@mui/material/styles';
 import { API_BASE_URL } from '../../config';
+import { toDepartmentParams, validateDepartmentForm } from './departmentConfig';
 import {
   stableCloseButtonSx,
   stableDialogActionsSx,
@@ -50,9 +51,7 @@ export default function AddDepartmentDialog({ open, onClose, onSuccess }) {
   }, [open]);
 
   const validate = () => {
-    const next = {};
-    if (!division.trim()) next.division = 'Division is required.';
-    if (!departmentName.trim()) next.departmentName = 'Department name is required.';
+    const next = validateDepartmentForm({ division, departmentName });
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -65,10 +64,7 @@ export default function AddDepartmentDialog({ open, onClose, onSuccess }) {
 
     setSaving(true);
     try {
-      const params = new URLSearchParams({
-        division: division.trim(),
-        departmentName: departmentName.trim()
-      });
+      const params = toDepartmentParams({ division, departmentName });
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE}?${params}`, {
         method: 'POST',
@@ -105,7 +101,7 @@ export default function AddDepartmentDialog({ open, onClose, onSuccess }) {
     <>
       <Dialog
         open={open}
-        onClose={saving ? undefined : onClose}
+        onClose={saving ? undefined : () => onClose?.(false)}
         fullScreen={fullScreen}
         maxWidth="sm"
         fullWidth
@@ -115,7 +111,7 @@ export default function AddDepartmentDialog({ open, onClose, onSuccess }) {
           <Typography component="div" sx={{ fontSize: '1.15rem', fontWeight: 750, lineHeight: 1.25 }}>
             Add Department
           </Typography>
-          <IconButton aria-label="Close" onClick={onClose} disabled={saving} sx={stableCloseButtonSx}>
+          <IconButton aria-label="Close" onClick={() => onClose?.(false)} disabled={saving} sx={stableCloseButtonSx}>
             <CloseRoundedIcon />
           </IconButton>
         </DialogTitle>
@@ -152,7 +148,7 @@ export default function AddDepartmentDialog({ open, onClose, onSuccess }) {
         </DialogContent>
 
         <DialogActions sx={stableDialogActionsSx}>
-          <Button onClick={onClose} disabled={saving} sx={stableTextButtonSx}>Cancel</Button>
+          <Button onClick={() => onClose?.(false)} disabled={saving} sx={stableTextButtonSx}>Cancel</Button>
           <Button onClick={save} disabled={saving} variant="contained" sx={stablePrimaryButtonSx}>
             {saving ? <CircularProgress size={19} color="inherit" /> : 'Create Department'}
           </Button>

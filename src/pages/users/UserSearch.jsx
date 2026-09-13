@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react';
 import { Box, Button, FormControl, InputLabel, MenuItem, Paper, Select, TextField } from '@mui/material';
 import { Add, Search } from '@mui/icons-material';
+import { userConfig } from './userConfig';
 
 const fieldSx = { flex: '1 1 155px', minWidth: { xs: '100%', sm: 145, md: 155 }, '& .MuiInputBase-root': { height: 34 }, '& .MuiInputLabel-root': { fontWeight: 600 } };
 const actionButtonSx = { height: 34, minWidth: 82, px: 1.35, borderRadius: 1.2, textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' };
@@ -18,8 +19,8 @@ export default function UserSearch({
         <TextField label="Username" size="small" value={searchUsername} onChange={(event) => { resetPage(); setSearchUsername(event.target.value); }} onKeyDown={handleKeyDown} disabled={disabled} fullWidth sx={fieldSx} />
         <TextField label="Company Email" size="small" value={searchEmail} onChange={(event) => { resetPage(); setSearchEmail(event.target.value); }} onKeyDown={handleKeyDown} disabled={disabled} fullWidth sx={fieldSx} />
         <TextField label="Phone" size="small" value={searchPhone} onChange={(event) => { resetPage(); setSearchPhone(event.target.value); }} onKeyDown={handleKeyDown} disabled={disabled} fullWidth sx={fieldSx} />
-        <FormControl fullWidth disabled={disabled} size="small" sx={fieldSx}><InputLabel>Role</InputLabel><Select value={searchRole || ''} label="Role" onChange={(event) => { resetPage(); setSearchRole(event.target.value); }}><MenuItem value="">All roles</MenuItem><MenuItem value="USER">User</MenuItem><MenuItem value="ADMIN">Admin</MenuItem></Select></FormControl>
-        <FormControl fullWidth disabled={disabled} size="small" sx={fieldSx}><InputLabel>System Access</InputLabel><Select value={searchAccessPermission || ''} label="System Access" onChange={(event) => { resetPage(); setSearchAccessPermission?.(event.target.value); }}><MenuItem value="">All access</MenuItem><MenuItem value="BOM">BOM</MenuItem><MenuItem value="SALES">Sales</MenuItem><MenuItem value="CURRENCY">Currency Action</MenuItem><MenuItem value="REOPEN_COMPLETED_MPR">Reopen Completed MPR</MenuItem><MenuItem value="VIEW_SYSTEM">View System</MenuItem></Select></FormControl>
+        <FormControl fullWidth disabled={disabled} size="small" sx={fieldSx}><InputLabel>Role</InputLabel><Select value={searchRole || ''} label="Role" onChange={(event) => { resetPage(); setSearchRole(event.target.value); }}><MenuItem value="">All roles</MenuItem>{userConfig.roleOptions.map((option) => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}</Select></FormControl>
+        <FormControl fullWidth disabled={disabled} size="small" sx={fieldSx}><InputLabel>System Access</InputLabel><Select value={searchAccessPermission || ''} label="System Access" onChange={(event) => { resetPage(); setSearchAccessPermission?.(event.target.value); }}>{userConfig.searchAccessOptions.map((option) => <MenuItem key={option.value || "ALL"} value={option.value}>{option.label}</MenuItem>)}</Select></FormControl>
         <TextField label="Address" size="small" value={searchAddress} onChange={(event) => { resetPage(); setSearchAddress(event.target.value); }} onKeyDown={handleKeyDown} disabled={disabled} fullWidth sx={fieldSx} />
         <Button variant="contained" startIcon={<Search fontSize="small" />} onClick={() => { resetPage(); onSearch?.(); }} disabled={disabled} sx={{ ...actionButtonSx, backgroundColor: '#103B5C' }}>Search</Button>
         <Button variant="outlined" onClick={onReset} disabled={disabled} sx={{ ...actionButtonSx, borderColor: '#cbd5e1', color: '#334155' }}>Reset</Button>

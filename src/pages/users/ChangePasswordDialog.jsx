@@ -145,7 +145,7 @@ export default function ChangePasswordDialog({ open, onClose, onUpdate, user }) 
           <Box sx={stableFormGridSx}>
             <TextField label="Company Email" value={formData.email} disabled error={Boolean(errors.email)} helperText={errors.email} sx={{ ...stableFieldSx, gridColumn: { xs: 'span 1', sm: 'span 12' } }} />
             <TextField required type="password" label="Current Password" value={formData.oldPassword} onChange={(event) => update('oldPassword', event.target.value)} disabled={saving} error={Boolean(errors.oldPassword)} helperText={errors.oldPassword} sx={{ ...stableFieldSx, gridColumn: { xs: 'span 1', sm: 'span 12' } }} />
-            <TextField required type="password" label="New Password" value={formData.newPassword} onChange={(event) => update('newPassword', event.target.value)} disabled={saving} error={Boolean(errors.newPassword)} helperText={errors.newPassword} sx={{ ...stableFieldSx, gridColumn: { xs: 'span 1', sm: 'span 6' } }} />
+            <TextField required type="password" label="New Password" value={formData.newPassword} onChange={(event) => update('newPassword', event.target.value)} disabled={saving} error={Boolean(errors.newPassword)} helperText={errors.newPassword || 'Password requirement: at least 8 characters.'} sx={{ ...stableFieldSx, gridColumn: { xs: 'span 1', sm: 'span 6' } }} />
             <TextField required type="password" label="Confirm New Password" value={formData.confirmNewPassword} onChange={(event) => update('confirmNewPassword', event.target.value)} disabled={saving} error={Boolean(errors.confirmNewPassword)} helperText={errors.confirmNewPassword} sx={{ ...stableFieldSx, gridColumn: { xs: 'span 1', sm: 'span 6' } }} />
           </Box>
         </DialogContent>

@@ -15,6 +15,7 @@ import { getAccessLabel, normalizeAccessPermissions } from 'utils/accessControl'
 import { getBuyerDefinition, isAdminUser, normalizeBuyerKey } from 'utils/buyerContext';
 import StatusBadge from '../../components/StatusBadge';
 import EmptyTableState from '../../components/EmptyTableState';
+import { userConfig } from './userConfig';
 
 const API_ROOT = `${API_BASE_URL.replace(/\/$/, '')}/api`;
 const chipTone = {
@@ -40,7 +41,7 @@ function PaginationBar({ count, page, rowsPerPage, loading, onPageChange, onRows
 }
 
 export default function UserManagementPage() {
-  const [users, setUsers] = useState([]); const [loading, setLoading] = useState(false); const [page, setPage] = useState(0); const [rowsPerPage, setRowsPerPage] = useState(10); const [totalRows, setTotalRows] = useState(0); const [sort, setSort] = useState({ key: '', direction: '' });
+  const [users, setUsers] = useState([]); const [loading, setLoading] = useState(false); const [page, setPage] = useState(0); const [rowsPerPage, setRowsPerPage] = useState(userConfig.defaultRowsPerPage); const [totalRows, setTotalRows] = useState(0); const [sort, setSort] = useState({ key: '', direction: '' });
   const [searchUsername, setSearchUsername] = useState(''); const [searchAddress, setSearchAddress] = useState(''); const [searchPhone, setSearchPhone] = useState(''); const [searchEmail, setSearchEmail] = useState(''); const [searchRole, setSearchRole] = useState(''); const [searchAccessPermission, setSearchAccessPermission] = useState('');
   const [selectedUser, setSelectedUser] = useState(null); const [addOpen, setAddOpen] = useState(false); const [editOpen, setEditOpen] = useState(false); const [viewOpen, setViewOpen] = useState(false); const [resetOpen, setResetOpen] = useState(false); const [deleteOpen, setDeleteOpen] = useState(false); const [notice, setNotice] = useState({ open: false, message: '', severity: 'success' }); const [imageErrors, setImageErrors] = useState({});
 

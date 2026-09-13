@@ -57,8 +57,21 @@ export const shipToConfig = {
       render: (row) => row.active === false ? 'Inactive' : 'Active'
     },
     { label: 'Remark', key: 'remark', minWidth: 260, hideOnSmall: true },
+    { label: 'Usage', key: 'used', minWidth: 105, sortable: false, render: (row) => row?.used ? 'In use' : 'Available' },
     { label: 'Updated At', key: 'updatedAt', minWidth: 150, hideOnSmall: true, isDate: true, render: (row) => formatDateTime(row.updatedAt) }
   ],
+
+  isEditLocked: (record) => Boolean(record?.used),
+  editLockMessage: (record) => record?.lockReason || 'This Ship To is in use and cannot be edited.',
+  isDeleteLocked: (record) => Boolean(record?.deleteLocked),
+  deleteLockMessage: (record) => record?.lockReason || 'This Ship To is used and cannot be deleted.',
+  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && ['shipToName', 'shipToCode'].includes(field.name),
+  getFieldHelperText: ({ field, mode, record }) => {
+    if (mode === 'edit' && record?.used && ['shipToName', 'shipToCode'].includes(field.name)) {
+      return 'Ship To Name/Code is locked because MPR or Material Ship To Mapping is using this record.';
+    }
+    return field.helperText || '';
+  },
 
   toFormValues: (record, defaults) => ({
     ...defaults,

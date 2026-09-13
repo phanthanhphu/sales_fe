@@ -82,8 +82,22 @@ export const materialShipToConfig = {
     },
     { label: 'Status', key: 'active', minWidth: 95, render: (row) => row.active === false ? 'Inactive' : 'Active' },
     { label: 'Remark', key: 'remark', minWidth: 220, hideOnSmall: true },
+    { label: 'Usage', key: 'used', minWidth: 105, sortable: false, render: (row) => row?.used ? 'In use' : 'Available' },
     { label: 'Updated At', key: 'updatedAt', minWidth: 155, hideOnSmall: true, isDate: true, render: (row) => formatDateTime(row.updatedAt) }
   ],
+
+  isEditLocked: (record) => Boolean(record?.used),
+  editLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is in use and cannot be edited.',
+  isDeleteLocked: (record) => Boolean(record?.deleteLocked),
+  deleteLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is used by MPR and cannot be deleted.',
+  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used)
+    && ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit'].includes(field.name),
+  getFieldHelperText: ({ field, mode, record }) => {
+    if (mode === 'edit' && record?.used && ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit'].includes(field.name)) {
+      return 'Material identity is locked because an MPR snapshot already uses this mapping.';
+    }
+    return field.helperText || '';
+  },
 
   validate: (values) => {
     const errors = {};

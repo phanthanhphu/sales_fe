@@ -35,30 +35,18 @@ import {
   listBuyers,
   updateBuyer
 } from '../../services/buyerService';
-import { normalizeBuyerKey } from '../../utils/buyerContext';
 import { PaginationBar } from '../shared/MasterDataTable';
 import StatusBadge from '../../components/StatusBadge';
 import SortableTableCell from '../../components/SortableTableCell';
-
-const emptyForm = {
-  buyerKey: '',
-  buyerName: '',
-  active: true,
-  description: ''
-};
+import { buyerConfig, toBuyerFormValues, toBuyerPayload, validateBuyerForm } from './buyerConfig';
 
 function BuyerFormDialog({ open, record, saving, onClose, onSave }) {
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(buyerConfig.defaultValues);
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
     if (!open) return;
-    setForm(record ? {
-      buyerKey: record.buyerKey || '',
-      buyerName: record.buyerName || '',
-      active: record.active ?? true,
-      description: record.description || ''
-    } : emptyForm);
+    setForm(toBuyerFormValues(record));
     setErrors({});
   }, [open, record]);
 
@@ -68,18 +56,10 @@ function BuyerFormDialog({ open, record, saving, onClose, onSave }) {
   };
 
   const submit = () => {
-    const next = {};
-    const buyerKey = normalizeBuyerKey(form.buyerKey);
-    if (!form.buyerKey.trim()) next.buyerKey = 'Buyer Key is required.';
-    if (!form.buyerName.trim()) next.buyerName = 'Buyer Name is required.';
+    const next = validateBuyerForm(form);
     setErrors(next);
     if (Object.keys(next).length) return;
-    onSave?.({
-      buyerKey,
-      buyerName: form.buyerName.trim(),
-      active: Boolean(form.active),
-      description: form.description.trim()
-    });
+    onSave?.(toBuyerPayload(form));
   };
 
   return (
@@ -135,12 +115,12 @@ function BuyerFormDialog({ open, record, saving, onClose, onSave }) {
 export default function BuyerManagementPage() {
   const [keyword, setKeyword] = useState('');
   const [active, setActive] = useState('');
-  const [applied, setApplied] = useState({ keyword: '', active: '' });
+  const [applied, setApplied] = useState(buyerConfig.defaultFilters);
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [rowsPerPage, setRowsPerPage] = useState(buyerConfig.defaultRowsPerPage);
   const [totalRows, setTotalRows] = useState(0);
-  const [sort, setSort] = useState({ key: 'createdAt', direction: 'desc' });
+  const [sort, setSort] = useState(buyerConfig.defaultSort);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formRecord, setFormRecord] = useState(null);
@@ -238,9 +218,7 @@ export default function BuyerManagementPage() {
           <FormControl size="small" sx={{ minWidth: 140, '& .MuiInputBase-root': { height: 34 } }}>
             <InputLabel>Status</InputLabel>
             <Select value={active} label="Status" onChange={(event) => setActive(event.target.value)}>
-              <MenuItem value="">All</MenuItem>
-              <MenuItem value="true">Active</MenuItem>
-              <MenuItem value="false">Inactive</MenuItem>
+              {buyerConfig.statusOptions.map((option) => <MenuItem key={option.value || 'ALL'} value={option.value}>{option.label}</MenuItem>)}
             </Select>
           </FormControl>
           <Button variant="contained" startIcon={<Search />} onClick={() => { setPage(0); setApplied({ keyword: keyword.trim(), active }); }} sx={{ textTransform: 'none', backgroundColor: '#103B5C' }}>Search</Button>
@@ -256,14 +234,7 @@ export default function BuyerManagementPage() {
           <Table size="small" sx={{ minWidth: 850 }}>
             <TableHead>
               <TableRow>
-                {[
-                  { label: 'No.', sortable: false },
-                  { label: 'Buyer Key', key: 'buyerKey' },
-                  { label: 'Buyer Name', key: 'buyerName' },
-                  { label: 'Status', key: 'active' },
-                  { label: 'Description', key: 'description' },
-                  { label: 'Actions', sortable: false }
-                ].map((column) => (
+                {buyerConfig.columns.map((column) => (
                   <SortableTableCell key={column.label} label={column.label} columnKey={column.key} sortable={column.sortable !== false} sortKey={sort.key} sortDirection={sort.direction} onSort={changeSort} sx={{ fontWeight: 750, backgroundColor: '#F8FAFC' }} />
                 ))}
               </TableRow>
@@ -280,8 +251,12 @@ export default function BuyerManagementPage() {
                   <TableCell>{row.description || '—'}</TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.5}>
-                      <Tooltip title="Edit"><IconButton size="small" color="primary" onClick={() => { setFormRecord(row); setFormOpen(true); }}><Edit fontSize="small" /></IconButton></Tooltip>
-                      <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => setDeleteTarget(row)}><Delete fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title={row.used ? (row.lockReason || 'Buyer is in use and cannot be edited.') : 'Edit'}>
+                        <span><IconButton size="small" color="primary" disabled={Boolean(row.used)} onClick={() => { setFormRecord(row); setFormOpen(true); }}><Edit fontSize="small" /></IconButton></span>
+                      </Tooltip>
+                      <Tooltip title={row.deleteLocked ? (row.lockReason || 'Buyer is in use and cannot be deleted.') : 'Delete'}>
+                        <span><IconButton size="small" color="error" disabled={Boolean(row.deleteLocked)} onClick={() => setDeleteTarget(row)}><Delete fontSize="small" /></IconButton></span>
+                      </Tooltip>
                     </Stack>
                   </TableCell>
                 </TableRow>

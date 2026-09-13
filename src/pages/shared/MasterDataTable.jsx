@@ -323,22 +323,29 @@ export default function MasterDataTable({
                   ))}
                   <TableCell align="center" sx={{ py: 0.45, px: 0.7, position: 'sticky', right: 0, zIndex: 2, backgroundColor: '#fff', boxShadow: '-1px 0 0 #e5e7eb' }}>
                     {(() => {
-                      const locked = typeof config.isRecordLocked === 'function' && config.isRecordLocked(row);
-                      const lockMessage = locked && typeof config.recordLockMessage === 'function'
+                      const legacyLocked = typeof config.isRecordLocked === 'function' && config.isRecordLocked(row);
+                      const editLockedByConfig = typeof config.isEditLocked === 'function' && config.isEditLocked(row);
+                      const deleteLockedByConfig = typeof config.isDeleteLocked === 'function' && config.isDeleteLocked(row);
+                      const legacyMessage = legacyLocked && typeof config.recordLockMessage === 'function'
                         ? config.recordLockMessage(row)
                         : '';
-                      const actionLocked = locked || actionsDisabled;
-                      const reason = actionsDisabled
-                        ? (config?.writePermissionMessage || 'Sales permission is required to modify master data.')
-                        : (lockMessage || 'This record is locked.');
+                      const editMessage = editLockedByConfig && typeof config.editLockMessage === 'function'
+                        ? config.editLockMessage(row)
+                        : legacyMessage;
+                      const deleteMessage = deleteLockedByConfig && typeof config.deleteLockMessage === 'function'
+                        ? config.deleteLockMessage(row)
+                        : legacyMessage;
+                      const permissionMessage = config?.writePermissionMessage || 'Sales permission is required to modify master data.';
+                      const editLocked = actionsDisabled || legacyLocked || editLockedByConfig;
+                      const deleteLocked = actionsDisabled || legacyLocked || deleteLockedByConfig;
                       return (
                         <Stack direction="row" spacing={0.4} justifyContent="center">
-                          <Tooltip title={actionLocked ? reason : `Edit ${config.singular}`} arrow>
+                          <Tooltip title={editLocked ? (actionsDisabled ? permissionMessage : (editMessage || 'This record cannot be edited.')) : `Edit ${config.singular}`} arrow>
                             <span>
                               <IconButton
                                 color="primary"
                                 size="small"
-                                disabled={actionLocked}
+                                disabled={editLocked}
                                 sx={{ p: 0.25 }}
                                 onClick={() => onEdit?.(row)}
                               >
@@ -346,12 +353,12 @@ export default function MasterDataTable({
                               </IconButton>
                             </span>
                           </Tooltip>
-                          <Tooltip title={actionLocked ? reason : `Delete ${config.singular}`} arrow>
+                          <Tooltip title={deleteLocked ? (actionsDisabled ? permissionMessage : (deleteMessage || 'This record cannot be deleted.')) : `Delete ${config.singular}`} arrow>
                             <span>
                               <IconButton
                                 color="error"
                                 size="small"
-                                disabled={actionLocked}
+                                disabled={deleteLocked}
                                 sx={{ p: 0.25 }}
                                 onClick={() => onDelete?.(row)}
                               >

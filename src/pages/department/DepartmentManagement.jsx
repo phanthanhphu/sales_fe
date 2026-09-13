@@ -36,28 +36,15 @@ import AddDepartmentDialog from './AddDepartmentDialog';
 import EditDepartmentDialog from './EditDepartmentDialog';
 import DepartmentSearch from './DepartmentSearch';
 import { PaginationBar } from '../shared/MasterDataTable';
+import {
+  canUseDepartmentAdmin,
+  departmentConfig,
+  getDepartmentList,
+  mapDepartmentRecord
+} from './departmentConfig';
 
 const API_URL = `${API_BASE_URL}/api/departments`;
-const MANAGE_MESSAGE = 'Only Admin or IT department users can add, edit, or delete departments.';
-
-const normalizeText = (value) => String(value || '')
-  .trim()
-  .toUpperCase()
-  .replace(/[_-]+/g, ' ')
-  .replace(/\s+/g, ' ');
-
-const isAdminRole = (role) => Array.isArray(role)
-  ? role.some(isAdminRole)
-  : ['ADMIN', 'ROLE ADMIN', 'ROLE_ADMIN'].includes(normalizeText(role));
-
-const isItDepartmentName = (value) => {
-  const text = normalizeText(value);
-  return text === 'IT'
-    || text === 'IT DEPARTMENT'
-    || text === 'INFORMATION TECHNOLOGY'
-    || text === 'INFORMATION TECHNOLOGY DEPARTMENT'
-    || /(^|\s)IT(\s|$)/.test(text);
-};
+const MANAGE_MESSAGE = departmentConfig.manageMessage;
 
 const parseStored = (value) => {
   try {
@@ -69,13 +56,6 @@ const parseStored = (value) => {
 
 const currentUser = () => parseStored(localStorage.getItem('user'));
 
-const canUseDepartmentAdmin = (user = {}) => isAdminRole(user.role || user.roles)
-  || [
-    user.departmentName,
-    user.division,
-    user.department?.departmentName,
-    user.department?.name
-  ].some(isItDepartmentName);
 
 const formatDate = (value) => {
   if (!value) return '—';
@@ -112,11 +92,11 @@ export default function DepartmentManagement() {
   const [canManage, setCanManage] = useState(() => canUseDepartmentAdmin(currentUser()));
   const [searchDivision, setSearchDivision] = useState('');
   const [searchDeptName, setSearchDeptName] = useState('');
-  const [appliedFilters, setAppliedFilters] = useState({ division: '', departmentName: '' });
+  const [appliedFilters, setAppliedFilters] = useState(departmentConfig.defaultFilters);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [rowsPerPage, setRowsPerPage] = useState(departmentConfig.defaultRowsPerPage);
   const [totalRows, setTotalRows] = useState(0);
-  const [sortConfig, setSortConfig] = useState({ key: 'createdAt', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState(departmentConfig.defaultSort);
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -154,21 +134,9 @@ export default function DepartmentManagement() {
       if (!response.ok) throw new Error(`Unable to load departments (${response.status}).`);
 
       const data = await response.json();
-      const list = Array.isArray(data?.departments)
-        ? data.departments
-        : Array.isArray(data)
-          ? data
-          : Array.isArray(data?.content)
-            ? data.content
-            : [];
+      const list = getDepartmentList(data);
 
-      setDepartments(list.map((item) => ({
-        id: item.id,
-        division: item.division || '',
-        departmentName: item.departmentName || item.name || '',
-        createdAt: item.createdAt || item.createdDate || '',
-        updatedAt: item.updatedAt || item.updatedDate || ''
-      })));
+      setDepartments(list.map(mapDepartmentRecord));
       setTotalRows(Number(data?.totalElements ?? list.length ?? 0));
 
       const apiUser = data?.currentUser || data?.user || {};
@@ -257,7 +225,14 @@ export default function DepartmentManagement() {
 
       if (!response.ok) {
         const raw = await response.text();
-        throw new Error(raw || `Unable to delete department (${response.status}).`);
+        let message = raw;
+        try {
+          const parsed = raw ? JSON.parse(raw) : null;
+          message = parsed?.message || raw;
+        } catch {
+          // Keep the raw response when it is not JSON.
+        }
+        throw new Error(message || `Unable to delete department (${response.status}).`);
       }
 
       setDeleteOpen(false);
@@ -360,9 +335,7 @@ export default function DepartmentManagement() {
                 >
                   No
                 </TableCell>
-                {headerCell('Division', 'division', { minWidth: 190 })}
-                {headerCell('Department Name', 'departmentName', { minWidth: 250 })}
-                {headerCell('Created At', 'createdAt', { minWidth: 190 })}
+                {departmentConfig.columns.map((column) => headerCell(column.label, column.key, { minWidth: column.minWidth }))}
                 {headerCell('Actions', 'actions', { align: 'center', minWidth: 96, sortable: false })}
               </TableRow>
             </TableHead>
@@ -394,11 +367,11 @@ export default function DepartmentManagement() {
                     </TableCell>
                     <TableCell align="center" sx={{ py: 0.45, px: 0.7 }}>
                       <Stack direction="row" spacing={0.4} justifyContent="center">
-                        <Tooltip title={canManage ? 'Edit Department' : MANAGE_MESSAGE} arrow>
+                        <Tooltip title={!canManage ? MANAGE_MESSAGE : department.used ? (department.lockReason || 'Department is in use and cannot be edited.') : 'Edit Department'} arrow>
                           <span>
                             <IconButton
                               size="small"
-                              disabled={!canManage || loading}
+                              disabled={!canManage || loading || Boolean(department.used)}
                               sx={{ p: 0.25, color: '#2563eb' }}
                               onClick={() => guard(() => {
                                 setSelectedDepartment(department);
@@ -409,11 +382,11 @@ export default function DepartmentManagement() {
                             </IconButton>
                           </span>
                         </Tooltip>
-                        <Tooltip title={canManage ? 'Delete Department' : MANAGE_MESSAGE} arrow>
+                        <Tooltip title={!canManage ? MANAGE_MESSAGE : department.deleteLocked ? (department.lockReason || 'Department is in use and cannot be deleted.') : 'Delete Department'} arrow>
                           <span>
                             <IconButton
                               size="small"
-                              disabled={!canManage || loading}
+                              disabled={!canManage || loading || Boolean(department.deleteLocked)}
                               sx={{ p: 0.25, color: '#dc2626' }}
                               onClick={() => guard(() => {
                                 setSelectedDepartment(department);
