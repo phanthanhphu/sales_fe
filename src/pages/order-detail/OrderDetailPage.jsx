@@ -11,7 +11,7 @@ import {
   Typography
 } from '@mui/material';
 import { ArrowBackOutlined } from '@mui/icons-material';
-import { Link as RouterLink, useParams } from 'react-router-dom';
+import { Link as RouterLink, useParams, useSearchParams } from 'react-router-dom';
 
 import { getApiError, getOrder } from '../../services/orderBomMprService';
 import StatusBadge from '../../components/StatusBadge';
@@ -22,11 +22,16 @@ import MprTab from './MprTab';
 
 export default function OrderDetailPage() {
   const { buyerKey: routeBuyerKey, orderId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const buyerKey = normalizeBuyerKey(routeBuyerKey);
 
   const [order, setOrder] = useState(null);
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(() => searchParams.get('tab') === 'mpr' ? 1 : 0);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    setTab(searchParams.get('tab') === 'mpr' ? 1 : 0);
+  }, [searchParams]);
 
   useEffect(() => {
     let alive = true;
@@ -95,7 +100,13 @@ export default function OrderDetailPage() {
 
         <Tabs
           value={tab}
-          onChange={(_, nextTab) => setTab(nextTab)}
+          onChange={(_, nextTab) => {
+            setTab(nextTab);
+            const next = new URLSearchParams(searchParams);
+            if (nextTab === 1) next.set('tab', 'mpr');
+            else next.delete('tab');
+            setSearchParams(next, { replace: true });
+          }}
           sx={{
             px: 0.75,
             minHeight: 38,

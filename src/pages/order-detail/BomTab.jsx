@@ -324,9 +324,11 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
         <Button size="small" variant="text" startIcon={<RestartAlt fontSize="small" />} onClick={resetFilter} disabled={loading} sx={{ textTransform: 'none', height: 34, color: '#52677d' }}>Reset</Button>
         <Box sx={{ flex: { xs: '1 1 100%', xl: 1 } }} />
         <Tooltip title="Refresh">
-          <IconButton onClick={load} disabled={loading} size="small" sx={{ border: '1px solid #d8e1ea', borderRadius: 1.2, width: 34, height: 34 }}>
-            <Refresh fontSize="small" />
-          </IconButton>
+          <span>
+            <IconButton onClick={load} disabled={loading} size="small" sx={{ border: '1px solid #d8e1ea', borderRadius: 1.2, width: 34, height: 34 }}>
+              <Refresh fontSize="small" />
+            </IconButton>
+          </span>
         </Tooltip>
         <Tooltip title={!canWrite ? writeBlockedMessage : ''} arrow disableHoverListener={canWrite}>
           <span><Button size="small" variant="contained" startIcon={<Add fontSize="small" />} onClick={() => setAddOpen(true)} disabled={!canWrite} sx={{ textTransform: 'none', backgroundColor: '#103B5C', height: 34 }}>Add BOM</Button></span>

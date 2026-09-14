@@ -1,3 +1,7 @@
+import React from 'react';
+import { Button, Stack, Typography } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
+import { buyerPath } from 'utils/buyerContext';
 import { formatDateTime, trimText } from '../shared/masterDataUtils';
 
 export const materialShipToConfig = {
@@ -87,7 +91,51 @@ export const materialShipToConfig = {
     },
     { label: 'Status', key: 'active', minWidth: 95, render: (row) => row.active === false ? 'Inactive' : 'Active' },
     { label: 'Remark', key: 'remark', minWidth: 220, hideOnSmall: true },
-    { label: 'Usage', key: 'used', minWidth: 105, sortable: false, render: (row) => row?.used ? 'In use' : 'Available' },
+    {
+      label: 'Needs Update', key: 'reviewRequiredMprs', minWidth: 245, sortable: false,
+      render: (row) => {
+        const pending = Array.isArray(row?.reviewRequiredMprs)
+          ? row.reviewRequiredMprs.filter((item) => {
+              if (!item?.orderId) return false;
+              const status = String(item?.status || '').trim().toUpperCase();
+              return status === 'IN_PROGRESS' || status === 'DRAFT';
+            })
+          : [];
+        if (!pending.length) return '-';
+
+        const reviewRows = pending.map((usage) => React.createElement(
+          Stack,
+          {
+            key: `${usage.orderId}-${usage.mprId || usage.mprNo || ''}`,
+            direction: 'row',
+            spacing: 0.5,
+            alignItems: 'center'
+          },
+          React.createElement(
+            Typography,
+            { sx: { fontSize: '.72rem', fontWeight: 800 } },
+            usage.mprNo || 'MPR',
+            usage.status ? ` · ${usage.status}` : ''
+          ),
+          React.createElement(
+            Button,
+            {
+              component: RouterLink,
+              to: `${buyerPath(row?.buyerKey, `orders/${usage.orderId}`)}?tab=mpr&reviewMaterialShipTo=${encodeURIComponent(row?.id || '')}`,
+              size: 'small',
+              sx: { minWidth: 'auto', p: 0, textTransform: 'none', fontSize: '.7rem', fontWeight: 800 }
+            },
+            'Open MPR'
+          )
+        ));
+
+        return React.createElement(
+          Stack,
+          { spacing: 0.35, alignItems: 'flex-start' },
+          ...reviewRows
+        );
+      }
+    },
     { label: 'Updated At', key: 'updatedAt', minWidth: 155, hideOnSmall: true, isDate: true, render: (row) => formatDateTime(row.updatedAt) }
   ],
 

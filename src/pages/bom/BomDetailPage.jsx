@@ -1,4 +1,4 @@
-import { vietnamCompactDate } from 'utils/vietnamTime';
+import { vietnamCompactDate, vietnamDateInput } from 'utils/vietnamTime';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Accordion,
@@ -1984,12 +1984,23 @@ export default function BomDetailPage() {
   const saveHeader = async () => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     const nextBomName = String(bomNameForm || '').trim();
+    const nextStyleName = String(headerForm?.styleName || '').trim();
     if (!nextBomName) { notify('BOM Name is required.', 'warning'); return; }
+    if (!nextStyleName) { notify('Style Name is required.', 'warning'); return; }
     if (nextBomName.length > 200) { notify('BOM Name must not exceed 200 characters.', 'warning'); return; }
+    const { buyer: ignoredBuyer, ...headerWithoutBuyer } = headerForm || {};
+    const nextHeader = {
+      ...headerWithoutBuyer,
+      styleName: nextStyleName,
+      bomDate: vietnamDateInput(headerWithoutBuyer.bomDate) || null,
+      markerDate: vietnamDateInput(headerWithoutBuyer.markerDate) || null,
+      patternDate: vietnamDateInput(headerWithoutBuyer.patternDate) || null,
+      patternRevisedDate: vietnamDateInput(headerWithoutBuyer.patternRevisedDate) || null
+    };
 
     try {
       setSaving(true);
-      await updateBom(bomId, { bomName: nextBomName, header: headerForm });
+      await updateBom(bomId, { bomName: nextBomName, header: nextHeader });
       setHeaderOpen(false);
       notify('BOM information saved.');
       await reloadWithoutJump();
@@ -3119,21 +3130,31 @@ export default function BomDetailPage() {
               helperText={`${bomNameForm.length}/200 · BOM No. ${bom?.bomNo || '-'} cannot be changed`}
               sx={{ gridColumn: { xs: '1', sm: '1 / -1' } }}
             />
-            {['buyer', 'revStage', 'season', 'styleNumber', 'styleName', 'markerDate', 'markerMaker', 'factoryProduct', 'patternNumber', 'patternMaker', 'bomMaker', 'size', 'bomDate', 'patternDate', 'patternRevisedDate', 'comments'].map((key) => (
-              <TextField
-                key={key}
-                label={key.replace(/([A-Z])/g, ' $1').replace(/^./, (value) => value.toUpperCase())}
-                value={headerForm[key] || ''}
-                onChange={(event) => setHeaderForm((current) => ({ ...current, [key]: event.target.value }))}
-                multiline={key === 'comments'}
-                minRows={key === 'comments' ? 2 : 1}
-              />
-            ))}
+            {[
+              'revStage', 'season', 'styleNumber', 'styleName', 'markerDate', 'markerMaker',
+              'factoryProduct', 'patternNumber', 'patternMaker', 'bomMaker', 'size', 'bomDate',
+              'patternDate', 'patternRevisedDate', 'comments'
+            ].map((key) => {
+              const dateOnly = ['markerDate', 'bomDate', 'patternDate', 'patternRevisedDate'].includes(key);
+              return (
+                <TextField
+                  key={key}
+                  required={key === 'styleName'}
+                  type={dateOnly ? 'date' : 'text'}
+                  label={key.replace(/([A-Z])/g, ' $1').replace(/^./, (value) => value.toUpperCase())}
+                  value={dateOnly ? vietnamDateInput(headerForm[key]) : (headerForm[key] || '')}
+                  onChange={(event) => setHeaderForm((current) => ({ ...current, [key]: event.target.value }))}
+                  multiline={key === 'comments'}
+                  minRows={key === 'comments' ? 2 : 1}
+                  InputLabelProps={dateOnly ? { shrink: true } : undefined}
+                />
+              );
+            })}
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setHeaderOpen(false)} disabled={saving} sx={{ textTransform: 'none' }}>Cancel</Button>
-          <Button variant="contained" onClick={saveHeader} disabled={saving || !bomNameForm.trim()} sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}>
+          <Button variant="contained" onClick={saveHeader} disabled={saving || !bomNameForm.trim() || !String(headerForm?.styleName || '').trim()} sx={{ textTransform: 'none', fontWeight: 700, backgroundColor: '#103B5C' }}>
             {saving ? 'Saving...' : 'Save Changes'}
           </Button>
         </DialogActions>
