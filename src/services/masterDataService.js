@@ -36,8 +36,8 @@ export const listMasterData = (type, params = {}) => {
   return apiClient.get(getEndpoint(type), { params: cleanParams(params || {}) });
 };
 
-export const getMasterDataById = (type, id) => {
-  return apiClient.get(`${getEndpoint(type)}/${encodeURIComponent(id)}`);
+export const getMasterDataById = (type, id, params = {}) => {
+  return apiClient.get(`${getEndpoint(type)}/${encodeURIComponent(id)}`, { params: cleanParams(params) });
 };
 
 export const createMasterData = (type, payload, params = {}) => {
@@ -93,6 +93,11 @@ export const downloadMasterDataTemplate = (type, params = {}) => (
 );
 
 export const listActiveShipTos = (buyerKey) => apiClient.get(`${MASTER_DATA_ENDPOINTS.shipTo}/active`, {
+  params: cleanParams({ buyerKey })
+});
+
+// Lightweight prerequisite check. It returns only true/false and does not load the full Ship To list.
+export const hasActiveShipToData = (buyerKey) => apiClient.get(`${MASTER_DATA_ENDPOINTS.shipTo}/exists-active`, {
   params: cleanParams({ buyerKey })
 });
 

@@ -1,3 +1,4 @@
+import { formatVietnamDateTime } from 'utils/vietnamTime';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -60,19 +61,7 @@ const formatWeight = (value) => value == null
   ? '—'
   : `${Number(value).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`;
 
-const formatDateTime = (value) => {
-  if (!value) return '—';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
-};
+const formatDateTime = (value) => formatVietnamDateTime(value, { includeSeconds: true });
 
 const createScanId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();

@@ -1,3 +1,4 @@
+import { formatVietnamDateTime } from 'utils/vietnamTime';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -46,11 +47,7 @@ const modules = ['USER', 'DEPARTMENT', 'BUYER', 'ORDER', 'BOM', 'MPR', 'CURRENCY
 const actions = ['ADD', 'EDIT', 'DELETE'];
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
-const formatDateTime = (value) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('vi-VN');
-};
+const formatDateTime = (value) => formatVietnamDateTime(value);
 
 const requestDateValue = (value) => value ? `${value}:00` : '';
 const readable = (value) => String(value || '—').replaceAll('_', ' ');

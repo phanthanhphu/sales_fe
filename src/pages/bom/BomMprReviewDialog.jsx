@@ -1,3 +1,4 @@
+import { formatVietnamDateTime } from 'utils/vietnamTime';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -33,11 +34,7 @@ const statusMeta = (status) => {
   }
 };
 
-const formatDate = (value) => {
-  if (!value) return '';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
-};
+const formatDate = (value) => formatVietnamDateTime(value, { fallback: '' });
 
 function ReviewChangesTable({ review }) {
   const changes = review?.changes || [];

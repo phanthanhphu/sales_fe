@@ -1,3 +1,4 @@
+import { vietnamCompactDate, vietnamTimestamp } from 'utils/vietnamTime';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Accordion,
@@ -115,11 +116,7 @@ const cssAttributeEscape = (value) => (
     : String(value || '').replace(/["\\]/g, '\\$&')
 );
 
-const downloadDate = () => {
-  const now = new Date();
-  const pad = (value) => String(value).padStart(2, '0');
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-};
+const downloadDate = () => vietnamCompactDate();
 
 const downloadFilePart = (value, fallback) => {
   const safe = String(value || fallback || '').trim()
@@ -289,8 +286,8 @@ const sourceSelectionFromBatch = (bom, batch, selected = false, mprDoc = null) =
 const batchesForBom = (mprDoc, bomId) => (mprDoc?.selections || [])
   .filter((item) => item?.batchId && item?.bomId === bomId)
   .sort((left, right) => {
-    const leftTime = left?.createdAt ? new Date(left.createdAt).getTime() : 0;
-    const rightTime = right?.createdAt ? new Date(right.createdAt).getTime() : 0;
+    const leftTime = vietnamTimestamp(left?.createdAt);
+    const rightTime = vietnamTimestamp(right?.createdAt);
     if (leftTime !== rightTime) return rightTime - leftTime;
     return String(right?.batchId || '').localeCompare(String(left?.batchId || ''));
   });
@@ -457,8 +454,8 @@ const latestBomReview = (line = {}) => {
   return reviews.reduce((latest, item) => {
     if (!item) return latest;
     if (!latest) return item;
-    const itemTime = new Date(item.requestedAt || item.reviewedAt || 0).getTime();
-    const latestTime = new Date(latest.requestedAt || latest.reviewedAt || 0).getTime();
+    const itemTime = vietnamTimestamp(item.requestedAt || item.reviewedAt);
+    const latestTime = vietnamTimestamp(latest.requestedAt || latest.reviewedAt);
     return itemTime >= latestTime ? item : latest;
   }, null);
 };
@@ -1344,8 +1341,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       const newBatches = (result?.selections || [])
         .filter((item) => item?.batchId && !previousBatchIds.has(item.batchId))
         .sort((left, right) => {
-          const leftTime = left?.createdAt ? new Date(left.createdAt).getTime() : 0;
-          const rightTime = right?.createdAt ? new Date(right.createdAt).getTime() : 0;
+          const leftTime = vietnamTimestamp(left?.createdAt);
+          const rightTime = vietnamTimestamp(right?.createdAt);
           return rightTime - leftTime;
         });
 
@@ -1879,8 +1876,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       })
       .filter((batch) => batch.sourceLineCount > 0)
       .sort((left, right) => {
-        const leftTime = left?.createdAt ? new Date(left.createdAt).getTime() : 0;
-        const rightTime = right?.createdAt ? new Date(right.createdAt).getTime() : 0;
+        const leftTime = vietnamTimestamp(left?.createdAt);
+        const rightTime = vietnamTimestamp(right?.createdAt);
         if (leftTime !== rightTime) return rightTime - leftTime;
         return String(right?.batchId || '').localeCompare(String(left?.batchId || ''));
       })

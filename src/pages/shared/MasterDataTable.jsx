@@ -1,3 +1,4 @@
+import { vietnamTimestamp } from 'utils/vietnamTime';
 import React, { useMemo, useState } from 'react';
 import {
   Box,
@@ -40,8 +41,7 @@ const compareValue = (row, column) => {
   if (value instanceof Date) return value.getTime();
 
   const stringValue = String(value).trim();
-  const date = new Date(stringValue);
-  if (column.isDate && !Number.isNaN(date.getTime())) return date.getTime();
+  if (column.isDate) return vietnamTimestamp(stringValue);
 
   return stringValue.toLocaleLowerCase();
 };

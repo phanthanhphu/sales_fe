@@ -126,14 +126,14 @@ export const vendorCodeConfig = {
     }
   ],
 
-  isEditLocked: (record) => Boolean(record?.editLocked),
-  editLockMessage: (record) => record?.lockReason || 'This Vendor Code is used by MPR and cannot be edited.',
+  isEditLocked: () => false,
+  editLockMessage: (record) => record?.lockReason || 'Short Name Supplier is locked when referenced; other Vendor fields remain editable.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This Vendor Code is in use and cannot be deleted.',
   isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && field.name === 'shortNameSupplier',
   getFieldHelperText: ({ field, mode, record }) => {
     if (mode === 'edit' && record?.used && field.name === 'shortNameSupplier') {
-      return record?.editLocked ? 'Short Name Supplier is locked because MPR is using this Vendor Code.' : 'Short Name Supplier is locked because MAT_INFO is referencing this Vendor Code. Other Vendor fields remain editable.';
+      return 'Short Name Supplier is locked because MAT_INFO or MPR is referencing this Vendor Code. Vendor Code, Vendor Name, Mat Charger and Remark remain editable.';
     }
     return field.helperText || '';
   },

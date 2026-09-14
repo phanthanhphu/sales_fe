@@ -1,3 +1,4 @@
+import { formatVietnamDateTime, vietnamCurrentYear } from 'utils/vietnamTime';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -53,7 +54,7 @@ const getErrorMessage = (error, fallback) => (
   || fallback
 );
 
-const currentYear = new Date().getFullYear();
+const currentYear = vietnamCurrentYear();
 const DEFAULT_FACTORY_CODE = '002';
 
 const statusMeta = (value) => {
@@ -69,11 +70,7 @@ const barcodeSortValue = (row, key) => {
   return row?.[key];
 };
 
-const dateTimeText = (value) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-};
+const dateTimeText = (value) => formatVietnamDateTime(value);
 
 const makePrintHtml = (rows) => {
   const labels = rows.map((row) => `

@@ -1,17 +1,13 @@
+import { vietnamDownloadTimestamp } from 'utils/vietnamTime';
 import React, { useState } from 'react';
 import { Alert, Box, Paper, Snackbar } from '@mui/material';
 import MasterDataUploadDialog from './MasterDataUploadDialog';
 import ConfirmDeleteDialog from './ConfirmDeleteDialog';
 import useMasterDataPage from './useMasterDataPage';
-import { downloadMasterDataEditWorkbook, downloadMasterDataTemplate, getMasterDataErrorMessage } from '../../services/masterDataService';
+import { downloadMasterDataEditWorkbook, downloadMasterDataTemplate, getMasterDataErrorMessage, hasActiveShipToData, searchVendorCodeOptions } from '../../services/masterDataService';
 import { canManageCurrency, canManageSales } from 'utils/accessControl';
 
-const padTimestampPart = (value) => String(value).padStart(2, '0');
-
-const downloadTimestamp = () => {
-  const now = new Date();
-  return `${padTimestampPart(now.getDate())}${padTimestampPart(now.getMonth() + 1)}${now.getFullYear()}_${padTimestampPart(now.getHours())}${padTimestampPart(now.getMinutes())}${padTimestampPart(now.getSeconds())}`;
-};
+const downloadTimestamp = () => vietnamDownloadTimestamp();
 
 const downloadFilePart = (value, fallback) => {
   const clean = String(value || '').trim().toUpperCase()
@@ -54,10 +50,55 @@ export default function MasterDataFeaturePage({
   const [editUploadOpen, setEditUploadOpen] = useState(false);
   const [downloadingEdit, setDownloadingEdit] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+  const [checkingCreatePrerequisite, setCheckingCreatePrerequisite] = useState(false);
 
-  const openAdd = () => { if (canWrite) page.setAddOpen(true); };
-  const openUpload = () => { if (canWrite) page.setUploadOpen(true); };
-  const openEditUpload = () => { if (canWrite && config.allowEditWorkbook) setEditUploadOpen(true); };
+  const ensureCreatePrerequisite = async () => {
+    const requiresVendor = Boolean(config?.requireVendorDataBeforeCreate);
+    const requiresShipTo = Boolean(config?.requireShipToDataBeforeCreate);
+    if (!requiresVendor && !requiresShipTo) return true;
+    if (checkingCreatePrerequisite) return false;
+
+    setCheckingCreatePrerequisite(true);
+    try {
+      if (requiresVendor) {
+        // Lightweight indexed lookup: only one Vendor Code row is needed to decide
+        // whether the Buyer has initialized Vendor master data.
+        const response = await searchVendorCodeOptions('', 1, scopeParams?.buyerKey);
+        const vendorRows = Array.isArray(response) ? response : response?.data;
+        if (!Array.isArray(vendorRows) || vendorRows.length === 0) {
+          page.notify(
+            config.vendorPrerequisiteMessage || 'Please create Vendor Code data before creating MAT_INFO because MAT_INFO uses Vendor Code.',
+            'warning'
+          );
+          return false;
+        }
+      }
+
+      if (requiresShipTo) {
+        // Existence-only endpoint: does not download the full active Ship To list.
+        const hasShipTo = await hasActiveShipToData(scopeParams?.buyerKey);
+        if (hasShipTo !== true) {
+          page.notify(
+            config.shipToPrerequisiteMessage || 'Please create Ship To data before creating Material Ship To because Material Ship To uses Ship To.',
+            'warning'
+          );
+          return false;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      const fallback = requiresShipTo ? 'Unable to verify Ship To data.' : 'Unable to verify Vendor Code data.';
+      page.notify(getMasterDataErrorMessage(error, fallback), 'error');
+      return false;
+    } finally {
+      setCheckingCreatePrerequisite(false);
+    }
+  };
+
+  const openAdd = async () => { if (canWrite && await ensureCreatePrerequisite()) page.setAddOpen(true); };
+  const openUpload = async () => { if (canWrite && await ensureCreatePrerequisite()) page.setUploadOpen(true); };
+  const openEditUpload = async () => { if (canWrite && config.allowEditWorkbook && await ensureCreatePrerequisite()) setEditUploadOpen(true); };
   const openEdit = (record) => { if (canWrite) page.openEdit(record); };
   const openDelete = (record) => { if (canWrite) page.confirmDelete(record); };
 
@@ -135,7 +176,7 @@ export default function MasterDataFeaturePage({
           showUpload={config.allowUpload !== false}
           showTemplate={Boolean(config.allowTemplate)}
           showEditWorkbook={Boolean(config.allowEditWorkbook)}
-          disabled={page.loading || downloadingEdit || downloadingTemplate}
+          disabled={page.loading || downloadingEdit || downloadingTemplate || checkingCreatePrerequisite}
           actionsDisabled={!canWrite}
         />
 

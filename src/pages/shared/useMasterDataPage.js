@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   deleteMasterData,
+  getMasterDataById,
   getMasterDataErrorMessage,
   listMasterData
 } from '../../services/masterDataService';
@@ -145,9 +146,36 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
     setPage(0);
   }, [config.searchFields]);
 
-  const openEdit = useCallback((record) => {
-    setEditRecord(record || null);
-  }, []);
+  const refreshRecordBeforeMutation = useCallback(async (record) => {
+    if (!record?.id || !config.refreshBeforeMutation) return record || null;
+    try {
+      const latest = await getMasterDataById(config.type, record.id, scopeParams);
+      if (latest?.id) {
+        setRows((current) => current.map((item) => item?.id === latest.id ? latest : item));
+        return latest;
+      }
+      return record;
+    } catch (error) {
+      notify(
+        getMasterDataErrorMessage(error, `Unable to refresh ${config.singular || 'record'} usage state.`),
+        'error'
+      );
+      return null;
+    }
+  }, [config.refreshBeforeMutation, config.singular, config.type, notify, scopeParams?.buyerKey]);
+
+  const openEdit = useCallback(async (record) => {
+    const latest = await refreshRecordBeforeMutation(record);
+    if (!latest) return;
+    if (typeof config.isEditLocked === 'function' && config.isEditLocked(latest)) {
+      const message = typeof config.editLockMessage === 'function'
+        ? config.editLockMessage(latest)
+        : `${config.singular || 'Record'} is in use and cannot be edited.`;
+      notify(message, 'warning');
+      return;
+    }
+    setEditRecord(latest);
+  }, [config.editLockMessage, config.isEditLocked, config.singular, notify, refreshRecordBeforeMutation]);
 
   const closeEdit = useCallback(() => {
     setEditRecord(null);
@@ -193,9 +221,18 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
     await load({ page: 0 });
   }, [load, notify, page]);
 
-  const confirmDelete = useCallback((record) => {
-    setDeleteTarget(record || null);
-  }, []);
+  const confirmDelete = useCallback(async (record) => {
+    const latest = await refreshRecordBeforeMutation(record);
+    if (!latest) return;
+    if (typeof config.isDeleteLocked === 'function' && config.isDeleteLocked(latest)) {
+      const message = typeof config.deleteLockMessage === 'function'
+        ? config.deleteLockMessage(latest)
+        : `${config.singular || 'Record'} is in use and cannot be deleted.`;
+      notify(message, 'warning');
+      return;
+    }
+    setDeleteTarget(latest);
+  }, [config.deleteLockMessage, config.isDeleteLocked, config.singular, notify, refreshRecordBeforeMutation]);
 
   const closeDelete = useCallback(() => {
     if (!deleting) setDeleteTarget(null);

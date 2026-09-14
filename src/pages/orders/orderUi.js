@@ -1,15 +1,5 @@
-export const formatDateTime = (value) => {
-  if (!value) return '—';
-  try {
-    const date = Array.isArray(value)
-      ? new Date(value[0], (value[1] || 1) - 1, value[2] || 1, value[3] || 0, value[4] || 0, value[5] || 0)
-      : new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return date.toLocaleString('en-GB', { hour12: false });
-  } catch {
-    return String(value);
-  }
-};
+import { formatVietnamDateTime, vietnamTodayIso } from 'utils/vietnamTime';
+export const formatDateTime = (value) => formatVietnamDateTime(value);
 
 export const statusSx = (status) => {
   const value = String(status || '').toUpperCase();
@@ -35,11 +25,7 @@ export const statusSx = (status) => {
   };
 };
 
-export const todayLocalDate = () => {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-};
+export const todayLocalDate = () => vietnamTodayIso();
 
 
 export const isCompletedOrderStatus = (status) => {

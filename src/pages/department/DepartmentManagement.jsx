@@ -1,3 +1,4 @@
+import { formatVietnamDateTime } from 'utils/vietnamTime';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -57,11 +58,7 @@ const parseStored = (value) => {
 const currentUser = () => parseStored(localStorage.getItem('user'));
 
 
-const formatDate = (value) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-};
+const formatDate = (value) => formatVietnamDateTime(value);
 
 const SortIndicator = ({ active, direction }) => {
   if (!active) {
@@ -367,11 +364,11 @@ export default function DepartmentManagement() {
                     </TableCell>
                     <TableCell align="center" sx={{ py: 0.45, px: 0.7 }}>
                       <Stack direction="row" spacing={0.4} justifyContent="center">
-                        <Tooltip title={!canManage ? MANAGE_MESSAGE : department.used ? (department.lockReason || 'Department is in use and cannot be edited.') : 'Edit Department'} arrow>
+                        <Tooltip title={!canManage ? MANAGE_MESSAGE : department.used ? (department.lockReason || 'Department is in use; edit is allowed because users reference its ID.') : 'Edit Department'} arrow>
                           <span>
                             <IconButton
                               size="small"
-                              disabled={!canManage || loading || Boolean(department.used)}
+                              disabled={!canManage || loading}
                               sx={{ p: 0.25, color: '#2563eb' }}
                               onClick={() => guard(() => {
                                 setSelectedDepartment(department);

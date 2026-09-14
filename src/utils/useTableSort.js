@@ -1,3 +1,4 @@
+import { vietnamTimestamp } from './vietnamTime';
 import { useCallback, useMemo, useState } from 'react';
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:[T\s].*)?$/;
@@ -19,8 +20,7 @@ const normalizeComparable = (value) => {
   }
 
   if (ISO_DATE_PATTERN.test(text)) {
-    const timestamp = Date.parse(text);
-    if (!Number.isNaN(timestamp)) return { empty: false, type: 'number', value: timestamp };
+    return { empty: false, type: 'number', value: vietnamTimestamp(text) };
   }
 
   return { empty: false, type: 'text', value: text.toLocaleLowerCase() };

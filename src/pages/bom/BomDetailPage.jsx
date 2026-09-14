@@ -1,3 +1,4 @@
+import { vietnamCompactDate } from 'utils/vietnamTime';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Accordion,
@@ -2377,11 +2378,7 @@ export default function BomDetailPage() {
     }
   };
 
-  const bomDownloadDate = () => {
-    const now = new Date();
-    const pad = (value) => String(value).padStart(2, '0');
-    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  };
+  const bomDownloadDate = () => vietnamCompactDate();
 
   const bomDownloadPart = (value, fallback) => {
     const safe = String(value || fallback || '').trim()

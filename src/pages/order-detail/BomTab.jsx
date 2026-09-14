@@ -1,3 +1,4 @@
+import { vietnamCompactDate } from 'utils/vietnamTime';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -56,11 +57,7 @@ const emptyFilters = {
 
 const normalize = (value) => String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
 
-const downloadDate = () => {
-  const now = new Date();
-  const pad = (value) => String(value).padStart(2, '0');
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-};
+const downloadDate = () => vietnamCompactDate();
 
 const downloadFilePart = (value, fallback) => {
   const safe = String(value || fallback || '').trim()

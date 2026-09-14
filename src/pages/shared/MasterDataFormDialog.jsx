@@ -469,6 +469,11 @@ export default function MasterDataFormDialog({
                 const selectedOption = multiple
                   ? selectedAutocompleteOptions(field, value, options)
                   : selectedAutocompleteOption(field, value, options);
+                const lockedMultiValues = multiple && typeof config.getLockedMultiValues === 'function'
+                  ? new Set((config.getLockedMultiValues({ field, values, record, mode }) || [])
+                    .map((item) => String(item || '').trim())
+                    .filter(Boolean))
+                  : new Set();
 
                 return (
                   <Box key={field.name} sx={{ gridColumn: { xs: 'span 1', sm: `span ${grid}` } }}>
@@ -487,12 +492,46 @@ export default function MasterDataFormDialog({
                       getOptionLabel={(option) => optionLabel(field, option)}
                       filterOptions={field.optionSource === 'shipTo' ? undefined : ((items) => items)}
                       onChange={(_, nextOption) => {
-                        const nextValue = multiple
+                        let nextValue = multiple
                           ? (nextOption || []).map((item) => optionValue(field, item)).filter(Boolean)
                           : (nextOption ? optionValue(field, nextOption) : '');
+                        if (multiple && lockedMultiValues.size > 0) {
+                          const nextSet = new Set(nextValue.map((item) => String(item)));
+                          let restored = false;
+                          lockedMultiValues.forEach((lockedValue) => {
+                            if (!nextSet.has(lockedValue)) {
+                              nextValue.push(lockedValue);
+                              nextSet.add(lockedValue);
+                              restored = true;
+                            }
+                          });
+                          if (restored) {
+                            setSnack({
+                              open: true,
+                              severity: 'warning',
+                              message: 'A Ship To already used by MPR cannot be removed from this mapping.'
+                            });
+                          }
+                        }
                         if (field.optionSource === 'supplier') setSupplierSearch(String(nextValue || ''));
                         handleChange(field, nextValue);
                       }}
+                      renderTags={multiple && lockedMultiValues.size > 0 ? ((tagValue, getTagProps) =>
+                        tagValue.map((option, index) => {
+                          const valueKey = optionValue(field, option);
+                          const lockedTag = lockedMultiValues.has(String(valueKey));
+                          const tagProps = getTagProps({ index });
+                          const { key, onDelete, ...chipProps } = tagProps;
+                          return (
+                            <Chip
+                              key={key}
+                              {...chipProps}
+                              onDelete={lockedTag ? undefined : onDelete}
+                              label={`${optionLabel(field, option)}${lockedTag ? ' · Used' : ''}`}
+                              size="small"
+                            />
+                          );
+                        })) : undefined}
                       onInputChange={(_, nextInput, reason) => {
                         if (field.optionSource === 'supplier' && (reason === 'input' || reason === 'clear')) {
                           setSupplierSearch(nextInput);

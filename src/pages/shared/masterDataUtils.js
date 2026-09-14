@@ -1,3 +1,4 @@
+import { formatVietnamDateTime, vietnamDateInput } from 'utils/vietnamTime';
 export const createEmptyFilters = (fields = []) =>
   (Array.isArray(fields) ? fields : []).reduce((result, field) => {
     result[field.name] = field.defaultValue ?? '';
@@ -45,47 +46,9 @@ export const normalizePageResponse = (response, fallbackPage = 0, fallbackSize =
   return { content, totalElements, number, size, totalPages };
 };
 
-export const formatDateTime = (value) => {
-  if (!value) return '-';
+export const formatDateTime = (value) => formatVietnamDateTime(value, { fallback: '-' });
 
-  try {
-    let date;
-
-    if (Array.isArray(value)) {
-      const [year, month = 1, day = 1, hour = 0, minute = 0, second = 0] = value;
-      date = new Date(year, Number(month) - 1, day, hour, minute, second);
-    } else {
-      date = new Date(value);
-    }
-
-    if (Number.isNaN(date.getTime())) return String(value);
-
-    const pad = (number) => String(number).padStart(2, '0');
-    return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  } catch {
-    return String(value);
-  }
-};
-
-export const toDateInput = (value) => {
-  if (!value) return '';
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-
-  try {
-    if (Array.isArray(value)) {
-      const [year, month = 1, day = 1] = value;
-      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    }
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '';
-
-    const pad = (number) => String(number).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  } catch {
-    return '';
-  }
-};
+export const toDateInput = (value) => vietnamDateInput(value);
 
 export const formatNumber = (value, maximumFractionDigits = 2) => {
   if (value === null || value === undefined || value === '') return '-';

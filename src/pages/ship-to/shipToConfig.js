@@ -61,8 +61,8 @@ export const shipToConfig = {
     { label: 'Updated At', key: 'updatedAt', minWidth: 150, hideOnSmall: true, isDate: true, render: (row) => formatDateTime(row.updatedAt) }
   ],
 
-  isEditLocked: (record) => Boolean(record?.used),
-  editLockMessage: (record) => record?.lockReason || 'This Ship To is in use and cannot be edited.',
+  isEditLocked: () => false,
+  editLockMessage: (record) => record?.lockReason || 'Ship To Name/Code are locked when used; Status and Remark remain editable.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This Ship To is used and cannot be deleted.',
   isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && ['shipToName', 'shipToCode'].includes(field.name),

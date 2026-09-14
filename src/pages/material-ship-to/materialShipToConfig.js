@@ -10,6 +10,11 @@ export const materialShipToConfig = {
   allowUpload: true,
   allowTemplate: true,
   allowEditWorkbook: true,
+  requireShipToDataBeforeCreate: true,
+  shipToPrerequisiteMessage: 'Please create Ship To data before creating Material Ship To because Material Ship To uses Ship To.',
+  // Refetch immediately before Edit/Delete so a mapping used by a newly generated MPR
+  // cannot be opened from stale table data in another browser tab/session.
+  refreshBeforeMutation: true,
   excelSheetName: 'MATERIAL SHIP TO',
   importHint: 'Download the template first. Dedicated Ship To contains only active records for the current Buyer. Repeating the same material on multiple rows is allowed: Ship To values are merged into one Dedicated Ship To list. You can also separate several Ship To names with ; (example: US; JAPAN). If the material already exists, newly imported Ship To values are appended without duplicating existing values.',
 
@@ -86,15 +91,26 @@ export const materialShipToConfig = {
     { label: 'Updated At', key: 'updatedAt', minWidth: 155, hideOnSmall: true, isDate: true, render: (row) => formatDateTime(row.updatedAt) }
   ],
 
-  isEditLocked: (record) => Boolean(record?.used),
-  editLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is in use and cannot be edited.',
+  isEditLocked: () => false,
+  editLockMessage: (record) => record?.lockReason || 'Used Ship To values are protected, but additional Ship To values may be added.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is used by MPR and cannot be deleted.',
+  getLockedMultiValues: ({ field, mode, record }) => {
+    if (mode !== 'edit' || field?.name !== 'shipToIds' || !record?.used) return [];
+    const used = Array.isArray(record?.usedShipToIds) ? record.usedShipToIds.filter(Boolean) : [];
+    if (used.length) return used;
+    return Array.isArray(record?.shipToIds) && record.shipToIds.length
+      ? record.shipToIds.filter(Boolean)
+      : [record?.shipToId].filter(Boolean);
+  },
   isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used)
-    && ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit'].includes(field.name),
+    && ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit', 'active'].includes(field.name),
   getFieldHelperText: ({ field, mode, record }) => {
-    if (mode === 'edit' && record?.used && ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit'].includes(field.name)) {
-      return 'Material identity is locked because an MPR snapshot already uses this mapping.';
+    if (mode === 'edit' && record?.used && ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit', 'active'].includes(field.name)) {
+      return 'This field is locked because an MPR snapshot already uses this mapping.';
+    }
+    if (mode === 'edit' && record?.used && field.name === 'shipToIds') {
+      return 'You may add more Ship To values. Ship To values already used by MPR are locked and cannot be removed.';
     }
     return field.helperText || '';
   },

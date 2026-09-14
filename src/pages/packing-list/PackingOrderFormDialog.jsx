@@ -1,3 +1,4 @@
+import { vietnamTodayIso } from 'utils/vietnamTime';
 import { useEffect, useState } from 'react';
 import {
   Button,
@@ -9,7 +10,7 @@ import {
 } from '@mui/material';
 import { PACKING_ORDER_FIELDS } from './packingListConfig';
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => vietnamTodayIso();
 const emptyForm = () => PACKING_ORDER_FIELDS.reduce((result, field) => ({
   ...result,
   [field.name]: field.name === 'orderDate' ? today() : ''

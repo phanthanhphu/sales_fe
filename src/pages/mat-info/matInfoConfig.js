@@ -33,6 +33,8 @@ export const matInfoConfig = {
   excelSheetName: 'MAT_INFO',
   needsCurrencyOptions: true,
   needsSupplierOptions: true,
+  requireVendorDataBeforeCreate: true,
+  vendorPrerequisiteMessage: 'Please create Vendor Code data before creating MAT_INFO because MAT_INFO uses Vendor Code.',
   // Keep the MAT_INFO dialog compact in both Add and Edit modes.
   hideFormSubtitle: true,
 
@@ -272,8 +274,8 @@ export const matInfoConfig = {
     }
   ],
 
-  isEditLocked: (record) => Boolean(record?.used),
-  editLockMessage: (record) => record?.lockReason || 'This MAT_INFO record is in use and cannot be edited.',
+  isEditLocked: () => false,
+  editLockMessage: (record) => record?.lockReason || 'MAT_INFO identity/commercial fields are locked, but metadata fields remain editable.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This MAT_INFO record is used by MPR and cannot be deleted.',
   isFieldDisabled: ({ field, mode, record }) => {

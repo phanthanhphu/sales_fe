@@ -85,7 +85,7 @@ function BuyerFormDialog({ open, record, saving, onClose, onSave }) {
             helperText={errors.buyerName}
             disabled={saving}
           />
-          <FormControl fullWidth disabled={saving}>
+          <FormControl fullWidth disabled={saving || Boolean(record?.used)}>
             <InputLabel>Status</InputLabel>
             <Select value={form.active ? 'true' : 'false'} label="Status" onChange={(event) => update('active', event.target.value === 'true')}>
               <MenuItem value="true">Active</MenuItem>
@@ -251,8 +251,8 @@ export default function BuyerManagementPage() {
                   <TableCell>{row.description || '—'}</TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.5}>
-                      <Tooltip title={row.used ? (row.lockReason || 'Buyer is in use and cannot be edited.') : 'Edit'}>
-                        <span><IconButton size="small" color="primary" disabled={Boolean(row.used)} onClick={() => { setFormRecord(row); setFormOpen(true); }}><Edit fontSize="small" /></IconButton></span>
+                      <Tooltip title={row.used ? (row.lockReason || 'Buyer Key/Status are locked; other descriptive fields remain editable.') : 'Edit'}>
+                        <span><IconButton size="small" color="primary" onClick={() => { setFormRecord(row); setFormOpen(true); }}><Edit fontSize="small" /></IconButton></span>
                       </Tooltip>
                       <Tooltip title={row.deleteLocked ? (row.lockReason || 'Buyer is in use and cannot be deleted.') : 'Delete'}>
                         <span><IconButton size="small" color="error" disabled={Boolean(row.deleteLocked)} onClick={() => setDeleteTarget(row)}><Delete fontSize="small" /></IconButton></span>
