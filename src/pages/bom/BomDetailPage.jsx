@@ -719,7 +719,6 @@ function LineDialog({ open, record, productColors = [], saving, onClose, onSave 
                                     : row)
                                 }));
                               }}
-                              helperText="Child Colors are filtered by the selected Style Color."
                               sx={{ flex: 1 }}
                             >
                               <MenuItem value=""><em>Select Child Color</em></MenuItem>
