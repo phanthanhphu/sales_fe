@@ -10,9 +10,15 @@ export default function InputLabel(theme) {
           fontWeight: 650
         },
         outlined: {
-          lineHeight: '0.8em',
-          '&.MuiInputLabel-sizeSmall': {
-            lineHeight: '1em'
+          // Keep the unshrunk label on the same vertical content line as
+          // OutlinedInput. OutlinedInput uses 9px vertical padding normally
+          // and 6px for size="small" in this project.
+          lineHeight: '1.4375em',
+          '&[data-shrink="false"]': {
+            transform: 'translate(14px, 9px) scale(1)'
+          },
+          '&.MuiInputLabel-sizeSmall[data-shrink="false"]': {
+            transform: 'translate(14px, 6px) scale(1)'
           },
           '&.MuiInputLabel-shrink': {
             background: theme.palette.background.paper,

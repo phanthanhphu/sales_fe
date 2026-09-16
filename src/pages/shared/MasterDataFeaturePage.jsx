@@ -43,8 +43,7 @@ export default function MasterDataFeaturePage({
   AddDialog,
   EditDialog,
   scopeParams = {},
-  scopeTitle = '',
-  onAfterSaved
+  scopeTitle = ''
 }) {
   const page = useMasterDataPage(config, scopeParams);
   const canWrite = config?.type === 'currency' ? canManageCurrency() : canManageSales();
@@ -102,10 +101,6 @@ export default function MasterDataFeaturePage({
   const openEditUpload = async () => { if (canWrite && config.allowEditWorkbook && await ensureCreatePrerequisite()) setEditUploadOpen(true); };
   const openEdit = (record) => { if (canWrite) page.openEdit(record); };
   const openDelete = (record) => { if (canWrite) page.confirmDelete(record); };
-  const handleDialogSaved = async (response, message, meta) => {
-    await page.handleSaved(response, message, meta);
-    if (typeof onAfterSaved === 'function') onAfterSaved(response, meta);
-  };
 
   const downloadEditWorkbook = async () => {
     if (!canWrite || !config.allowEditWorkbook || downloadingEdit) return;
@@ -204,7 +199,7 @@ export default function MasterDataFeaturePage({
       <AddDialog
         open={canWrite && page.addOpen}
         onClose={() => page.setAddOpen(false)}
-        onSaved={handleDialogSaved}
+        onSaved={page.handleSaved}
         scopeParams={scopeParams}
       />
 
@@ -212,7 +207,7 @@ export default function MasterDataFeaturePage({
         open={canWrite && Boolean(page.editRecord)}
         record={page.editRecord}
         onClose={page.closeEdit}
-        onSaved={handleDialogSaved}
+        onSaved={page.handleSaved}
         scopeParams={scopeParams}
       />
 

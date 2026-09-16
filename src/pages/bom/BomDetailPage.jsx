@@ -1,4 +1,4 @@
-import { vietnamCompactDate, vietnamDateInput } from 'utils/vietnamTime';
+import { vietnamCompactDate } from 'utils/vietnamTime';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Accordion,
@@ -157,6 +157,15 @@ const OverviewCardTitle = ({ icon, title }) => (
 );
 
 const overviewGridLine = '#dbe4ed';
+
+const formatBomDisplayDate = (value) => {
+  if (value === null || value === undefined || String(value).trim() === '') return '00/00/0000';
+  const raw = String(value).trim();
+  if (raw === '00/00/0000') return raw;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  return raw;
+};
 
 const OverviewInfoCell = ({ label, value, strong = false, empty = false }) => (
   <TableCell
@@ -609,11 +618,19 @@ function LineDialog({ open, record, productColors = [], saving, onClose, onSave 
           />
           <TextField label="Consumption Unit" value={form.consumptionUnit} onChange={set('consumptionUnit')} sx={fieldSx} />
 
-          <FormControlLabel
-            control={<Checkbox checked={Boolean(form.detailLine)} onChange={set('detailLine')} />}
-            label="Detail Line"
-            sx={{ gridColumn: { xs: '1', sm: 'span 2' }, alignSelf: 'center' }}
-          />
+          <Box sx={{ gridColumn: { xs: '1', sm: 'span 2' }, alignSelf: 'center', justifySelf: 'start' }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={Boolean(form.detailLine)}
+                  onChange={set('detailLine')}
+                  onClick={(event) => event.stopPropagation()}
+                />
+              }
+              label="Detail Line"
+              sx={{ m: 0, width: 'fit-content' }}
+            />
+          </Box>
 
           <TextField
             label="Remarks On BOM"
@@ -1986,21 +2003,22 @@ export default function BomDetailPage() {
     const nextBomName = String(bomNameForm || '').trim();
     const nextStyleName = String(headerForm?.styleName || '').trim();
     if (!nextBomName) { notify('BOM Name is required.', 'warning'); return; }
-    if (!nextStyleName) { notify('Style Name is required.', 'warning'); return; }
     if (nextBomName.length > 200) { notify('BOM Name must not exceed 200 characters.', 'warning'); return; }
-    const { buyer: ignoredBuyer, ...headerWithoutBuyer } = headerForm || {};
-    const nextHeader = {
-      ...headerWithoutBuyer,
+    if (!nextStyleName) { notify('Style Name is required.', 'warning'); return; }
+
+    // Buyer is intentionally omitted: Buyer is authoritative from the current workspace/order.
+    const { buyer: _ignoredBuyer, ...editableHeader } = headerForm || {};
+    const payloadHeader = {
+      ...editableHeader,
       styleName: nextStyleName,
-      bomDate: vietnamDateInput(headerWithoutBuyer.bomDate) || null,
-      markerDate: vietnamDateInput(headerWithoutBuyer.markerDate) || null,
-      patternDate: vietnamDateInput(headerWithoutBuyer.patternDate) || null,
-      patternRevisedDate: vietnamDateInput(headerWithoutBuyer.patternRevisedDate) || null
+      bomDate: editableHeader.bomDate || null,
+      markerDate: editableHeader.markerDate || null,
+      patternRevisedDate: editableHeader.patternRevisedDate || null
     };
 
     try {
       setSaving(true);
-      await updateBom(bomId, { bomName: nextBomName, header: nextHeader });
+      await updateBom(bomId, { bomName: nextBomName, header: payloadHeader });
       setHeaderOpen(false);
       notify('BOM information saved.');
       await reloadWithoutJump();
@@ -2658,20 +2676,20 @@ export default function BomDetailPage() {
                   <OverviewInfoGroup title="Pattern / Season">
                     <OverviewInfoCell label="Season" value={bom.header?.season} />
                     <OverviewInfoCell label="Pattern Number" value={bom.header?.patternNumber} />
-                    <OverviewInfoCell label="Pattern Date" value={bom.header?.patternDate} />
+                    <OverviewInfoCell label="Old Pattern Date" value={formatBomDisplayDate(bom.header?.oldPatternDate || bom.header?.patternDate)} />
                     <OverviewInfoCell label="Pattern Maker" value={bom.header?.patternMaker} />
                   </OverviewInfoGroup>
 
                   <OverviewInfoGroup title="BOM / Factory">
                     <OverviewInfoCell label="BOM Maker" value={bom.header?.bomMaker} />
-                    <OverviewInfoCell label="BOM Date" value={bom.header?.bomDate} />
-                    <OverviewInfoCell label="Revised Date" value={bom.header?.patternRevisedDate} />
+                    <OverviewInfoCell label="BOM Date" value={formatBomDisplayDate(bom.header?.bomDate)} />
+                    <OverviewInfoCell label="Revised Date" value={formatBomDisplayDate(bom.header?.patternRevisedDate)} />
                     <OverviewInfoCell label="Factory Product" value={bom.header?.factoryProduct} />
                   </OverviewInfoGroup>
 
                   <OverviewInfoGroup title="Additional" subtle>
                     <OverviewInfoCell label="Rev. Stage" value={bom.header?.revStage} />
-                    <OverviewInfoCell label="Marker Date" value={bom.header?.markerDate} />
+                    <OverviewInfoCell label="Marker Date" value={formatBomDisplayDate(bom.header?.markerDate)} />
                     <OverviewInfoCell label="Marker Maker" value={bom.header?.markerMaker} />
                     <OverviewInfoCell label="Size (W x H x D)" value={bom.header?.size} />
                   </OverviewInfoGroup>
@@ -3046,8 +3064,7 @@ export default function BomDetailPage() {
         <DialogContent dividers>
           <Stack spacing={1.25}>
             <Alert severity="warning">
-              Duplicate comparison uses only these four keys: Product / Style Color + Pattern Number + Season + Style Number.
-              Child Color values are not used for duplicate detection.
+              Duplicate Product Color checking is limited to this BOM only. Colors from other BOMs in the same Order are not compared.
             </Alert>
 
             {(duplicateExcelWarning.duplicates || []).map((item, index) => {
@@ -3131,22 +3148,37 @@ export default function BomDetailPage() {
               sx={{ gridColumn: { xs: '1', sm: '1 / -1' } }}
             />
             {[
-              'revStage', 'season', 'styleNumber', 'styleName', 'markerDate', 'markerMaker',
-              'factoryProduct', 'patternNumber', 'patternMaker', 'bomMaker', 'size', 'bomDate',
-              'patternDate', 'patternRevisedDate', 'comments'
-            ].map((key) => {
-              const dateOnly = ['markerDate', 'bomDate', 'patternDate', 'patternRevisedDate'].includes(key);
+              { key: 'revStage', label: 'Rev Stage' },
+              { key: 'season', label: 'Season' },
+              { key: 'styleNumber', label: 'Style Number' },
+              { key: 'styleName', label: 'Style Name', required: true },
+              { key: 'markerDate', label: 'Marker Date', type: 'date' },
+              { key: 'markerMaker', label: 'Marker Maker' },
+              { key: 'factoryProduct', label: 'Factory Product' },
+              { key: 'patternNumber', label: 'Pattern Number' },
+              { key: 'patternMaker', label: 'Pattern Maker' },
+              { key: 'bomMaker', label: 'BOM Maker' },
+              { key: 'size', label: 'Size' },
+              { key: 'bomDate', label: 'BOM Date', type: 'date' },
+              { key: 'patternRevisedDate', label: 'Pattern Revised Date', type: 'date' },
+              { key: 'comments', label: 'Comments', multiline: true }
+            ].map((field) => {
+              const value = headerForm?.[field.key] || '';
+              const styleNameMissing = field.key === 'styleName' && !String(value).trim();
               return (
                 <TextField
-                  key={key}
-                  required={key === 'styleName'}
-                  type={dateOnly ? 'date' : 'text'}
-                  label={key.replace(/([A-Z])/g, ' $1').replace(/^./, (value) => value.toUpperCase())}
-                  value={dateOnly ? vietnamDateInput(headerForm[key]) : (headerForm[key] || '')}
-                  onChange={(event) => setHeaderForm((current) => ({ ...current, [key]: event.target.value }))}
-                  multiline={key === 'comments'}
-                  minRows={key === 'comments' ? 2 : 1}
-                  InputLabelProps={dateOnly ? { shrink: true } : undefined}
+                  key={field.key}
+                  required={Boolean(field.required)}
+                  label={field.label}
+                  type={field.type || 'text'}
+                  value={value}
+                  onChange={(event) => setHeaderForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                  multiline={Boolean(field.multiline)}
+                  minRows={field.multiline ? 2 : 1}
+                  error={styleNameMissing}
+                  helperText={styleNameMissing ? 'Style Name is required.' : undefined}
+                  InputLabelProps={field.type === 'date' ? { shrink: true } : undefined}
+                  sx={field.required ? { '& .MuiFormLabel-asterisk': { color: 'error.main' } } : undefined}
                 />
               );
             })}

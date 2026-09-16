@@ -37,7 +37,6 @@ import {
   Typography
 } from '@mui/material';
 import { CheckCircle, Delete, Download, Edit, ErrorOutline, ExpandMore, FileUpload, LockOpen, Preview, Refresh, RestartAlt, Save, Search as SearchIcon } from '@mui/icons-material';
-import { useSearchParams } from 'react-router-dom';
 import {
   confirmMpr,
   deleteMpr,
@@ -53,7 +52,6 @@ import {
   reopenMpr,
   refreshAllMprBomSources,
   refreshMprBomSource,
-  refreshMprMaterialShipToSource,
   validateMpr,
   validateMprMasterData,
   updateMprBatch,
@@ -213,6 +211,12 @@ const numberValue = (value) => {
   if (value === '' || value === null || value === undefined) return '';
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : '';
+};
+
+const isPositivePoQty = (value) => {
+  if (value === '' || value === null || value === undefined) return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0;
 };
 
 const sumShipToQty = (shipToQty = {}, shipToIds = []) => (shipToIds || []).reduce((total, shipToId) => {
@@ -656,17 +660,7 @@ const MprSummaryMetric = ({ label, value, helper = '' }) => (
   </Box>
 );
 
-const staleMaterialShipToImpact = (mprDoc, mappingId = '') => {
-  const requestedId = String(mappingId || '').trim();
-  return (Array.isArray(mprDoc?.sourceImpacts) ? mprDoc.sourceImpacts : []).find((item) => {
-    if (!item?.stale || String(item?.sourceType || '').toUpperCase() !== 'MATERIAL_SHIP_TO') return false;
-    return !requestedId || String(item?.sourceId || '').trim() === requestedId;
-  }) || null;
-};
-
 export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusChange }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const requestedMaterialShipToReviewId = String(searchParams.get('reviewMaterialShipTo') || '').trim();
   const buyerKey = normalizeBuyerKey(buyerKeyProp || order?.buyerKey);
   const llBeanMprEnabled = buyerKey === 'LLBEAN';
   const canWrite = canManageSales();
@@ -703,8 +697,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   const [batchSaving, setBatchSaving] = useState(false);
   const [sourceRefreshingBomId, setSourceRefreshingBomId] = useState('');
   const [sourceRefreshingAll, setSourceRefreshingAll] = useState(false);
-  const [materialShipToRefreshingId, setMaterialShipToRefreshingId] = useState('');
-  const [materialShipToReviewOpen, setMaterialShipToReviewOpen] = useState(false);
   const [mprFilters, setMprFilters] = useState(emptyMprFilters);
   const [mprUploading, setMprUploading] = useState(false);
   const [mprUploadProgress, setMprUploadProgress] = useState(initialUploadProgress());
@@ -796,24 +788,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    if (!requestedMaterialShipToReviewId || !mpr?.id) return;
-    const impact = staleMaterialShipToImpact(mpr, requestedMaterialShipToReviewId);
-    if (impact) {
-      setMaterialShipToReviewOpen(true);
-      return;
-    }
-
-    // The requested mapping is no longer stale (for example after Confirm Update).
-    // Remove the deep-link flag so the dialog does not reopen on refresh.
-    if (Array.isArray(mpr?.sourceImpacts)) {
-      const next = new URLSearchParams(searchParams);
-      next.delete('reviewMaterialShipTo');
-      setSearchParams(next, { replace: true });
-      setMaterialShipToReviewOpen(false);
-    }
-  }, [mpr, requestedMaterialShipToReviewId]);
 
   useEffect(() => () => {
     if (progressTimerRef.current) window.clearInterval(progressTimerRef.current);
@@ -1220,8 +1194,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
         }
         for (const shipToId of selectedShipToIds) {
           const quantity = selectedBom.shipToQtyByColor?.[colorId]?.[shipToId];
-          if (quantity === '' || quantity === null || quantity === undefined || !Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
-            notify('Enter a valid PO Qty for every selected Ship To.', 'error');
+          if (!isPositivePoQty(quantity)) {
+            notify('PO Qty must be greater than 0 for every selected Ship To.', 'error');
             return false;
           }
         }
@@ -1326,57 +1300,12 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     setFocusedValidationIssue(null);
   };
 
-  const requestMaterialShipToReview = (impact) => {
-    const mappingId = String(impact?.sourceId || '').trim();
-    if (mappingId) {
-      const next = new URLSearchParams(searchParams);
-      next.set('tab', 'mpr');
-      next.set('reviewMaterialShipTo', mappingId);
-      setSearchParams(next, { replace: true });
-    }
-    setMaterialShipToReviewOpen(true);
-  };
-
-  const ensureExistingMprMaterialShipToIsCurrent = async () => {
-    if (!mpr?.id || !order?.id) return true;
-    try {
-      const latest = await getMpr(order.id);
-      setMpr(latest);
-      const impact = staleMaterialShipToImpact(latest);
-      if (!impact) return true;
-      requestMaterialShipToReview(impact);
-      notify('Material Ship To changed for an existing MPR material. Confirm the update before creating more MPR batches.', 'warning');
-      return false;
-    } catch (error) {
-      notify(getApiError(error, 'Unable to check current Material Ship To impact.'), 'error');
-      return false;
-    }
-  };
-
-  const clearMaterialShipToReviewRequest = () => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('reviewMaterialShipTo');
-    setSearchParams(next, { replace: true });
-  };
-
-  const confirmMaterialShipToReview = async () => {
-    const impact = staleMaterialShipToImpact(mpr, requestedMaterialShipToReviewId);
-    const mappingId = String(impact?.sourceId || requestedMaterialShipToReviewId || '').trim();
-    if (!mappingId) return;
-    const updated = await refreshChangedMaterialShipTo(mappingId);
-    if (updated) {
-      setMaterialShipToReviewOpen(false);
-      clearMaterialShipToReviewRequest();
-    }
-  };
-
   const previewMprAction = async () => {
     if (!canMutateMpr || !llBeanMprEnabled) {
       notify(!canMutateMpr ? mutationBlockedMessage : buyerStrategyMessage, 'warning');
       return;
     }
     if (!validateSelection()) return;
-    if (!(await ensureExistingMprMaterialShipToIsCurrent())) return;
     if (!(await runMprPreflight('Preview MPR'))) return;
     try {
       const result = await previewMpr(order.id, payload);
@@ -1403,7 +1332,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     }
     if (generateProgress.status === 'processing' || preflightBusy) return;
     if (!validateSelection()) return;
-    if (!(await ensureExistingMprMaterialShipToIsCurrent())) return;
     if (!(await runMprPreflight('Create MPR'))) return;
 
     startGenerateProgress();
@@ -1539,10 +1467,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     if ((mpr?.selections || []).some((item) => item?.bomSourceChanged)) {
       notify('A source BOM has changed. Update the changed BOM source before confirming this MPR.', 'warning');
-      return;
-    }
-    if (mpr?.materialShipToSourceChanged) {
-      notify('Material Ship To changed. Review the impact and update it before confirming this MPR.', 'warning');
       return;
     }
     if (!mpr?.id || !order?.id || confirming) return;
@@ -1751,8 +1675,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       }
       for (const shipToId of selectedShipToIds) {
         const quantity = batchEditForm.shipToQtyByColor?.[color]?.[shipToId];
-        if (quantity === '' || quantity === null || quantity === undefined || !Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
-          notify('Enter a valid PO Qty for every selected Ship To.', 'error');
+        if (!isPositivePoQty(quantity)) {
+          notify('PO Qty must be greater than 0 for every selected Ship To.', 'error');
           return;
         }
       }
@@ -1816,25 +1740,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       notify(getApiError(error, 'Unable to update all changed BOM sources.'), 'error');
     } finally {
       setSourceRefreshingAll(false);
-    }
-  };
-
-  const refreshChangedMaterialShipTo = async (mappingId) => {
-    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return false; }
-    if (!order?.id || !mappingId || materialShipToRefreshingId || sourceRefreshingBomId || sourceRefreshingAll) return false;
-
-    setMaterialShipToRefreshingId(mappingId);
-    try {
-      const result = await refreshMprMaterialShipToSource(order.id, mappingId);
-      setMpr(result);
-      setPreview(null);
-      notify('Affected MPR rows were updated from Material Ship To only. BOM and other Master Data snapshots were kept unchanged.');
-      return true;
-    } catch (error) {
-      notify(getApiError(error, 'Unable to update MPR from Material Ship To.'), 'error');
-      return false;
-    } finally {
-      setMaterialShipToRefreshingId('');
     }
   };
 
@@ -2107,7 +2012,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
         changedAt: item.currentBomSourceChangedAt || null,
         changedBy: item.currentBomSourceChangedBy || '',
         summary: item.currentBomSourceChangeSummary || 'BOM source data changed',
-        changes: [],
         missing: Boolean(item.bomSourceMissing)
       };
       existing.batchCount += 1;
@@ -2115,10 +2019,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
       existing.changedAt = item.currentBomSourceChangedAt || existing.changedAt;
       existing.changedBy = item.currentBomSourceChangedBy || existing.changedBy;
       existing.summary = item.currentBomSourceChangeSummary || existing.summary;
-      (item.currentBomSourceChanges || []).forEach((change) => {
-        const key = `${change?.revision ?? ''}|${change?.sourceType || ''}|${change?.row ?? ''}|${change?.field || ''}|${change?.oldValue || ''}|${change?.newValue || ''}`;
-        if (!existing.changes.some((entry) => entry.key === key)) existing.changes.push({ key, ...change });
-      });
       existing.missing = existing.missing || Boolean(item.bomSourceMissing);
       groups.set(item.bomId, existing);
     });
@@ -2126,36 +2026,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   }, [mpr]);
   const refreshableStaleBomGroups = useMemo(() => staleBomGroups.filter((item) => !item.missing), [staleBomGroups]);
   const hasStaleBomSources = staleBomGroups.length > 0;
-  const masterDataImpacts = useMemo(() => (mpr?.sourceImpacts || []).filter(Boolean), [mpr]);
-  const detailedMasterDataImpacts = useMemo(
-    () => masterDataImpacts.filter((item) => item?.stale || String(item?.status || '').toUpperCase() !== 'MATCHED'),
-    [masterDataImpacts]
-  );
-  const matchedMasterDataSummary = useMemo(() => {
-    const groups = new Map();
-    masterDataImpacts
-      .filter((item) => !item?.stale && String(item?.status || '').toUpperCase() === 'MATCHED')
-      .forEach((item) => {
-        const sourceType = item?.sourceType || 'MASTER DATA';
-        const current = groups.get(sourceType) || { sourceType, lineIds: new Set(), batchIds: new Set(), records: 0 };
-        (item?.affectedLineIds || []).filter(Boolean).forEach((id) => current.lineIds.add(id));
-        (item?.affectedBatchIds || []).filter(Boolean).forEach((id) => current.batchIds.add(id));
-        current.records += 1;
-        groups.set(sourceType, current);
-      });
-    return Array.from(groups.values()).map((item) => ({
-      sourceType: item.sourceType,
-      lineCount: item.lineIds.size,
-      batchCount: item.batchIds.size,
-      recordCount: item.records
-    }));
-  }, [masterDataImpacts]);
-  const staleMaterialShipToImpacts = useMemo(
-    () => masterDataImpacts.filter((item) => item?.sourceType === 'MATERIAL_SHIP_TO' && item?.stale),
-    [masterDataImpacts]
-  );
-  const hasStaleMaterialShipTo = Boolean(mpr?.materialShipToSourceChanged || staleMaterialShipToImpacts.length);
-  const sourceRefreshBusy = Boolean(sourceRefreshingBomId || sourceRefreshingAll || materialShipToRefreshingId);
+  const sourceRefreshBusy = Boolean(sourceRefreshingBomId || sourceRefreshingAll);
 
   const generationBusy = generateProgress.status === 'processing';
   const exportBusy = exportProgress.status === 'processing';
@@ -2261,7 +2132,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
             </Tooltip>
 
             {mpr && (
-              <Tooltip title={!canWrite ? writeBlockedMessage : (mprCompleted ? completedLockMessage : (hasStaleBomSources ? 'Update changed BOM sources before confirming this MPR.' : (hasStaleMaterialShipTo ? 'Update changed Material Ship To mappings before confirming this MPR.' : 'Confirm the current MPR as completed')))}>
+              <Tooltip title={!canWrite ? writeBlockedMessage : (mprCompleted ? completedLockMessage : (hasStaleBomSources ? 'Update changed BOM sources before confirming this MPR.' : 'Confirm the current MPR as completed'))}>
                 <span>
                   <Button
                     size="small"
@@ -2269,7 +2140,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                     color="success"
                     startIcon={<CheckCircle />}
                     onClick={() => setConfirmOpen(true)}
-                    disabled={!canMutateMpr || operationBusy || hasStaleBomSources || hasStaleMaterialShipTo}
+                    disabled={!canMutateMpr || operationBusy || hasStaleBomSources}
                     sx={{ ...mprActionButtonSx, minWidth: 124, boxShadow: 'none' }}
                   >
                     {mprCompleted ? 'Confirmed' : 'Confirm MPR'}
@@ -2358,16 +2229,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                       {item.changedBy ? ` · ${item.changedBy}` : ''}
                       {item.batchCount > 1 ? ` · ${item.batchCount} MPR batches affected` : ''}
                     </Typography>
-                    {!item.missing && item.changes?.length > 0 && (
-                      <Stack spacing={0.25} sx={{ mt: 0.55 }}>
-                        {item.changes.map((change) => (
-                          <Typography key={change.key} sx={{ fontSize: '.71rem', color: '#7c2d12', fontFamily: 'monospace' }}>
-                            {change.row ? `Row ${change.row}` : (change.sourceType === 'HEADER' ? 'Header' : change.sourceType || 'BOM')}
-                            {' - '}{change.field || 'Field'}: {change.oldValue || '(blank)'} → {change.newValue || '(blank)'}
-                          </Typography>
-                        ))}
-                      </Stack>
-                    )}
                   </Box>
                   {!mprCompleted && !item.missing && (
                     <Button
@@ -2401,62 +2262,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                 </Button>
               </Box>
             )}
-          </Stack>
-        </Alert>
-      )}
-
-      {mpr && masterDataImpacts.length > 0 && (
-        <Alert severity={hasStaleMaterialShipTo && !mprCompleted ? 'warning' : 'info'} sx={{ mb: 0.8, alignItems: 'flex-start' }}>
-          <Stack spacing={0.8} sx={{ width: '100%' }}>
-            <Box>
-              <Typography sx={{ fontWeight: 800, fontSize: '.85rem' }}>Master Data impact</Typography>
-              <Typography sx={{ mt: 0.2, fontSize: '.75rem' }}>
-                Current Master Data is checked read-only against the exact IDs saved in this MPR. No source value is applied until you explicitly update.
-              </Typography>
-            </Box>
-            {matchedMasterDataSummary.length > 0 && (
-              <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
-                {matchedMasterDataSummary.map((item) => (
-                  <Chip
-                    key={`matched-${item.sourceType}`}
-                    size="small"
-                    variant="outlined"
-                    label={`${item.sourceType}: Matched${item.lineCount ? ` · ${item.lineCount} line(s)` : ''}${item.batchCount ? ` · ${item.batchCount} batch(es)` : ''}`}
-                    sx={{ fontWeight: 700, backgroundColor: '#fff' }}
-                  />
-                ))}
-              </Stack>
-            )}
-            {detailedMasterDataImpacts.map((impact, index) => (
-              <Paper key={`${impact?.sourceType || 'SOURCE'}-${impact?.sourceId || impact?.masterKey || index}-${impact?.status || ''}`} variant="outlined" sx={{ p: 0.85, backgroundColor: impact?.stale ? '#fffdf7' : '#ffffff', borderColor: impact?.stale ? '#f59e0b' : '#dbe3ef' }}>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ md: 'center' }}>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography sx={{ fontWeight: 800, fontSize: '.75rem', color: impact?.stale ? '#7c2d12' : '#334155' }}>
-                      {impact?.sourceType || 'MASTER DATA'} · {impact?.status || 'MATCHED'}
-                    </Typography>
-                    <Typography sx={{ mt: 0.15, fontSize: '.71rem', color: '#64748b' }}>
-                      {impact?.message || '-'}
-                      {impact?.masterKey ? ` · ${impact.masterKey}` : ''}
-                      {impact?.affectedLineIds?.length ? ` · ${impact.affectedLineIds.length} line(s)` : ''}
-                      {impact?.affectedBatchIds?.length ? ` · ${impact.affectedBatchIds.length} batch(es)` : ''}
-                    </Typography>
-                  </Box>
-                  {!mprCompleted && impact?.sourceType === 'MATERIAL_SHIP_TO' && impact?.stale && impact?.sourceId && (
-                    <Button
-                      size="small"
-                      variant="contained"
-                      color="warning"
-                      startIcon={<Refresh />}
-                      onClick={() => refreshChangedMaterialShipTo(impact.sourceId)}
-                      disabled={!canMutateMpr || sourceRefreshBusy}
-                      sx={{ textTransform: 'none', fontWeight: 800, whiteSpace: 'nowrap' }}
-                    >
-                      {materialShipToRefreshingId === impact.sourceId ? 'Updating...' : 'Update from Material Ship To'}
-                    </Button>
-                  )}
-                </Stack>
-              </Paper>
-            ))}
           </Stack>
         </Alert>
       )}
@@ -2861,8 +2666,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                                             value={state.shipToQtyByColor?.[colorId]?.[shipTo.id] ?? ''}
                                                             onChange={(event) => changeShipToQty(bom.id, colorId, shipTo.id, event.target.value)}
                                                             inputProps={{ min: 0, step: 'any' }}
+                                                            error={state.shipToQtyByColor?.[colorId]?.[shipTo.id] !== '' && state.shipToQtyByColor?.[colorId]?.[shipTo.id] !== undefined && state.shipToQtyByColor?.[colorId]?.[shipTo.id] !== null && !isPositivePoQty(state.shipToQtyByColor?.[colorId]?.[shipTo.id])}
                                                             disabled={!canMutateMpr}
-                                                            helperText={shipTo.shipToCode && shipTo.shipToName ? shipTo.shipToName : ''}
+                                                            helperText={
+                                                              state.shipToQtyByColor?.[colorId]?.[shipTo.id] !== '' && state.shipToQtyByColor?.[colorId]?.[shipTo.id] !== undefined && state.shipToQtyByColor?.[colorId]?.[shipTo.id] !== null && !isPositivePoQty(state.shipToQtyByColor?.[colorId]?.[shipTo.id])
+                                                                ? 'PO Qty must be greater than 0.'
+                                                                : (shipTo.shipToCode && shipTo.shipToName ? shipTo.shipToName : '')
+                                                            }
                                                             sx={{ width: { xs: '100%', sm: 190 } }}
                                                           />
                                                         ))}
@@ -3848,82 +3658,6 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={Boolean(mpr?.id && materialShipToReviewOpen && requestedMaterialShipToReviewId)}
-        onClose={materialShipToRefreshingId ? undefined : () => {
-          setMaterialShipToReviewOpen(false);
-          clearMaterialShipToReviewRequest();
-        }}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle sx={{ fontWeight: 800, color: '#9a6700' }}>Material Ship To change detected</DialogTitle>
-        <DialogContent dividers>
-          {(() => {
-            const impact = staleMaterialShipToImpact(mpr, requestedMaterialShipToReviewId);
-            if (!impact) return <Alert severity="info">This Material Ship To mapping is already up to date in this MPR.</Alert>;
-            return (
-              <Stack spacing={1.2}>
-                <Alert severity="warning">
-                  {mprCompleted
-                    ? 'This completed MPR keeps its old snapshot. Reopen it before applying the new Material Ship To mapping.'
-                    : 'A new or changed Material Ship To mapping matches material already saved in this MPR. Nothing has been changed automatically.'}
-                </Alert>
-                <Box sx={{ p: 1.1, border: '1px solid #e5e7eb', borderRadius: 1.5, bgcolor: '#f8fafc' }}>
-                  <Typography sx={{ fontWeight: 800, fontSize: '.82rem' }}>
-                    {impact?.sourceType || 'MATERIAL_SHIP_TO'} · {impact?.status || 'CHANGED'}
-                  </Typography>
-                  <Typography sx={{ mt: 0.35, fontSize: '.74rem', color: '#64748b' }}>
-                    {impact?.message || 'Material Ship To mapping changed.'}
-                    {impact?.masterKey ? ` · ${impact.masterKey}` : ''}
-                  </Typography>
-                  <Typography sx={{ mt: 0.35, fontSize: '.72rem', color: '#64748b' }}>
-                    {impact?.affectedLineIds?.length || 0} affected line(s) · {impact?.affectedBatchIds?.length || 0} affected batch(es)
-                  </Typography>
-                </Box>
-                <Typography sx={{ fontSize: '.76rem', color: '#475569' }}>
-                  Confirm Update only refreshes the Material Ship To snapshot/Ship To allocation for the affected rows. BOM and other Master Data snapshots stay unchanged.
-                </Typography>
-              </Stack>
-            );
-          })()}
-        </DialogContent>
-        <DialogActions sx={{ p: 1.5 }}>
-          <Button
-            onClick={() => { setMaterialShipToReviewOpen(false); clearMaterialShipToReviewRequest(); }}
-            disabled={Boolean(materialShipToRefreshingId)}
-            sx={{ textTransform: 'none' }}
-          >
-            Close
-          </Button>
-          {mprCompleted ? (
-            <Button
-              variant="contained"
-              color="warning"
-              disabled={!canReopenMpr}
-              onClick={() => {
-                setMaterialShipToReviewOpen(false);
-                setReopenOpen(true);
-              }}
-              sx={{ textTransform: 'none', fontWeight: 800 }}
-            >
-              Reopen MPR
-            </Button>
-          ) : (
-            <Button
-              variant="contained"
-              color="warning"
-              startIcon={<Refresh />}
-              onClick={confirmMaterialShipToReview}
-              disabled={!canMutateMpr || Boolean(materialShipToRefreshingId)}
-              sx={{ textTransform: 'none', fontWeight: 800 }}
-            >
-              {materialShipToRefreshingId ? 'Updating...' : 'Confirm Update'}
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
-
       <Dialog open={canMutateMpr && confirmOpen} onClose={confirming ? undefined : () => setConfirmOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Confirm MPR?</DialogTitle>
         <DialogContent>
@@ -4032,8 +3766,13 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                                   value={batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id] ?? ''}
                                   onChange={(event) => changeBatchShipToQty(colorId, shipTo.id, event.target.value)}
                                   inputProps={{ min: 0, step: 'any' }}
+                                  error={batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id] !== '' && batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id] !== undefined && batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id] !== null && !isPositivePoQty(batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id])}
                                   disabled={batchSaving}
-                                  helperText={shipTo.shipToCode && shipTo.shipToName ? shipTo.shipToName : ''}
+                                  helperText={
+                                    batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id] !== '' && batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id] !== undefined && batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id] !== null && !isPositivePoQty(batchEditForm.shipToQtyByColor?.[colorId]?.[shipTo.id])
+                                      ? 'PO Qty must be greater than 0.'
+                                      : (shipTo.shipToCode && shipTo.shipToName ? shipTo.shipToName : '')
+                                  }
                                   sx={{ width: { xs: '100%', sm: 195 } }}
                                 />
                               ))}

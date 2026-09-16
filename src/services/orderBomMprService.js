@@ -250,14 +250,6 @@ export const refreshAllMprBomSources = (orderId) => unwrap(
   )
 );
 
-export const refreshMprMaterialShipToSource = (orderId, mappingId) => unwrap(
-  apiRawClient.post(
-    `/api/orders/${encodeURIComponent(orderId)}/mpr/refresh-material-ship-to/${encodeURIComponent(mappingId)}`,
-    null,
-    withAuth()
-  )
-);
-
 export const deleteMprBatch = (orderId, batchId) => unwrap(
   apiRawClient.delete(
     `/api/orders/${encodeURIComponent(orderId)}/mpr/batches/${encodeURIComponent(batchId)}`,

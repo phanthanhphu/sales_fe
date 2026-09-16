@@ -115,7 +115,7 @@ export const vendorCodeConfig = {
       render: (row) => (row.pendingCompletion ? 'Pending completion' : 'Complete')
     },
     { label: 'Remark', key: 'remark', minWidth: 220, hideOnSmall: true },
-    { label: 'Usage', key: 'used', minWidth: 115, sortable: false, render: (row) => row?.usedByMpr ? 'MPR locked' : row?.usedByMatInfo ? 'MAT_INFO used' : row?.used ? 'Referenced' : 'Available' },
+    { label: 'Usage', key: 'used', minWidth: 115, sortable: false, render: (row) => row?.editLocked ? 'MPR locked' : row?.used ? 'Referenced' : 'Available' },
     {
       label: 'Updated At',
       key: 'updatedAt',
@@ -127,20 +127,13 @@ export const vendorCodeConfig = {
   ],
 
   isEditLocked: () => false,
-  editLockMessage: (record) => record?.lockReason || 'Business fields are locked after MPR usage; Remark remains editable.',
+  editLockMessage: (record) => record?.lockReason || 'Short Name Supplier is locked when referenced; other Vendor fields remain editable.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This Vendor Code is in use and cannot be deleted.',
-  isFieldDisabled: ({ field, mode, record }) => {
-    if (mode !== 'edit') return false;
-    if (record?.usedByMpr) return ['shortNameSupplier', 'vendorCode', 'vendorName', 'matCharger'].includes(field.name);
-    return Boolean(record?.usedByMatInfo || record?.used) && field.name === 'shortNameSupplier';
-  },
+  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && field.name === 'shortNameSupplier',
   getFieldHelperText: ({ field, mode, record }) => {
-    if (mode === 'edit' && record?.usedByMpr && ['shortNameSupplier', 'vendorCode', 'vendorName', 'matCharger'].includes(field.name)) {
-      return 'This business field is locked because an MPR snapshot already uses this exact Vendor Code. Remark remains editable.';
-    }
-    if (mode === 'edit' && (record?.usedByMatInfo || record?.used) && field.name === 'shortNameSupplier') {
-      return 'Short Name Supplier is locked because MAT_INFO references this Vendor Code.';
+    if (mode === 'edit' && record?.used && field.name === 'shortNameSupplier') {
+      return 'Short Name Supplier is locked because MAT_INFO or MPR is referencing this Vendor Code. Vendor Code, Vendor Name, Mat Charger and Remark remain editable.';
     }
     return field.helperText || '';
   },
