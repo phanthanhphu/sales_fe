@@ -224,8 +224,7 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
     setSaving(true);
     try {
       const updated = await updateBom(editTarget.id, {
-        bomName: nextName,
-        header: editTarget.header || {}
+        bomName: nextName
       });
       setRows((current) => current.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)));
       setEditTarget(null);

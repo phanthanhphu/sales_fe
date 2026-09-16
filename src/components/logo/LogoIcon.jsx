@@ -25,7 +25,7 @@ export default function LogoIcon() {
           0 12px 30px ${alpha('#000', 0.30)}
         `,
 
-        // nhẹ xíu cho nổi bật
+        // Add a subtle highlight.
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)'
       }}

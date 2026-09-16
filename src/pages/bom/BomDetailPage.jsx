@@ -811,7 +811,7 @@ function PackingDialog({ open, record, saving, onClose, onSave }) {
     </Dialog>
   );
 }
-function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment, productColors = [], saving, onClose, onSave }) {
+function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment, productColors = [], saving, onClose, onSave, onImageOpen }) {
   const blankChildColor = () => ({ id: '', childColor: '' });
   const clean = (value) => String(value || '').trim();
   const mapChildColors = (source = []) => (
@@ -825,6 +825,7 @@ function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment,
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [removeImageRequested, setRemoveImageRequested] = useState(false);
   const [imageError, setImageError] = useState('');
+  const [localImagePreviewOpen, setLocalImagePreviewOpen] = useState(false);
   const [childColorDeleteTarget, setChildColorDeleteTarget] = useState(null);
   const editableChildColorRows = form.childColors.map((item, sourceIndex) => ({ ...item, __sourceIndex: sourceIndex }));
   const { sortedRows: sortedEditableChildColors, sortKey: childSortKey, sortDirection: childSortDirection, requestSort: requestChildSort } = useTableSort(editableChildColorRows, { getValue: (item, key) => key === 'childColor' ? item.childColor : item?.[key] });
@@ -841,6 +842,7 @@ function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment,
     setImageFile(null);
     setRemoveImageRequested(false);
     setImageError('');
+    setLocalImagePreviewOpen(false);
     setChildColorDeleteTarget(null);
   }, [open, record, header]);
 
@@ -963,9 +965,21 @@ function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment,
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
                 <Box sx={{ width: { xs: 1, md: 240 }, flexShrink: 0 }}>
                   {imagePreviewUrl ? (
-                    <Box component="img" src={imagePreviewUrl} alt="Selected Product Color" sx={{ width: 1, height: 150, objectFit: 'contain', display: 'block', borderRadius: 1, backgroundColor: '#f8fafc' }} />
+                    <Tooltip title="Click to enlarge" arrow>
+                      <Box
+                        component="img"
+                        src={imagePreviewUrl}
+                        alt="Selected Product Color"
+                        onClick={() => setLocalImagePreviewOpen(true)}
+                        sx={{ width: 1, height: 150, objectFit: 'contain', display: 'block', borderRadius: 1, backgroundColor: '#f8fafc', cursor: 'zoom-in' }}
+                      />
+                    </Tooltip>
                   ) : imageAttachment && !removeImageRequested ? (
-                    <ProtectedAttachmentImage bomId={bomId} attachment={imageAttachment} height={150} />
+                    <Tooltip title="Click to enlarge" arrow>
+                      <Box sx={{ cursor: 'zoom-in' }}>
+                        <ProtectedAttachmentImage bomId={bomId} attachment={imageAttachment} onOpen={onImageOpen} height={150} />
+                      </Box>
+                    </Tooltip>
                   ) : (
                     <Stack alignItems="center" justifyContent="center" spacing={0.5} sx={{ height: 150, backgroundColor: '#f8fafc', borderRadius: 1 }}>
                       <Image color="action" />
@@ -1060,6 +1074,35 @@ function ProductColorDialog({ open, record, header = {}, bomId, imageAttachment,
             {saving ? 'Saving...' : record ? 'Save Product Color' : 'Add Product Color'}
           </Button>
         </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(localImagePreviewOpen && imagePreviewUrl)}
+        onClose={() => setLocalImagePreviewOpen(false)}
+        fullWidth
+        maxWidth="lg"
+        PaperProps={{ sx: { width: 'min(1100px, calc(100vw - 32px))', maxHeight: 'calc(100vh - 32px)', borderRadius: 2 } }}
+      >
+        <DialogTitle sx={{ pr: 7, py: 1.5, fontWeight: 750, color: '#103B5C' }}>
+          <Typography noWrap sx={{ pr: 1, fontWeight: 750, color: '#103B5C' }}>
+            {imageFile?.name || form.colorName || 'Product Color Image'}
+          </Typography>
+          <IconButton
+            aria-label="Close image preview"
+            onClick={() => setLocalImagePreviewOpen(false)}
+            sx={{ position: 'absolute', right: 12, top: 8 }}
+          >
+            <Close />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: { xs: 1, sm: 2 }, minHeight: 260, display: 'grid', placeItems: 'center', bgcolor: '#0f172a' }}>
+          <Box
+            component="img"
+            src={imagePreviewUrl}
+            alt={imageFile?.name || form.colorName || 'Product Color Image'}
+            sx={{ display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 150px)', width: 'auto', height: 'auto', objectFit: 'contain', mx: 'auto' }}
+          />
+        </DialogContent>
       </Dialog>
 
       <ConfirmDeleteDialog
@@ -1730,25 +1773,14 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
                   }}
                 >
                   {label === 'Material' ? (
-                    <Stack direction="row" spacing={0.65} alignItems="center" sx={{ minWidth: 0 }}>
-                      <BomLineImageCell
-                        bomId={bomId}
-                        line={line}
-                        onUpload={onImageUpload}
-                        onDelete={onImageDelete}
-                        onPreview={onImagePreview}
-                        actionsDisabled={actionsDisabled}
-                        compact
-                      />
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography sx={{ fontSize: '.75rem', fontWeight: 650, color: '#20354b', lineHeight: 1.25, overflowWrap: 'anywhere' }}>
-                          {line.materialType || 'Material'}
-                        </Typography>
-                        {line.detailNo && (
-                          <Typography sx={{ mt: 0.12, fontSize: '.64rem', color: '#7a8da0' }}>Detail {line.detailNo}</Typography>
-                        )}
-                      </Box>
-                    </Stack>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ fontSize: '.75rem', fontWeight: 650, color: '#20354b', lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+                        {line.materialType || 'Material'}
+                      </Typography>
+                      {line.detailNo && (
+                        <Typography sx={{ mt: 0.12, fontSize: '.64rem', color: '#7a8da0' }}>Detail {line.detailNo}</Typography>
+                      )}
+                    </Box>
                   ) : label === 'Image'
                     ? <BomLineImageCell bomId={bomId} line={line} onUpload={onImageUpload} onDelete={onImageDelete} onPreview={onImagePreview} actionsDisabled={actionsDisabled} />
                     : (render(line) ?? '—')}
@@ -2985,7 +3017,11 @@ export default function BomDetailPage() {
                   <Stack direction="row" spacing={0.7} alignItems="center">
                     <Box sx={{ width: 86, flexShrink: 0, overflow: 'hidden', borderRadius: 1 }}>
                       {imageAttachment ? (
-                        <ProtectedAttachmentImage bomId={bomId} attachment={imageAttachment} height={64} />
+                        <Tooltip title="Click to enlarge" arrow>
+                          <Box sx={{ cursor: 'zoom-in' }}>
+                            <ProtectedAttachmentImage bomId={bomId} attachment={imageAttachment} onOpen={setAttachmentPreview} height={64} />
+                          </Box>
+                        </Tooltip>
                       ) : (
                         <Stack alignItems="center" justifyContent="center" sx={{ height: 64, backgroundColor: '#f8fafc', borderRadius: 1 }}>
                           <Image sx={{ fontSize: 20, color: '#94a3b8' }} />
@@ -3204,6 +3240,7 @@ export default function BomDetailPage() {
         saving={saving}
         onClose={() => setProductColorCtx(null)}
         onSave={saveProductColor}
+        onImageOpen={setAttachmentPreview}
       />
 
       <ConfirmDeleteDialog

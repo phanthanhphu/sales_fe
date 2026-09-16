@@ -1,10 +1,10 @@
 # User module
 
-Toàn bộ giao diện và chức năng quản lý người dùng được gom vào thư mục này:
+All user-management UI and functionality are grouped in this folder:
 
-- `UserManagementPage.jsx`: danh sách người dùng, thêm/sửa/xóa/reset mật khẩu.
-- `AddUserDialog.jsx`: thêm người dùng.
-- `EditUserDialog.jsx`: cập nhật người dùng.
-- `ResetPasswordDialog.jsx`: đặt lại mật khẩu.
-- `UserSearch.jsx`: lọc và tìm kiếm người dùng.
-- `ViewUserDialog.jsx`, `ProfileEditDialog.jsx`, `ChangePasswordDialog.jsx`: hồ sơ người dùng ở góc phải trên cùng.
+- `UserManagementPage.jsx`: user list, add/edit/delete users, and reset passwords.
+- `AddUserDialog.jsx`: add users.
+- `EditUserDialog.jsx`: update users.
+- `ResetPasswordDialog.jsx`: reset passwords.
+- `UserSearch.jsx`: filter and search users.
+- `ViewUserDialog.jsx`, `ProfileEditDialog.jsx`, `ChangePasswordDialog.jsx`: user profile functions in the top-right area.

@@ -108,7 +108,7 @@ const isAdminRole = (role) => {
 const canManageBookingUser = (user = {}, fallbackRole = '') => {
   const role = getUserRole(user, fallbackRole);
 
-  // Giữ dữ liệu quyền booking trong phiên đăng nhập để không làm thay đổi cấu trúc token cũ.
+  // Keep booking permission data in the login session without changing the legacy token structure.
   if (isAdminRole(role)) {
     return false;
   }

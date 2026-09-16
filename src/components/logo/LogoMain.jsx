@@ -23,7 +23,7 @@ export default function LogoMain({ sx }) {
         maxWidth: 150,
         mr: 'auto',
 
-        // tinh tế hơn (đỡ gắt)
+        // Keep the logo treatment subtle.
         opacity: 0.92,
         filter: `
           drop-shadow(0 10px 22px ${alpha(theme.palette.common.black, 0.35)})
