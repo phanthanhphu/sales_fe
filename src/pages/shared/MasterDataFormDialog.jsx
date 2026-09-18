@@ -16,6 +16,7 @@ import {
   Snackbar,
   Stack,
   TextField,
+  Tooltip,
   Typography,
   useMediaQuery
 } from '@mui/material';
@@ -179,6 +180,9 @@ export default function MasterDataFormDialog({
     : legacyRecordLocked && typeof config.recordLockMessage === 'function'
       ? config.recordLockMessage(record)
       : '';
+  const restrictedEditMessage = Boolean(isEditing && !recordLocked && typeof config.restrictedEditMessage === 'function')
+    ? config.restrictedEditMessage(record)
+    : '';
   const title = `${isEditing ? 'Edit' : 'Add'} ${config.menuTitle}`;
   const formFields = config.formFields || [];
   const usesCurrencyOptions = Boolean(config.needsCurrencyOptions || formFields.some((field) => field.optionSource === 'currency'));
@@ -449,6 +453,7 @@ export default function MasterDataFormDialog({
 
         <DialogContent dividers sx={{ p: { xs: 1.5, sm: 2 } }}>
           {recordLocked && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{recordLockMessage || 'This record is used and locked.'}</Alert>}
+          {restrictedEditMessage && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{restrictedEditMessage}</Alert>}
           {serverError && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{serverError}</Alert>}
           {optionError && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{optionError}</Alert>}
           {config.formHint && <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>{config.formHint}</Alert>}
@@ -522,15 +527,24 @@ export default function MasterDataFormDialog({
                           const lockedTag = lockedMultiValues.has(String(valueKey));
                           const tagProps = getTagProps({ index });
                           const { key, onDelete, ...chipProps } = tagProps;
-                          return (
+                          const chip = (
                             <Chip
                               key={key}
                               {...chipProps}
                               onDelete={lockedTag ? undefined : onDelete}
-                              label={`${optionLabel(field, option)}${lockedTag ? ' · Used' : ''}`}
+                              label={`${optionLabel(field, option)}${lockedTag ? ' · Used by MPR' : ''}`}
                               size="small"
                             />
                           );
+                          return lockedTag ? (
+                            <Tooltip
+                              key={key}
+                              title="Cannot remove because this Ship To is referenced by an existing MPR."
+                              arrow
+                            >
+                              <span>{chip}</span>
+                            </Tooltip>
+                          ) : chip;
                         })) : undefined}
                       onInputChange={(_, nextInput, reason) => {
                         if (field.optionSource === 'supplier' && (reason === 'input' || reason === 'clear')) {
@@ -606,8 +620,11 @@ export default function MasterDataFormDialog({
                   >
                     {field.type === 'select' && displayedOptions.map((option) => {
                       const valueKey = optionValue(field, option);
+                      const optionDisabled = typeof config.isOptionDisabled === 'function'
+                        ? Boolean(config.isOptionDisabled({ field, option, values, record, mode }))
+                        : Boolean(option?.disabled);
                       return (
-                        <MenuItem key={valueKey || String(option)} value={valueKey}>
+                        <MenuItem key={valueKey || String(option)} value={valueKey} disabled={optionDisabled}>
                           {optionLabel(field, option)}
                         </MenuItem>
                       );

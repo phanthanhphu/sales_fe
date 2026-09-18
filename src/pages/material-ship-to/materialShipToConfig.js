@@ -87,18 +87,45 @@ export const materialShipToConfig = {
     },
     { label: 'Status', key: 'active', minWidth: 95, render: (row) => row.active === false ? 'Inactive' : 'Active' },
     { label: 'Remark', key: 'remark', minWidth: 220, hideOnSmall: true },
-    { label: 'Usage', key: 'used', minWidth: 105, sortable: false, render: (row) => row?.used ? 'In use' : 'Available' },
+    { label: 'Usage', key: 'used', minWidth: 105, sortable: false, render: (row) => row?.used ? 'Restricted Edit' : 'Available' },
     { label: 'Updated At', key: 'updatedAt', minWidth: 155, hideOnSmall: true, isDate: true, render: (row) => formatDateTime(row.updatedAt) }
   ],
 
-  isEditLocked: (record) => Boolean(record?.editLocked || record?.used),
-  editLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is used by an existing MPR and cannot be edited. Create a new mapping for future changes.',
+  // v11 Restricted Edit: a mapping referenced by an existing MPR is still editable,
+  // but its material identity and any Ship To already referenced by MPR are locked.
+  isEditLocked: (record) => Boolean(record?.editLocked),
+  editLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping cannot be edited.',
+  restrictedEditMessage: (record) => record?.used
+    ? 'Restricted Edit: material identity is read-only. A Ship To marked Used by MPR cannot be removed because an existing MPR references it.'
+    : '',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
-  deleteLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is used by MPR and cannot be deleted.',
-  isFieldDisabled: ({ mode, record }) => mode === 'edit' && Boolean(record?.editLocked || record?.used),
+  deleteLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is referenced by an existing MPR and cannot be deleted.',
+  isFieldDisabled: ({ field, mode, record }) => {
+    if (mode !== 'edit' || !record?.used) return false;
+    return ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit'].includes(field?.name);
+  },
+  isOptionDisabled: ({ field, option, mode, record }) => {
+    if (mode !== 'edit' || !record?.used || field?.name !== 'active') return false;
+    const optionValue = String(option?.value ?? option ?? '');
+    return record?.active !== false && optionValue === 'false';
+  },
+  getLockedMultiValues: ({ field, mode, record }) => {
+    if (mode !== 'edit' || field?.name !== 'shipToIds') return [];
+    return Array.isArray(record?.usedShipToIds) ? record.usedShipToIds : [];
+  },
   getFieldHelperText: ({ field, mode, record }) => {
-    if (mode === 'edit' && (record?.editLocked || record?.used)) {
-      return record?.lockReason || 'This mapping is locked because an existing MPR already uses it.';
+    if (mode === 'edit' && record?.used) {
+      if (field?.name === 'shipToIds') {
+        return 'Ship To values marked Used by MPR are locked. Unused selected Ship To may be removed and new Ship To may be added.';
+      }
+      if (['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit'].includes(field?.name)) {
+        return 'Read-only because this material identity is referenced by an existing MPR.';
+      }
+      if (field?.name === 'active') {
+        return record?.active === false
+          ? 'This referenced mapping may be re-activated. It cannot be changed from Active to Inactive while an existing MPR references it.'
+          : 'Cannot change from Active to Inactive while an existing MPR references this mapping.';
+      }
     }
     return field.helperText || '';
   },

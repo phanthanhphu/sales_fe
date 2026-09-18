@@ -209,6 +209,16 @@ export const validateMprMasterData = (orderId) => unwrap(apiRawClient.get(`/api/
 export const previewMpr = (orderId, payload) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/preview`, payload, withAuth()));
 export const generateMpr = (orderId, payload) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/generate`, payload, withAuth()));
 export const confirmMpr = (orderId) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/confirm`, null, withAuth()));
+export const reviewMprMaterialShipTo = (orderId) => unwrap(
+  apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/material-ship-to/review`, null, withAuth())
+);
+export const applyMprMaterialShipTo = (orderId, reviewedMaterialShipToVersion) => unwrap(
+  apiRawClient.post(
+    `/api/orders/${encodeURIComponent(orderId)}/mpr/material-ship-to/apply`,
+    { reviewedMaterialShipToVersion },
+    withAuth()
+  )
+);
 export const reopenMpr = (orderId, reason) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/mpr/reopen`, { reason }, withAuth()));
 export const deleteMpr = (orderId) => unwrap(apiRawClient.delete(`/api/orders/${encodeURIComponent(orderId)}/mpr`, withAuth()));
 export const updateMprLine = (orderId, lineId, payload) => unwrap(

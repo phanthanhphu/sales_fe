@@ -36,7 +36,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { CheckCircle, Delete, Download, Edit, ErrorOutline, ExpandMore, FileUpload, LockOpen, Preview, Refresh, RestartAlt, Save, Search as SearchIcon } from '@mui/icons-material';
+import { CheckCircle, Delete, Download, Edit, ErrorOutline, ExpandMore, FileUpload, LockOpen, Preview, Refresh, RestartAlt, Save, Search as SearchIcon, Sync } from '@mui/icons-material';
 import {
   confirmMpr,
   deleteMpr,
@@ -50,6 +50,8 @@ import {
   listBoms,
   previewMpr,
   reopenMpr,
+  reviewMprMaterialShipTo,
+  applyMprMaterialShipTo,
   refreshAllMprBomSources,
   refreshMprBomSource,
   validateMpr,
@@ -440,6 +442,10 @@ const MPR_NUMERIC_FIELDS = new Set([
 
 const renderMprCellValue = (field, value, row = {}) => {
   if (field === 'vendorCode') return vendorCodeValue(value);
+  // The MPR UI column named "Exchange Rate" is a user-facing Currency Master
+  // snapshot. Display Rate To VND (VND = 1) without changing the internal
+  // cross-rate stored in exchangeRate, which is still used by backend pricing.
+  if (field === 'exchangeRate') return formatValue(row?.rateToVnd ?? value);
   if (MPR_TEXT_FIELDS.has(field)) return textValue(value);
   const safeValue = MPR_NUMERIC_FIELDS.has(field) && (value === null || value === undefined || value === '') ? 0 : value;
   if (field === 'matPriceWithoutTax') {
@@ -688,6 +694,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
   const [reopening, setReopening] = useState(false);
+  const [materialShipToReview, setMaterialShipToReview] = useState({ open: false, loading: false, applying: false, data: null, error: '' });
   const [batchDeleteTarget, setBatchDeleteTarget] = useState(null);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [editingLine, setEditingLine] = useState(null);
@@ -1467,6 +1474,56 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     }
   };
 
+  const reviewMaterialShipToUpdate = async () => {
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
+    if (!mpr?.id || !order?.id || !mpr?.materialShipToUpdateAvailable) return;
+
+    setMaterialShipToReview({ open: true, loading: true, applying: false, data: null, error: '' });
+    try {
+      const result = await reviewMprMaterialShipTo(order.id);
+      if (result?.noApplicableChanges) {
+        setMaterialShipToReview({ open: false, loading: false, applying: false, data: null, error: '' });
+        const currentMpr = await getMpr(order.id);
+        setMpr(currentMpr);
+        notify(result?.message || 'No applicable Material Ship To changes. Version synchronized.');
+        return;
+      }
+      setMaterialShipToReview({ open: true, loading: false, applying: false, data: result, error: '' });
+    } catch (error) {
+      const message = getApiError(error, 'Unable to review Material Ship To changes.');
+      setMaterialShipToReview({ open: true, loading: false, applying: false, data: null, error: message });
+    }
+  };
+
+  const applyMaterialShipToUpdate = async () => {
+    const review = materialShipToReview?.data;
+    const changes = Array.isArray(review?.changes) ? review.changes : [];
+    if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
+    if (!order?.id || !review || materialShipToReview.applying) return;
+    const blocked = changes.find((item) => item?.applyAllowed === false);
+    if (blocked) {
+      setMaterialShipToReview((current) => ({
+        ...current,
+        error: blocked?.validationMessage || 'PO Qty must be greater than zero for every new Product Color + Ship To.'
+      }));
+      return;
+    }
+
+    setMaterialShipToReview((current) => ({ ...current, applying: true, error: '' }));
+    try {
+      const result = await applyMprMaterialShipTo(order.id, review.reviewedMaterialShipToVersion);
+      setMpr(result);
+      setPreview(null);
+      setMaterialShipToReview({ open: false, loading: false, applying: false, data: null, error: '' });
+      notify('Missing Material Ship To values were applied. Existing MPR rows and existing Ship To values were preserved.');
+    } catch (error) {
+      const message = getApiError(error, 'Unable to apply Material Ship To changes.');
+      // Keep the review dialog and its data intact so a concurrent master-data
+      // rejection never resets the user's current review context.
+      setMaterialShipToReview((current) => ({ ...current, applying: false, error: message }));
+    }
+  };
+
   const confirmCurrentMpr = async () => {
     if (!canMutateMpr) { notify(mutationBlockedMessage, 'warning'); return; }
     if ((mpr?.selections || []).some((item) => item?.bomSourceChanged)) {
@@ -1823,7 +1880,9 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
     () => unfilteredVisibleLines.filter((line) => mprLineMatchesFilters(line, mprFilters)),
     [unfilteredVisibleLines, mprFilters]
   );
-  const { sortedRows: sortedVisibleLines, sortKey: mprSortKey, sortDirection: mprSortDirection, requestSort: requestMprSort } = useTableSort(visibleLines);
+  const { sortedRows: sortedVisibleLines, sortKey: mprSortKey, sortDirection: mprSortDirection, requestSort: requestMprSort } = useTableSort(visibleLines, {
+    getValue: (line, key) => key === 'exchangeRate' ? (line?.rateToVnd ?? line?.exchangeRate) : line?.[key]
+  });
   const mprColumnTotals = useMemo(() => ({
     poQuantity: sumMprColumn(visibleLines, 'poQuantity'),
     matRequiredQuantity: sumMprColumn(visibleLines, 'matRequiredQuantity'),
@@ -2034,7 +2093,7 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
 
   const generationBusy = generateProgress.status === 'processing';
   const exportBusy = exportProgress.status === 'processing';
-  const operationBusy = generationBusy || preflightBusy || exportBusy || mprUploading || confirming || reopening || sourceRefreshBusy;
+  const operationBusy = generationBusy || preflightBusy || exportBusy || mprUploading || confirming || reopening || sourceRefreshBusy || materialShipToReview.loading || materialShipToReview.applying;
   const visibleMprColumns = useMemo(() => MPR_COLUMNS.filter(([field]) => mprVisibleFields.includes(field)), [mprVisibleFields]);
   const mprTableMinWidth = useMemo(() => Math.max(1500, visibleMprColumns.reduce((total, [, , minWidth]) => total + Number(minWidth || 100), 0) + 190), [visibleMprColumns]);
 
@@ -2134,6 +2193,24 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
                 </Button>
               </span>
             </Tooltip>
+
+            {mpr && !mprCompleted && mpr?.materialShipToUpdateAvailable && (
+              <Tooltip title={!canMutateMpr ? mutationBlockedMessage : 'Review Material Ship To changes that apply to materials already in this MPR'}>
+                <span>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="warning"
+                    startIcon={<Sync />}
+                    onClick={reviewMaterialShipToUpdate}
+                    disabled={!canMutateMpr || operationBusy}
+                    sx={{ ...mprActionButtonSx, minWidth: 176, boxShadow: 'none' }}
+                  >
+                    Update Material Ship To
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
 
             {mpr && (
               <Tooltip title={!canWrite ? writeBlockedMessage : (mprCompleted ? completedLockMessage : (hasStaleBomSources ? 'Update changed BOM sources before confirming this MPR.' : 'Confirm the current MPR as completed'))}>
@@ -3658,6 +3735,114 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
             sx={{ textTransform: 'none', ...(exportProgress.status === 'success' ? { backgroundColor: '#103B5C' } : {}) }}
           >
             {exportProgress.status === 'success' ? 'Done' : 'Close'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(materialShipToReview.open)}
+        onClose={(materialShipToReview.loading || materialShipToReview.applying) ? undefined : () => setMaterialShipToReview({ open: false, loading: false, applying: false, data: null, error: '' })}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800, color: '#103B5C' }}>Review Update Material Ship To</DialogTitle>
+        <DialogContent dividers>
+          {materialShipToReview.loading && (
+            <Stack spacing={1.25}>
+              <LinearProgress />
+              <Typography sx={{ fontSize: '.82rem', color: 'text.secondary' }}>
+                Checking only materials in this MPR against their current Dedicated Ship To mappings…
+              </Typography>
+            </Stack>
+          )}
+
+          {!materialShipToReview.loading && materialShipToReview.error && (
+            <Alert severity="error" sx={{ mb: 1.5 }}>{materialShipToReview.error}</Alert>
+          )}
+
+          {!materialShipToReview.loading && materialShipToReview.data && (
+            <Stack spacing={1.5}>
+              <Alert severity="info">
+                {materialShipToReview.data?.message || 'Only NEW / MISSING Ship To values are shown. Existing MPR Ship To values are preserved.'}
+              </Alert>
+              <Typography sx={{ fontSize: '.78rem', color: 'text.secondary' }}>
+                MPR version: <strong>{materialShipToReview.data?.mprMaterialShipToVersion ?? '-'}</strong>
+                {' · '}Reviewed Buyer version: <strong>{materialShipToReview.data?.reviewedMaterialShipToVersion ?? '-'}</strong>
+              </Typography>
+
+              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 480 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 800 }}>BOM</TableCell>
+                      <TableCell sx={{ fontWeight: 800 }}>Product Color</TableCell>
+                      <TableCell sx={{ fontWeight: 800, minWidth: 230 }}>Material</TableCell>
+                      <TableCell sx={{ fontWeight: 800, minWidth: 180 }}>Current Ship To</TableCell>
+                      <TableCell sx={{ fontWeight: 800, minWidth: 150 }}>New Ship To</TableCell>
+                      <TableCell sx={{ fontWeight: 800 }} align="right">PO Qty</TableCell>
+                      <TableCell sx={{ fontWeight: 800 }} align="right">Lines</TableCell>
+                      <TableCell sx={{ fontWeight: 800 }}>Status</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {(materialShipToReview.data?.changes || []).map((change, index) => {
+                      const material = [change?.sapCode, change?.materialType, change?.matFullDescription || change?.position, change?.matColor, change?.matUnit]
+                        .filter(Boolean).join(' · ');
+                      const currentShipTo = (change?.currentShipToLabels || []).filter(Boolean).join(' + ') || '-';
+                      const newShipTo = [change?.newShipToCode, change?.newShipToName].filter(Boolean).join(' · ') || change?.newShipToId || '-';
+                      return (
+                        <TableRow key={`${change?.materialShipToId || 'mst'}-${change?.bomId || 'bom'}-${change?.productColorId || index}-${change?.newShipToId || index}`}>
+                          <TableCell>{change?.bomNo || change?.bomId || '-'}</TableCell>
+                          <TableCell>{change?.productColor || change?.productColorId || '-'}</TableCell>
+                          <TableCell>{material || '-'}</TableCell>
+                          <TableCell>{currentShipTo}</TableCell>
+                          <TableCell><strong>{newShipTo}</strong></TableCell>
+                          <TableCell align="right">{change?.poQty ?? '-'}</TableCell>
+                          <TableCell align="right">{change?.affectedLineCount ?? 0}</TableCell>
+                          <TableCell>
+                            {change?.applyAllowed ? (
+                              <Chip size="small" color="success" variant="outlined" label="Ready" />
+                            ) : (
+                              <Tooltip title={change?.validationMessage || 'PO Qty must be greater than zero.'}>
+                                <Chip size="small" color="error" variant="outlined" label="Blocked" />
+                              </Tooltip>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          {materialShipToReview.error && !materialShipToReview.loading && (
+            <Button disabled={materialShipToReview.applying} onClick={reviewMaterialShipToUpdate} startIcon={<Refresh />}>
+              Review Again
+            </Button>
+          )}
+          <Button
+            disabled={materialShipToReview.loading || materialShipToReview.applying}
+            onClick={() => setMaterialShipToReview({ open: false, loading: false, applying: false, data: null, error: '' })}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            startIcon={<Sync />}
+            disabled={
+              materialShipToReview.loading
+              || materialShipToReview.applying
+              || !materialShipToReview.data
+              || !(materialShipToReview.data?.changes || []).length
+              || (materialShipToReview.data?.changes || []).some((item) => item?.applyAllowed === false)
+            }
+            onClick={applyMaterialShipToUpdate}
+          >
+            {materialShipToReview.applying ? 'Applying...' : 'Apply Missing Ship To'}
           </Button>
         </DialogActions>
       </Dialog>
