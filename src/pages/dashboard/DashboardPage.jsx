@@ -26,6 +26,8 @@ import { getDashboardError, getDashboardSummary } from '../../services/dashboard
 import { getAccessibleBuyers, getSelectedBuyerKey, normalizeBuyerKey, setSelectedBuyerKey } from '../../utils/buyerContext';
 import { listAccessibleBuyers } from '../../services/buyerService';
 
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
+
 const ORDER_COLORS = ['#22A06B', '#F59E0B', '#EF5B5B'];
 const BOM_COLORS = ['#2563EB', '#A8D4FA'];
 const MATERIAL_COLORS = ['#2563EB', '#22A06B', '#8B5CF6'];
@@ -475,6 +477,8 @@ export default function DashboardPage() {
       setLoading(false);
     }
   }, [filters]);
+
+  useRealtimeRefresh(['ORDER', 'BOM', 'MPR'], load);
 
   useEffect(() => {
     load();

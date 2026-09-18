@@ -1,9 +1,7 @@
-import { useEffect } from 'react';
-import SockJS from 'sockjs-client';
-import { Client } from '@stomp/stompjs';
+import { useCallback } from 'react';
 
-import { API_BASE_URL } from '../config';
 import { getStoredToken, redirectToLogin } from '../routes/globalApi';
+import { useAppSocketEvent } from '../realtime/AppSocketProvider';
 
 const currentUserId = () => {
   const storedId = localStorage.getItem('userId');
@@ -24,56 +22,25 @@ const currentUserId = () => {
  * out without waiting for the next API call.
  */
 export default function AuthSessionWatcher() {
-  useEffect(() => {
+  const handleUserEvent = useCallback((event) => {
     const token = getStoredToken();
     const userId = currentUserId();
+    if (!token || !userId) return;
 
-    if (!token || !userId) return undefined;
+    const action = String(event?.action || '').trim().toUpperCase();
+    const changedUserId = String(event?.id || '');
+    if (changedUserId !== userId) return;
 
-    let redirected = false;
-    const logoutOnce = (reason) => {
-      if (redirected) return;
-      redirected = true;
-      redirectToLogin(reason);
-    };
+    if (action === 'DISABLED' || action === 'DELETED') {
+      redirectToLogin('accountDisabled');
+      return;
+    }
 
-    const client = new Client({
-      webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),
-      reconnectDelay: 5000,
-      debug: () => {},
-      onConnect: () => {
-        client.subscribe('/topic/app-events', (message) => {
-          let event = {};
-          try {
-            event = JSON.parse(message.body || '{}');
-          } catch {
-            return;
-          }
-
-          const moduleName = String(event?.module || '').trim().toUpperCase();
-          const action = String(event?.action || '').trim().toUpperCase();
-          const changedUserId = String(event?.id || '');
-
-          if (moduleName !== 'USER' || changedUserId !== userId) return;
-
-          if (action === 'DISABLED' || action === 'DELETED') {
-            logoutOnce('accountDisabled');
-            return;
-          }
-
-          if (action === 'ACCESS_CHANGED' || action === 'SESSION_REVOKED') {
-            logoutOnce('sessionRevoked');
-          }
-        });
-      }
-    });
-
-    client.activate();
-
-    return () => {
-      client.deactivate();
-    };
+    if (action === 'ACCESS_CHANGED' || action === 'SESSION_REVOKED') {
+      redirectToLogin('sessionRevoked');
+    }
   }, []);
 
+  useAppSocketEvent('USER', handleUserEvent);
   return null;
 }

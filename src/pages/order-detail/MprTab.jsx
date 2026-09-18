@@ -71,6 +71,8 @@ import { listActiveShipTos } from '../../services/masterDataService';
 import { canManageSales, canReopenCompletedMpr } from 'utils/accessControl';
 import { normalizeBuyerKey } from 'utils/buyerContext';
 
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
+
 const emptyBomSelection = () => ({
   selected: false,
   colors: [],
@@ -788,6 +790,8 @@ export default function MprTab({ order, buyerKey: buyerKeyProp, onOrderStatusCha
   useEffect(() => {
     load();
   }, [load]);
+
+  useRealtimeRefresh(['MPR', 'BOM', 'SHIP_TO', 'MATERIAL_SHIP_TO', 'LOSS', 'CURRENCY', 'MAT_INFO'], load);
 
   useEffect(() => () => {
     if (progressTimerRef.current) window.clearInterval(progressTimerRef.current);

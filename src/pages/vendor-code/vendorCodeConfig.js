@@ -13,6 +13,7 @@ export const vendorCodeConfig = {
   primaryField: 'shortNameSupplier',
   minTableWidth: 1220,
   allowEditWorkbook: true,
+  refreshBeforeMutation: true,
   excelSheetName: 'VENDER CODE',
   importHint: 'Upload New skips any row whose Short Name Supplier already exists and never updates existing records. Exact duplicate rows in the Excel file are also skipped. The legacy VENDER CODE Excel sheet name is still accepted.',
 
@@ -126,14 +127,15 @@ export const vendorCodeConfig = {
     }
   ],
 
-  isEditLocked: () => false,
+  isEditLocked: (record) => Boolean(record?.editLocked),
   editLockMessage: (record) => record?.lockReason || 'Short Name Supplier is locked when referenced; other Vendor fields remain editable.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This Vendor Code is in use and cannot be deleted.',
-  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && field.name === 'shortNameSupplier',
+  isFieldDisabled: ({ field, mode, record }) =>
+    mode === 'edit' && Boolean(record?.used) && !Boolean(record?.editLocked) && field.name === 'shortNameSupplier',
   getFieldHelperText: ({ field, mode, record }) => {
-    if (mode === 'edit' && record?.used && field.name === 'shortNameSupplier') {
-      return 'Short Name Supplier is locked because MAT_INFO or MPR is referencing this Vendor Code. Vendor Code, Vendor Name, Mat Charger and Remark remain editable.';
+    if (mode === 'edit' && record?.used && !record?.editLocked && field.name === 'shortNameSupplier') {
+      return 'Short Name Supplier is locked because MAT_INFO is referencing this Vendor Code. Vendor Code, Vendor Name, Mat Charger and Remark remain editable.';
     }
     return field.helperText || '';
   },

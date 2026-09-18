@@ -47,6 +47,7 @@ import SortableTableCell from '../../components/SortableTableCell';
 import useTableSort from '../../utils/useTableSort';
 import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
 import BomCreateDialog from './BomCreateDialog';
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
 
 const emptyFilters = {
   keyword: '',
@@ -154,6 +155,7 @@ export default function BomTab({ order, buyerKey: buyerKeyProp }) {
   }, [order?.id]);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh('BOM', load);
 
   const productColorOptions = useMemo(() => {
     const values = new Map();

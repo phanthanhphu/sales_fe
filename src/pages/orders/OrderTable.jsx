@@ -45,6 +45,19 @@ export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, ac
               const overdueDays = getOrderOverdueDays(row.endDate, row.status);
               const overdue = overdueDays > 0;
               const overdueMessage = `End Date passed ${overdueDays} day${overdueDays === 1 ? '' : 's'} ago.`;
+              const dependencyLocked = Boolean(row?.editLocked || row?.deleteLocked || row?.hasBom || row?.hasMpr);
+              const lockReason = row?.lockReason
+                || (row?.hasBom && row?.hasMpr
+                  ? 'Order is locked because BOM and MPR data already exist.'
+                  : row?.hasBom
+                    ? 'Order is locked because BOM data already exists.'
+                    : row?.hasMpr
+                      ? 'Order is locked because MPR data already exists.'
+                      : 'Order is locked because related BOM/MPR data exists.');
+              const editDisabled = actionsDisabled || dependencyLocked;
+              const deleteDisabled = actionsDisabled || dependencyLocked;
+              const editTooltip = actionsDisabled ? blockedMessage : dependencyLocked ? lockReason : 'Edit';
+              const deleteTooltip = actionsDisabled ? blockedMessage : dependencyLocked ? lockReason : 'Delete';
 
               return (
                 <TableRow
@@ -91,8 +104,8 @@ export default function OrderTable({ rows, loading, onOpen, onEdit, onDelete, ac
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(row.updatedAt)}</TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>
                     <Tooltip title="Open order"><IconButton size="small" color="primary" onClick={() => onOpen(row)}><OpenInNew fontSize="small" /></IconButton></Tooltip>
-                    <Tooltip title={actionsDisabled ? blockedMessage : 'Edit'}><span><IconButton size="small" disabled={actionsDisabled} onClick={() => onEdit(row)}><Edit fontSize="small" /></IconButton></span></Tooltip>
-                    <Tooltip title={actionsDisabled ? blockedMessage : 'Delete'}><span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete(row)}><Delete fontSize="small" /></IconButton></span></Tooltip>
+                    <Tooltip title={editTooltip}><span><IconButton size="small" disabled={editDisabled} onClick={() => onEdit(row)}><Edit fontSize="small" /></IconButton></span></Tooltip>
+                    <Tooltip title={deleteTooltip}><span><IconButton size="small" color="error" disabled={deleteDisabled} onClick={() => onDelete(row)}><Delete fontSize="small" /></IconButton></span></Tooltip>
                   </TableCell>
                 </TableRow>
               );

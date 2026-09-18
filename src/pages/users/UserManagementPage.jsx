@@ -4,7 +4,7 @@ import {
   Divider, IconButton, MenuItem, Pagination, Paper, Select, Snackbar, Stack, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography
 } from '@mui/material';
-import { ArrowDownward, ArrowUpward, ChevronLeft, ChevronRight, Delete, Edit, Inbox as InboxIcon, LockReset, Refresh, Visibility } from '@mui/icons-material';
+import { ArrowDownward, ArrowUpward, Delete, Edit, Inbox as InboxIcon, LockReset, Refresh, Visibility } from '@mui/icons-material';
 import AddUserDialog from './AddUserDialog';
 import EditUserDialog from './EditUserDialog';
 import ResetPasswordDialog from './ResetPasswordDialog';
@@ -16,6 +16,7 @@ import { getBuyerDefinition, isAdminUser, normalizeBuyerKey } from 'utils/buyerC
 import StatusBadge from '../../components/StatusBadge';
 import EmptyTableState from '../../components/EmptyTableState';
 import { userConfig } from './userConfig';
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
 
 const API_ROOT = `${API_BASE_URL.replace(/\/$/, '')}/api`;
 const chipTone = {
@@ -37,7 +38,7 @@ function SortIndicator({ active, direction }) {
 
 function PaginationBar({ count, page, rowsPerPage, loading, onPageChange, onRowsPerPageChange }) {
   const totalPages = Math.max(1, Math.ceil((count || 0) / Math.max(rowsPerPage || 1, 1))); const from = count ? page * rowsPerPage + 1 : 0; const to = Math.min(count || 0, (page + 1) * rowsPerPage);
-  return <><Divider /><Box sx={{ p: 0.65, backgroundColor: '#fff' }}><Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between"><Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>Showing <span style={{ color: '#111827' }}>{from}</span>–<span style={{ color: '#111827' }}>{to}</span> of <span style={{ color: '#111827' }}>{count || 0}</span></Typography><Stack direction="row" spacing={1} alignItems="center" justifyContent="center"><Button variant="text" startIcon={<ChevronLeft fontSize="small" />} disabled={loading || page <= 0} onClick={() => onPageChange(page - 1)} sx={{ textTransform: 'none', fontWeight: 400 }}>Prev</Button><Pagination size="small" page={page + 1} count={totalPages} onChange={(_, next) => onPageChange(next - 1)} disabled={loading} siblingCount={1} boundaryCount={1} sx={{ '& .MuiPaginationItem-root': { fontSize: '0.8rem', minWidth: 32, height: 32 } }} /><Button variant="text" endIcon={<ChevronRight fontSize="small" />} disabled={loading || page >= totalPages - 1} onClick={() => onPageChange(page + 1)} sx={{ textTransform: 'none', fontWeight: 400 }}>Next</Button></Stack><Stack direction="row" spacing={1} alignItems="center"><Typography sx={{ fontSize: '0.76rem', color: 'text.secondary' }}>Rows</Typography><Select size="small" value={rowsPerPage} onChange={(event) => onRowsPerPageChange(Number(event.target.value))} disabled={loading} sx={{ height: 30, minWidth: 86, borderRadius: 1.2, '& .MuiSelect-select': { fontSize: '0.78rem' } }}>{[10, 25, 50, 100].map((value) => <MenuItem key={value} value={value} sx={{ fontSize: '0.8rem' }}>{value}</MenuItem>)}</Select></Stack></Stack></Box></>;
+  return <><Divider /><Box sx={{ p: 0.65, backgroundColor: '#fff' }}><Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between"><Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>Showing <span style={{ color: '#111827' }}>{from}</span>–<span style={{ color: '#111827' }}>{to}</span> of <span style={{ color: '#111827' }}>{count || 0}</span></Typography><Stack direction="row" spacing={1} alignItems="center" justifyContent="center"><Button variant="text" disabled={loading || page <= 0} onClick={() => onPageChange(page - 1)} sx={{ textTransform: 'none', fontWeight: 400 }}>Prev</Button><Pagination size="small" page={page + 1} count={totalPages} onChange={(_, next) => onPageChange(next - 1)} disabled={loading} siblingCount={1} boundaryCount={1} hidePrevButton hideNextButton sx={{ '& .MuiPaginationItem-root': { fontSize: '0.8rem', minWidth: 32, height: 32 } }} /><Button variant="text" disabled={loading || page >= totalPages - 1} onClick={() => onPageChange(page + 1)} sx={{ textTransform: 'none', fontWeight: 400 }}>Next</Button></Stack><Stack direction="row" spacing={1} alignItems="center"><Typography sx={{ fontSize: '0.76rem', color: 'text.secondary' }}>Rows</Typography><Select size="small" value={rowsPerPage} onChange={(event) => onRowsPerPageChange(Number(event.target.value))} disabled={loading} sx={{ height: 30, minWidth: 86, borderRadius: 1.2, '& .MuiSelect-select': { fontSize: '0.78rem' } }}>{[10, 25, 50, 100].map((value) => <MenuItem key={value} value={value} sx={{ fontSize: '0.8rem' }}>{value}</MenuItem>)}</Select></Stack></Stack></Box></>;
 }
 
 export default function UserManagementPage() {
@@ -59,6 +60,7 @@ export default function UserManagementPage() {
   }, [page, rowsPerPage, searchUsername, searchAddress, searchPhone, searchEmail, searchRole, searchAccessPermission]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useRealtimeRefresh('USER', fetchUsers);
   const resetFilters = () => { setSearchUsername(''); setSearchAddress(''); setSearchPhone(''); setSearchEmail(''); setSearchRole(''); setSearchAccessPermission(''); setSort({ key: '', direction: '' }); setPage(0); fetchUsers({ page: 0, searchUsername: '', searchAddress: '', searchPhone: '', searchEmail: '', searchRole: '', searchAccessPermission: '' }); };
   const deleteUser = async () => { if (!selectedUser?.id) return; setLoading(true); try { const token = localStorage.getItem('token'); const response = await fetch(`${API_ROOT}/users/${selectedUser.id}`, { method: 'DELETE', headers: { accept: '*/*', ...(token ? { Authorization: `Bearer ${token}` } : {}) } }); const raw = await response.text(); if (!response.ok) throw new Error(raw || `Unable to delete user (${response.status}).`); setDeleteOpen(false); setSelectedUser(null); await fetchUsers(); setNotice({ open: true, message: 'User deleted successfully.', severity: 'success' }); } catch (error) { setNotice({ open: true, message: error.message || 'Unable to delete user.', severity: 'error' }); } finally { setLoading(false); } };
   const sortedUsers = useMemo(() => { if (!sort.key) return users; const factor = sort.direction === 'desc' ? -1 : 1; return [...users].sort((left, right) => String(compareValue(left, sort.key)).localeCompare(String(compareValue(right, sort.key)), undefined, { numeric: true, sensitivity: 'base' }) * factor); }, [users, sort]);

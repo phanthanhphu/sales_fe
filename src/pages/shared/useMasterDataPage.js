@@ -11,6 +11,8 @@ import {
   normalizePageResponse
 } from './masterDataUtils';
 
+import { masterDataSocketModule, useRealtimeRefresh } from '../../realtime/AppSocketProvider';
+
 const VALID_SEVERITIES = new Set(['success', 'info', 'warning', 'error']);
 
 const safeMessage = (value, fallback) => {
@@ -57,6 +59,9 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
     message: ''
   });
   const scrollTargetRef = useRef('');
+  const loadSequenceRef = useRef(0);
+  const visibleLoadSequenceRef = useRef(0);
+  const skipNextAutoLoadRef = useRef(false);
 
   const notify = useCallback((message, severity = 'success') => {
     setNotification({
@@ -73,7 +78,15 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
   const load = useCallback(async (overrides = {}) => {
     const requestedPage = Number.isInteger(overrides.page) ? Math.max(0, overrides.page) : page;
     const requestedSize = Number.isInteger(overrides.size) ? Math.max(1, overrides.size) : rowsPerPage;
-    setLoading(true);
+    const silent = Boolean(overrides.silent);
+    const requestSequence = ++loadSequenceRef.current;
+
+    // Keep the current table visible for background/action refreshes. Loading is
+    // reserved for intentional navigation/search/first load so rows do not flash.
+    if (!silent) {
+      visibleLoadSequenceRef.current = requestSequence;
+      setLoading(true);
+    }
 
     try {
       const response = await listMasterData(config.type, {
@@ -82,6 +95,9 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
         page: requestedPage,
         size: requestedSize
       });
+
+      // Ignore an older response that finishes after a newer request.
+      if (requestSequence !== loadSequenceRef.current) return [];
 
       const normalized = normalizePageResponse(response, requestedPage, requestedSize);
       const nextRows = Array.isArray(normalized.content) ? normalized.content : [];
@@ -94,20 +110,34 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
 
       return nextRows;
     } catch (error) {
-      setRows([]);
-      setTotalElements(0);
+      if (requestSequence !== loadSequenceRef.current) return [];
+      // A silent background refresh should not blank a valid table because of a
+      // temporary network error. Keep existing rows and surface the error only.
+      if (!silent) {
+        setRows([]);
+        setTotalElements(0);
+      }
       notify(
         getMasterDataErrorMessage(error, `Unable to load ${config.menuTitle || 'master data'}.`),
         'error'
       );
+      return [];
     } finally {
-      setLoading(false);
+      if (!silent && visibleLoadSequenceRef.current === requestSequence) setLoading(false);
     }
   }, [appliedFilters, config.menuTitle, config.type, notify, page, rowsPerPage, scopeParams?.buyerKey]);
 
   useEffect(() => {
+    if (skipNextAutoLoadRef.current) {
+      skipNextAutoLoadRef.current = false;
+      return;
+    }
     load();
   }, [load]);
+
+  // Realtime invalidation is a background refresh: never replace the table with
+  // a Loading row just because another user changed data.
+  useRealtimeRefresh(masterDataSocketModule(config.type), () => load({ silent: true }));
 
   useEffect(() => {
     if (loading || !scrollTargetRef.current || typeof document === 'undefined') return;
@@ -204,8 +234,13 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
     notify(message, 'success');
     const isCreate = meta?.mode === 'create';
     const targetPage = isCreate ? 0 : page;
-    if (isCreate && page !== 0) setPage(0);
-    await load({ page: targetPage });
+    if (isCreate && page !== 0) {
+      // We are loading page 0 explicitly below; prevent setPage(0) from causing
+      // a second automatic request.
+      skipNextAutoLoadRef.current = true;
+      setPage(0);
+    }
+    await load({ page: targetPage, silent: true });
   }, [config.singular, load, notify, page]);
 
   const handleImported = useCallback(async (result) => {
@@ -217,8 +252,11 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
 
     notify(`Import completed: ${created} created, ${updated} updated, ${deleted} deleted.${suffix}`, 'success');
     setUploadOpen(false);
-    if (page !== 0) setPage(0);
-    await load({ page: 0 });
+    if (page !== 0) {
+      skipNextAutoLoadRef.current = true;
+      setPage(0);
+    }
+    await load({ page: 0, silent: true });
   }, [load, notify, page]);
 
   const confirmDelete = useCallback(async (record) => {
@@ -252,9 +290,12 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
       setDeleteTarget(null);
 
       if (rows.length === 1 && page > 0) {
-        setPage((current) => Math.max(0, current - 1));
+        const previousPage = Math.max(0, page - 1);
+        skipNextAutoLoadRef.current = true;
+        setPage(previousPage);
+        await load({ page: previousPage, silent: true });
       } else {
-        await load();
+        await load({ silent: true });
       }
     } catch (error) {
       notify(

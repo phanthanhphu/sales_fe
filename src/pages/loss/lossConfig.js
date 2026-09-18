@@ -20,6 +20,7 @@ export const lossConfig = {
   primaryField: 'materialGroup',
   minTableWidth: 1360,
   allowEditWorkbook: true,
+  refreshBeforeMutation: true,
   excelSheetName: 'LOSS',
   importHint: 'Loss is scoped to the current Buyer. Rows with the same Material Group and all four Loss values are skipped; a repeated Material Group with different Loss values is reported as conflicting data.',
 
@@ -205,7 +206,7 @@ export const lossConfig = {
       sortValue: (row) => Number(row.factorGte3001 || 0),
       render: (row) => row.factorGte3001 ?? '-'
     },
-    { label: 'Usage', key: 'used', minWidth: 115, sortable: false, render: (row) => row?.editLocked ? 'MPR locked' : row?.used ? 'Referenced' : 'Available' },
+    { label: 'Usage', key: 'used', minWidth: 115, sortable: false, render: (row) => row?.used ? 'Locked' : 'Available' },
     {
       label: 'Updated At',
       key: 'updatedAt',
@@ -216,14 +217,14 @@ export const lossConfig = {
     }
   ],
 
-  isEditLocked: (record) => Boolean(record?.editLocked),
-  editLockMessage: (record) => record?.lockReason || 'This Loss record is used by MPR and cannot be edited.',
-  isDeleteLocked: (record) => Boolean(record?.deleteLocked),
+  isEditLocked: (record) => Boolean(record?.used || record?.editLocked),
+  editLockMessage: (record) => record?.lockReason || 'This Loss record is already in use and no values can be edited.',
+  isDeleteLocked: (record) => Boolean(record?.used || record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This Loss record is in use and cannot be deleted.',
-  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && field.name === 'materialGroup',
+  isFieldDisabled: ({ mode, record }) => mode === 'edit' && Boolean(record?.used),
   getFieldHelperText: ({ field, mode, record }) => {
-    if (mode === 'edit' && record?.used && field.name === 'materialGroup') {
-      return record?.editLocked ? 'Material Group is locked because MPR is using this Loss record.' : 'Material Group is locked because MAT_INFO or BOM is referencing this Loss record. Loss rates remain editable.';
+    if (mode === 'edit' && record?.used) {
+      return record?.lockReason || 'This Loss record is already in use and cannot be changed.';
     }
     return field.helperText || '';
   },

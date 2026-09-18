@@ -1,4 +1,5 @@
 import apiClient, { apiRawClient } from '../routes/globalApi';
+import { beginLocalRealtimeMutation, endLocalRealtimeMutation, masterDataRealtimeModule } from '../realtime/localMutationRegistry';
 
 const MASTER_DATA_ROOT = '/api/master-data';
 
@@ -40,17 +41,30 @@ export const getMasterDataById = (type, id, params = {}) => {
   return apiClient.get(`${getEndpoint(type)}/${encodeURIComponent(id)}`, { params: cleanParams(params) });
 };
 
-export const createMasterData = (type, payload, params = {}) => {
-  return apiClient.post(getEndpoint(type), payload, { params: cleanParams(params) });
+const runMasterMutation = async (type, params, operation) => {
+  const handle = beginLocalRealtimeMutation(masterDataRealtimeModule(type), params?.buyerKey);
+  try {
+    const response = await operation();
+    endLocalRealtimeMutation(handle, 1400);
+    return response;
+  } catch (error) {
+    // A failed REST request should not keep suppressing legitimate remote events.
+    endLocalRealtimeMutation(handle, 150);
+    throw error;
+  }
 };
 
-export const updateMasterData = (type, id, payload, params = {}) => {
-  return apiClient.put(`${getEndpoint(type)}/${encodeURIComponent(id)}`, payload, { params: cleanParams(params) });
-};
+export const createMasterData = (type, payload, params = {}) => (
+  runMasterMutation(type, params, () => apiClient.post(getEndpoint(type), payload, { params: cleanParams(params) }))
+);
 
-export const deleteMasterData = (type, id, params = {}) => {
-  return apiClient.delete(`${getEndpoint(type)}/${encodeURIComponent(id)}`, { params: cleanParams(params) });
-};
+export const updateMasterData = (type, id, payload, params = {}) => (
+  runMasterMutation(type, params, () => apiClient.put(`${getEndpoint(type)}/${encodeURIComponent(id)}`, payload, { params: cleanParams(params) }))
+);
+
+export const deleteMasterData = (type, id, params = {}) => (
+  runMasterMutation(type, params, () => apiClient.delete(`${getEndpoint(type)}/${encodeURIComponent(id)}`, { params: cleanParams(params) }))
+);
 
 
 const masterExcelUploadConfig = (file, params = {}, options = {}) => ({
@@ -66,22 +80,22 @@ export const uploadMasterData = (type, file, mode = 'CREATE_ONLY', params = {}, 
   const formData = new FormData();
   formData.append('file', file);
 
-  return apiClient.post(
+  return runMasterMutation(type, params, () => apiClient.post(
     `${getEndpoint(type)}/upload`,
     formData,
     masterExcelUploadConfig(file, { mode, ...params }, options)
-  );
+  ));
 };
 
 export const uploadEditedMasterData = (type, file, params = {}, options = {}) => {
   const formData = new FormData();
   formData.append('file', file);
 
-  return apiClient.post(
+  return runMasterMutation(type, params, () => apiClient.post(
     `${getEndpoint(type)}/upload-edited`,
     formData,
     masterExcelUploadConfig(file, params, options)
-  );
+  ));
 };
 
 export const downloadMasterDataEditWorkbook = (type, params = {}) => (

@@ -91,6 +91,8 @@ import SortableTableCell from '../../components/SortableTableCell';
 import useTableSort from '../../utils/useTableSort';
 import { initialUploadProgress, startProcessingTicker, uploadProgressFromEvent, uploadStage } from '../../utils/uploadProgress';
 
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
+
 const blankLine = {
   materialGroupNo: '',
   materialType: '',
@@ -1925,6 +1927,7 @@ export default function BomDetailPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(['BOM', 'MPR'], reloadWithoutJump);
 
   useEffect(() => {
     if (loading || scrollRestoreRef.current === null || typeof window === 'undefined') return;

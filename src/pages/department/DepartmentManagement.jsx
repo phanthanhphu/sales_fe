@@ -30,9 +30,8 @@ import {
   Inbox as InboxIcon,
   Refresh
 } from '@mui/icons-material';
-import SockJS from 'sockjs-client';
-import { Client } from '@stomp/stompjs';
 import { API_BASE_URL } from '../../config';
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
 import AddDepartmentDialog from './AddDepartmentDialog';
 import EditDepartmentDialog from './EditDepartmentDialog';
 import DepartmentSearch from './DepartmentSearch';
@@ -157,29 +156,7 @@ export default function DepartmentManagement() {
     refreshRef.current = () => fetchDepartments(appliedFilters, { silent: true });
   }, [appliedFilters, fetchDepartments]);
 
-  useEffect(() => {
-    const client = new Client({
-      webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),
-      reconnectDelay: 5000,
-      debug: () => {},
-      onConnect: () => client.subscribe('/topic/app-events', (message) => {
-        let event = {};
-        try {
-          event = JSON.parse(message.body);
-        } catch {
-          event = { module: 'ALL' };
-        }
-
-        const module = String(event?.module || 'ALL').toUpperCase();
-        if (['DEPARTMENT', 'DEPARTMENTS', 'ALL'].includes(module)) {
-          refreshRef.current?.();
-        }
-      })
-    });
-
-    client.activate();
-    return () => client.deactivate();
-  }, []);
+  useRealtimeRefresh(['DEPARTMENT', 'DEPARTMENTS'], () => refreshRef.current?.());
 
   const guard = (callback) => {
     if (!canManage) {

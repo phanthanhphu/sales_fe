@@ -91,26 +91,14 @@ export const materialShipToConfig = {
     { label: 'Updated At', key: 'updatedAt', minWidth: 155, hideOnSmall: true, isDate: true, render: (row) => formatDateTime(row.updatedAt) }
   ],
 
-  isEditLocked: () => false,
-  editLockMessage: (record) => record?.lockReason || 'Used Ship To values are protected, but additional Ship To values may be added.',
+  isEditLocked: (record) => Boolean(record?.editLocked || record?.used),
+  editLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is used by an existing MPR and cannot be edited. Create a new mapping for future changes.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This Material Ship To mapping is used by MPR and cannot be deleted.',
-  getLockedMultiValues: ({ field, mode, record }) => {
-    if (mode !== 'edit' || field?.name !== 'shipToIds' || !record?.used) return [];
-    const used = Array.isArray(record?.usedShipToIds) ? record.usedShipToIds.filter(Boolean) : [];
-    if (used.length) return used;
-    return Array.isArray(record?.shipToIds) && record.shipToIds.length
-      ? record.shipToIds.filter(Boolean)
-      : [record?.shipToId].filter(Boolean);
-  },
-  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used)
-    && ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit', 'active'].includes(field.name),
+  isFieldDisabled: ({ mode, record }) => mode === 'edit' && Boolean(record?.editLocked || record?.used),
   getFieldHelperText: ({ field, mode, record }) => {
-    if (mode === 'edit' && record?.used && ['sapCode', 'materialType', 'matFullDescription', 'matColor', 'matUnit', 'active'].includes(field.name)) {
-      return 'This field is locked because an MPR snapshot already uses this mapping.';
-    }
-    if (mode === 'edit' && record?.used && field.name === 'shipToIds') {
-      return 'You may add more Ship To values. Ship To values already used by MPR are locked and cannot be removed.';
+    if (mode === 'edit' && (record?.editLocked || record?.used)) {
+      return record?.lockReason || 'This mapping is locked because an existing MPR already uses it.';
     }
     return field.helperText || '';
   },

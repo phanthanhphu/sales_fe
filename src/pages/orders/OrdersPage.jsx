@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Pagination, Paper, Select, Snackbar, Stack, Typography } from '@mui/material';
 import { useNavigate, useParams } from 'react-router-dom';
-import { createOrder, deleteOrder, getApiError, listOrders, updateOrder } from '../../services/orderBomMprService';
+import { createOrder, deleteOrder, getApiError, getOrder, listOrders, updateOrder } from '../../services/orderBomMprService';
 import { canManageSales } from 'utils/accessControl';
 import { buyerPath, getBuyerDefinition, normalizeBuyerKey } from 'utils/buyerContext';
 import OrderFormDialog from './OrderFormDialog';
 import OrderSearch from './OrderSearch';
 import OrderTable from './OrderTable';
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
 
 const emptyFilters = { keyword: '', status: '' };
 const SALES_WRITE_MESSAGE = 'Sales permission is required to create, edit, or delete orders.';
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
+const ORDER_DEPENDENCY_LOCK_MESSAGE = 'Order is locked because BOM or MPR data already exists. Remove the related BOM/MPR data before editing or deleting the Order.';
+const isOrderDependencyLocked = (record) => Boolean(record?.editLocked || record?.deleteLocked || record?.hasBom || record?.hasMpr);
+const orderLockMessage = (record) => String(record?.lockReason || '').trim() || ORDER_DEPENDENCY_LOCK_MESSAGE;
 
 const cssAttributeEscape = (value) => (
   typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
@@ -83,6 +87,7 @@ export default function OrdersPage() {
   }, [applied, buyerKey, page, pageSize, sortBy, sortDirection]);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(['ORDER', 'BOM', 'MPR'], load);
 
   const scrollToCreatedOrder = useCallback((id) => {
     if (id) scrollTargetRef.current = `[data-order-row-id="${cssAttributeEscape(id)}"]`;
@@ -118,21 +123,54 @@ export default function OrdersPage() {
     setFormOpen(true);
   };
 
-  const openEdit = (record) => {
+  const openEdit = async (record) => {
     if (!canWrite) {
       notify(SALES_WRITE_MESSAGE, 'warning');
       return;
     }
-    setFormRecord(record);
-    setFormOpen(true);
+    if (isOrderDependencyLocked(record)) {
+      notify(orderLockMessage(record), 'warning');
+      return;
+    }
+
+    // Refetch before opening. BOM/MPR may have been created in another session
+    // after this row was loaded, so the backend response is the authoritative lock state.
+    try {
+      const latest = await getOrder(record?.id, buyerKey);
+      if (isOrderDependencyLocked(latest)) {
+        notify(orderLockMessage(latest), 'warning');
+        await load();
+        return;
+      }
+      setFormRecord(latest || record);
+      setFormOpen(true);
+    } catch (error) {
+      notify(getApiError(error, 'Unable to load the latest Order before editing.'), 'error');
+    }
   };
 
-  const requestDelete = (record) => {
+  const requestDelete = async (record) => {
     if (!canWrite) {
       notify(SALES_WRITE_MESSAGE, 'warning');
       return;
     }
-    setDeleteTarget(record);
+    if (isOrderDependencyLocked(record)) {
+      notify(orderLockMessage(record), 'warning');
+      return;
+    }
+
+    // Refetch before opening the confirmation for the same stale-row protection as Edit.
+    try {
+      const latest = await getOrder(record?.id, buyerKey);
+      if (isOrderDependencyLocked(latest)) {
+        notify(orderLockMessage(latest), 'warning');
+        await load();
+        return;
+      }
+      setDeleteTarget(latest || record);
+    } catch (error) {
+      notify(getApiError(error, 'Unable to load the latest Order before deleting.'), 'error');
+    }
   };
 
   const save = async (payload) => {
@@ -272,7 +310,7 @@ export default function OrdersPage() {
       <Dialog open={canWrite && Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Delete Order?</DialogTitle>
         <DialogContent>
-          <Typography>Delete <strong>{deleteTarget?.orderNo}</strong>? This only works when there is no BOM or MPR linked to the order.</Typography>
+          <Typography>Delete <strong>{deleteTarget?.orderNo}</strong>? Edit/Delete are only available when there is no BOM or MPR linked to the Order.</Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)} sx={{ textTransform: 'none' }}>Cancel</Button>

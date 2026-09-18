@@ -27,8 +27,6 @@ import {
   Edit,
   Refresh
 } from '@mui/icons-material';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ColumnVisibilityMenu from '../../components/ColumnVisibilityMenu';
 import EmptyTableState from '../../components/EmptyTableState';
 import StatusBadge from '../../components/StatusBadge';
@@ -100,10 +98,9 @@ export function PaginationBar({ count, page, rowsPerPage, loading, onPageChange,
         <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
           <Button
             variant="text"
-            startIcon={<ChevronLeftIcon fontSize="small" />}
             disabled={loading || page <= 0}
             onClick={() => onPageChange(page - 1)}
-            sx={{ textTransform: 'none', fontWeight: 500, minWidth: 58 }}
+            sx={{ textTransform: 'none', fontWeight: 500, minWidth: 48 }}
           >
             Prev
           </Button>
@@ -115,14 +112,15 @@ export function PaginationBar({ count, page, rowsPerPage, loading, onPageChange,
             disabled={loading}
             siblingCount={1}
             boundaryCount={1}
+            hidePrevButton
+            hideNextButton
             sx={{ '& .MuiPaginationItem-root': { fontSize: '0.8rem', minWidth: 32, height: 32 } }}
           />
           <Button
             variant="text"
-            endIcon={<ChevronRightIcon fontSize="small" />}
             disabled={loading || page >= totalPages - 1}
             onClick={() => onPageChange(page + 1)}
-            sx={{ textTransform: 'none', fontWeight: 500, minWidth: 58 }}
+            sx={{ textTransform: 'none', fontWeight: 500, minWidth: 48 }}
           >
             Next
           </Button>

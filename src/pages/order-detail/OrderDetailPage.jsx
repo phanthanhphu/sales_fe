@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Box,
@@ -19,6 +19,7 @@ import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
 import { formatDate } from '../orders/orderUi';
 import BomTab from './BomTab';
 import MprTab from './MprTab';
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
 
 export default function OrderDetailPage() {
   const { buyerKey: routeBuyerKey, orderId } = useParams();
@@ -28,22 +29,21 @@ export default function OrderDetailPage() {
   const [tab, setTab] = useState(0);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    let alive = true;
-    const loadOrder = async () => {
-      try {
-        const data = await getOrder(orderId, buyerKey);
-        if (alive) {
-          setOrder(data);
-          setError('');
-        }
-      } catch (requestError) {
-        if (alive) setError(getApiError(requestError, 'Unable to load order.'));
-      }
-    };
-    loadOrder();
-    return () => { alive = false; };
+  const loadOrder = useCallback(async () => {
+    try {
+      const data = await getOrder(orderId, buyerKey);
+      setOrder(data);
+      setError('');
+    } catch (requestError) {
+      setError(getApiError(requestError, 'Unable to load order.'));
+    }
   }, [buyerKey, orderId]);
+
+  useEffect(() => {
+    loadOrder();
+  }, [loadOrder]);
+
+  useRealtimeRefresh(['ORDER', 'BOM', 'MPR'], loadOrder);
 
   if (error) {
     return <Box sx={{ p: 1 }}><Alert severity="error">{error}</Alert></Box>;

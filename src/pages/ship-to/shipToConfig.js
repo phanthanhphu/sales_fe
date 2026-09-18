@@ -10,6 +10,7 @@ export const shipToConfig = {
   allowUpload: true,
   allowTemplate: true,
   allowEditWorkbook: true,
+  refreshBeforeMutation: true,
   excelSheetName: 'SHIP TO',
   importHint: 'Upload New accepts BOTH Ship To formats automatically: (1) Template: Action, Ship To Code, Ship To Name, Active, Remark; and (2) downloaded Edit Excel: Key, Action, Ship To Code, Ship To Name, Active, Remark. Template rows use CREATE (or blank). Edit rows use Key + CREATE/UPDATE/DELETE.',
 
@@ -61,15 +62,12 @@ export const shipToConfig = {
     { label: 'Updated At', key: 'updatedAt', minWidth: 150, hideOnSmall: true, isDate: true, render: (row) => formatDateTime(row.updatedAt) }
   ],
 
-  isEditLocked: () => false,
-  editLockMessage: (record) => record?.lockReason || 'Ship To Name/Code are locked when used; Status and Remark remain editable.',
+  isEditLocked: (record) => Boolean(record?.used || record?.editLocked),
+  editLockMessage: (record) => record?.lockReason || 'This Ship To is referenced by an existing MPR or Material Ship To Mapping and cannot be edited.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This Ship To is used and cannot be deleted.',
-  isFieldDisabled: ({ field, mode, record }) => mode === 'edit' && Boolean(record?.used) && ['shipToName', 'shipToCode'].includes(field.name),
+  isFieldDisabled: () => false,
   getFieldHelperText: ({ field, mode, record }) => {
-    if (mode === 'edit' && record?.used && ['shipToName', 'shipToCode'].includes(field.name)) {
-      return 'Ship To Name/Code is locked because MPR or Material Ship To Mapping is using this record.';
-    }
     return field.helperText || '';
   },
 

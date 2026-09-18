@@ -39,6 +39,7 @@ import { PaginationBar } from '../shared/MasterDataTable';
 import StatusBadge from '../../components/StatusBadge';
 import SortableTableCell from '../../components/SortableTableCell';
 import { buyerConfig, toBuyerFormValues, toBuyerPayload, validateBuyerForm } from './buyerConfig';
+import { useRealtimeRefresh } from '../../realtime/AppSocketProvider';
 
 function BuyerFormDialog({ open, record, saving, onClose, onSave }) {
   const [form, setForm] = useState(buyerConfig.defaultValues);
@@ -166,6 +167,7 @@ export default function BuyerManagementPage() {
   }, [applied, page, rowsPerPage, sort]);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh('BUYER', load);
 
   const changeSort = (key) => {
     setPage(0);
@@ -296,3 +298,4 @@ export default function BuyerManagementPage() {
     </Box>
   );
 }
+

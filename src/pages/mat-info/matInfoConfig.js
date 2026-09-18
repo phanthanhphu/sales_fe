@@ -37,6 +37,7 @@ export const matInfoConfig = {
   vendorPrerequisiteMessage: 'Please create Vendor Code data before creating MAT_INFO because MAT_INFO uses Vendor Code.',
   // Keep the MAT_INFO dialog compact in both Add and Edit modes.
   hideFormSubtitle: true,
+  refreshBeforeMutation: true,
 
   importHint:
     'System Key is auto-generated when creating/importing, starting from MI000001. Expected columns: Flex ID, Material Type, Mat Full Description, Mat Color, Mat Unit, Cur, Mat Price (W/O Tax), Short Name Supplier, Remark, Updated Date, Updated Pic and Style Desc. Blank rows are skipped. A row is treated as duplicate and skipped only when Flex ID, Material Type, Mat Full Description, Mat Color, Mat Unit, Cur, Mat Price (W/O Tax), and Short Name Supplier are all the same. A new Short Name Supplier is allowed and automatically creates a pending Vendor Code record. Edited files include Key, Row Version and Action (CREATE/UPDATE/DELETE).',
@@ -274,17 +275,14 @@ export const matInfoConfig = {
     }
   ],
 
-  isEditLocked: () => false,
-  editLockMessage: (record) => record?.lockReason || 'MAT_INFO identity/commercial fields are locked, but metadata fields remain editable.',
+  isEditLocked: (record) => Boolean(record?.editLocked || record?.used),
+  editLockMessage: (record) => record?.lockReason || 'This MAT_INFO record is used by an existing MPR and cannot be edited. Create a new MAT_INFO record for future changes.',
   isDeleteLocked: (record) => Boolean(record?.deleteLocked),
   deleteLockMessage: (record) => record?.lockReason || 'This MAT_INFO record is used by MPR and cannot be deleted.',
-  isFieldDisabled: ({ field, mode, record }) => {
-    if (mode !== 'edit' || !record?.used) return false;
-    return ['flexId', 'materialType', 'matFullDescription', 'matColor', 'matUnit', 'currency', 'matPriceWithoutTax', 'shortNameSupplier'].includes(field.name);
-  },
+  isFieldDisabled: ({ mode, record }) => mode === 'edit' && Boolean(record?.editLocked || record?.used),
   getFieldHelperText: ({ field, mode, record }) => {
-    if (mode === 'edit' && record?.used && ['flexId', 'materialType', 'matFullDescription', 'matColor', 'matUnit', 'currency', 'matPriceWithoutTax', 'shortNameSupplier'].includes(field.name)) {
-      return 'Identity field is locked because an MPR snapshot already uses this MAT_INFO record.';
+    if (mode === 'edit' && (record?.editLocked || record?.used)) {
+      return record?.lockReason || 'This MAT_INFO record is locked because an existing MPR already uses it.';
     }
     return field.helperText || '';
   },
