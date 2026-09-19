@@ -270,13 +270,13 @@ export default function MasterDataFormDialog({
           console.error('Unable to search Vendor Code Master:', error);
           if (alive) {
             setSupplierOptions([]);
-            setOptionError('Unable to search Vendor Code Master. You may still enter a new supplier name.');
+            setOptionError('Unable to search Vendor Code Master. Short Name Supplier must be selected from Vendor Code.');
           }
         })
         .finally(() => {
           if (alive) setOptionLoading((current) => ({ ...current, supplier: false }));
         });
-    }, 250);
+    }, 400);
 
     return () => {
       alive = false;
@@ -351,7 +351,13 @@ export default function MasterDataFormDialog({
       ? Boolean(config.isFieldDisabled({ field, values, record, mode }))
       : Boolean(field.disabled);
 
-    return saving || recordLocked || loadingOptions || disabledByConfig;
+    // Keep searchable supplier Autocomplete enabled while its filtered options
+    // are loading. Disabling it for every request makes the input lose focus
+    // and can reset the character the user has just typed.
+    const disableWhileLoading = loadingOptions
+      && !(field.type === 'autocomplete' && field.optionSource === 'supplier');
+
+    return saving || recordLocked || disableWhileLoading || disabledByConfig;
   };
 
   const helperText = (field, error, loadingOptions) => {
@@ -361,7 +367,12 @@ export default function MasterDataFormDialog({
       ? config.getFieldHelperText({ field, values, record, mode })
       : '';
 
-    return dynamicHelper || field.helperText || (loadingOptions ? 'Loading master data…' : '');
+    // Keep the Supplier field height stable while remote filtering is running.
+    // Showing/hiding loading helper text here makes the entire form jump.
+    const showLoadingHelper = loadingOptions
+      && !(field.type === 'autocomplete' && field.optionSource === 'supplier');
+
+    return dynamicHelper || field.helperText || (showLoadingHelper ? 'Loading master data…' : '');
   };
 
   const handleAttemptSave = () => {
@@ -491,6 +502,7 @@ export default function MasterDataFormDialog({
                       options={options}
                       loading={loadingOptions}
                       value={selectedOption}
+                      inputValue={field.optionSource === 'supplier' && !multiple ? supplierSearch : undefined}
                       disabled={disabled}
                       noOptionsText={loadingOptions ? 'Loading options…' : 'No matching master-data record'}
                       isOptionEqualToValue={(option, selected) => optionValue(field, option) === optionValue(field, selected)}
@@ -552,6 +564,12 @@ export default function MasterDataFormDialog({
                         }
                         if (field.freeSolo === true && (reason === 'input' || reason === 'clear')) {
                           handleChange(field, nextInput);
+                        } else if (field.requireSelection === true && !multiple && reason === 'input') {
+                          // Clear the selected master-data value only once. Repeating this on every
+                          // keystroke causes unnecessary form-wide re-renders while filtering.
+                          if (String(values?.[field.name] || '') !== '') {
+                            handleChange(field, '');
+                          }
                         }
                       }}
                       renderInput={(params) => (

@@ -16,6 +16,7 @@ import {
   Snackbar,
   Stack,
   TextField,
+  Tooltip,
   Typography,
   useMediaQuery
 } from '@mui/material';
@@ -39,7 +40,12 @@ const createFormValues = (config, record) => {
 
   (config.formFields || []).forEach((field) => {
     const value = fromConfig?.[field.name];
-    defaults[field.name] = field.type === 'number' ? textValue(value) : (value ?? defaults[field.name] ?? '');
+    if (field.multiple === true) {
+      const source = value ?? defaults[field.name];
+      defaults[field.name] = Array.isArray(source) ? source : (source ? [source] : []);
+    } else {
+      defaults[field.name] = field.type === 'number' ? textValue(value) : (value ?? defaults[field.name] ?? '');
+    }
   });
 
   return defaults;
@@ -52,7 +58,7 @@ const validate = (config, values) => {
     const rawValue = values?.[field.name];
     const value = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
 
-    if (field.required && (value === '' || value === null || value === undefined)) {
+    if (field.required && (value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0))) {
       errors[field.name] = `${field.label} is required.`;
       return;
     }
@@ -156,17 +162,30 @@ export default function MasterDataFormDialog({
   const [currencyOptions, setCurrencyOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
   const [shipToOptions, setShipToOptions] = useState([]);
+  // Keep the text typed in Short Name Supplier separate from the selected
+  // master-data value. This prevents MUI Autocomplete from resetting the
+  // user's text while the remote Vendor Code search is refreshing options.
+  const [supplierInput, setSupplierInput] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const [optionLoading, setOptionLoading] = useState({ currency: false, supplier: false, shipTo: false });
   const [optionError, setOptionError] = useState('');
   const [snack, setSnack] = useState({ open: false, severity: 'error', message: '' });
 
   const isEditing = mode === 'edit';
-  const recordLocked = Boolean(
+  const legacyRecordLocked = Boolean(
     isEditing && typeof config.isRecordLocked === 'function' && config.isRecordLocked(record)
   );
-  const recordLockMessage = recordLocked && typeof config.recordLockMessage === 'function'
-    ? config.recordLockMessage(record)
+  const editRecordLocked = Boolean(
+    isEditing && typeof config.isEditLocked === 'function' && config.isEditLocked(record)
+  );
+  const recordLocked = legacyRecordLocked || editRecordLocked;
+  const recordLockMessage = editRecordLocked && typeof config.editLockMessage === 'function'
+    ? config.editLockMessage(record)
+    : legacyRecordLocked && typeof config.recordLockMessage === 'function'
+      ? config.recordLockMessage(record)
+      : '';
+  const restrictedEditMessage = Boolean(isEditing && !recordLocked && typeof config.restrictedEditMessage === 'function')
+    ? config.restrictedEditMessage(record)
     : '';
   const title = `${isEditing ? 'Edit' : 'Add'} ${config.menuTitle}`;
   const formFields = config.formFields || [];
@@ -179,7 +198,9 @@ export default function MasterDataFormDialog({
 
     const initialValues = createFormValues(config, record);
     setValues(initialValues);
-    setSupplierSearch(String(initialValues?.shortNameSupplier || ''));
+    const initialSupplier = String(initialValues?.shortNameSupplier || '');
+    setSupplierInput(initialSupplier);
+    setSupplierSearch(initialSupplier);
     setErrors({});
     setServerError('');
     setSaving(false);
@@ -224,7 +245,7 @@ export default function MasterDataFormDialog({
 
     let alive = true;
     setOptionLoading((current) => ({ ...current, shipTo: true }));
-    listActiveShipTos()
+    listActiveShipTos(scopeParams?.buyerKey)
       .then((items) => {
         if (alive) setShipToOptions(Array.isArray(items) ? items : []);
       })
@@ -239,7 +260,7 @@ export default function MasterDataFormDialog({
       });
 
     return () => { alive = false; };
-  }, [open, usesShipToOptions]);
+  }, [open, scopeParams?.buyerKey, usesShipToOptions]);
 
   useEffect(() => {
     if (!open || !usesSupplierOptions) return undefined;
@@ -247,7 +268,7 @@ export default function MasterDataFormDialog({
     let alive = true;
     const timer = window.setTimeout(() => {
       setOptionLoading((current) => ({ ...current, supplier: true }));
-      searchVendorCodeOptions(supplierSearch, 50)
+      searchVendorCodeOptions(supplierSearch, 50, scopeParams?.buyerKey)
         .then((items) => {
           if (alive) setSupplierOptions(Array.isArray(items) ? items : []);
         })
@@ -255,7 +276,7 @@ export default function MasterDataFormDialog({
           console.error('Unable to search Vendor Code Master:', error);
           if (alive) {
             setSupplierOptions([]);
-            setOptionError('Unable to search Vendor Code Master. You may still enter a new supplier name.');
+            setOptionError('Unable to search Vendor Code Master. Short Name Supplier must be selected from Vendor Code.');
           }
         })
         .finally(() => {
@@ -267,7 +288,7 @@ export default function MasterDataFormDialog({
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [open, supplierSearch, usesSupplierOptions]);
+  }, [open, scopeParams?.buyerKey, supplierSearch, usesSupplierOptions]);
 
   const getOptions = (field) => {
     if (field.optionSource === 'currency') return currencyOptions;
@@ -284,6 +305,13 @@ export default function MasterDataFormDialog({
 
     return options.find((item) => optionValue(field, item).toLowerCase() === value.toLowerCase())
       || { [field.optionValue || 'value']: value };
+  };
+
+  const selectedAutocompleteOptions = (field, rawValues, options) => {
+    const values = Array.isArray(rawValues) ? rawValues : (rawValues ? [rawValues] : []);
+    return values
+      .map((value) => selectedAutocompleteOption(field, value, options))
+      .filter(Boolean);
   };
 
   const selectedCurrency = useMemo(() => {
@@ -329,7 +357,11 @@ export default function MasterDataFormDialog({
       ? Boolean(config.isFieldDisabled({ field, values, record, mode }))
       : Boolean(field.disabled);
 
-    return saving || recordLocked || loadingOptions || disabledByConfig;
+    // Remote Supplier search must remain editable while its options are loading.
+    // Disabling the Autocomplete on every request makes the field lose focus
+    // and causes the typed character to appear to disappear.
+    const blockWhileLoading = loadingOptions && field.optionSource !== 'supplier';
+    return saving || recordLocked || blockWhileLoading || disabledByConfig;
   };
 
   const helperText = (field, error, loadingOptions) => {
@@ -431,13 +463,14 @@ export default function MasterDataFormDialog({
 
         <DialogContent dividers sx={{ p: { xs: 1.5, sm: 2 } }}>
           {recordLocked && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{recordLockMessage || 'This record is used and locked.'}</Alert>}
+          {restrictedEditMessage && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{restrictedEditMessage}</Alert>}
           {serverError && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{serverError}</Alert>}
           {optionError && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{optionError}</Alert>}
           {config.formHint && <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>{config.formHint}</Alert>}
 
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(12, minmax(0, 1fr))' }, gap: 1.25 }}>
             {formFields.map((field) => {
-              const value = values?.[field.name] ?? '';
+              const value = values?.[field.name] ?? (field.multiple === true ? [] : '');
               const error = errors?.[field.name];
               const grid = field.grid || 6;
               const options = getOptions(field);
@@ -447,33 +480,120 @@ export default function MasterDataFormDialog({
               const fieldHelper = helperText(field, error, loadingOptions);
 
               if (field.type === 'autocomplete') {
-                const selectedOption = selectedAutocompleteOption(field, value, options);
+                const multiple = field.multiple === true;
+                const selectedOption = multiple
+                  ? selectedAutocompleteOptions(field, value, options)
+                  : selectedAutocompleteOption(field, value, options);
+                const lockedMultiValues = multiple && typeof config.getLockedMultiValues === 'function'
+                  ? new Set((config.getLockedMultiValues({ field, values, record, mode }) || [])
+                    .map((item) => String(item || '').trim())
+                    .filter(Boolean))
+                  : new Set();
 
                 return (
                   <Box key={field.name} sx={{ gridColumn: { xs: 'span 1', sm: `span ${grid}` } }}>
                     <Autocomplete
+                      multiple={multiple}
+                      filterSelectedOptions={multiple}
                       size="small"
                       freeSolo={field.freeSolo === true}
                       fullWidth
                       options={options}
                       loading={loadingOptions}
                       value={selectedOption}
+                      inputValue={field.optionSource === 'supplier' ? supplierInput : undefined}
                       disabled={disabled}
                       noOptionsText={loadingOptions ? 'Loading options…' : 'No matching master-data record'}
                       isOptionEqualToValue={(option, selected) => optionValue(field, option) === optionValue(field, selected)}
                       getOptionLabel={(option) => optionLabel(field, option)}
-                      filterOptions={field.optionSource === 'shipTo' ? undefined : ((items) => items)}
+                      // Supplier uses both MUI's immediate local filtering and the
+                      // debounced server lookup. Local filtering keeps the dropdown
+                      // responsive while the newest Vendor Code results are loading.
+                      filterOptions={(field.optionSource === 'supplier' || field.optionSource === 'shipTo')
+                        ? undefined
+                        : ((items) => items)}
                       onChange={(_, nextOption) => {
-                        const nextValue = nextOption ? optionValue(field, nextOption) : '';
-                        if (field.optionSource === 'supplier') setSupplierSearch(String(nextValue || ''));
+                        let nextValue = multiple
+                          ? (nextOption || []).map((item) => optionValue(field, item)).filter(Boolean)
+                          : (nextOption ? optionValue(field, nextOption) : '');
+                        if (multiple && lockedMultiValues.size > 0) {
+                          const nextSet = new Set(nextValue.map((item) => String(item)));
+                          let restored = false;
+                          lockedMultiValues.forEach((lockedValue) => {
+                            if (!nextSet.has(lockedValue)) {
+                              nextValue.push(lockedValue);
+                              nextSet.add(lockedValue);
+                              restored = true;
+                            }
+                          });
+                          if (restored) {
+                            setSnack({
+                              open: true,
+                              severity: 'warning',
+                              message: 'A Ship To already used by MPR cannot be removed from this mapping.'
+                            });
+                          }
+                        }
+                        if (field.optionSource === 'supplier') {
+                          const selectedSupplier = String(nextValue || '');
+                          setSupplierInput(selectedSupplier);
+                          setSupplierSearch(selectedSupplier);
+                        }
                         handleChange(field, nextValue);
                       }}
+                      renderTags={multiple && lockedMultiValues.size > 0 ? ((tagValue, getTagProps) =>
+                        tagValue.map((option, index) => {
+                          const valueKey = optionValue(field, option);
+                          const lockedTag = lockedMultiValues.has(String(valueKey));
+                          const tagProps = getTagProps({ index });
+                          const { key, onDelete, ...chipProps } = tagProps;
+                          const chip = (
+                            <Chip
+                              key={key}
+                              {...chipProps}
+                              onDelete={lockedTag ? undefined : onDelete}
+                              label={`${optionLabel(field, option)}${lockedTag ? ' · Used by MPR' : ''}`}
+                              size="small"
+                            />
+                          );
+                          return lockedTag ? (
+                            <Tooltip
+                              key={key}
+                              title="Cannot remove because this Ship To is referenced by an existing MPR."
+                              arrow
+                            >
+                              <span>{chip}</span>
+                            </Tooltip>
+                          ) : chip;
+                        })) : undefined}
                       onInputChange={(_, nextInput, reason) => {
-                        if (field.optionSource === 'supplier' && (reason === 'input' || reason === 'clear')) {
-                          setSupplierSearch(nextInput);
+                        if (field.optionSource === 'supplier') {
+                          if (reason === 'input' || reason === 'clear') {
+                            // Control the visible search text ourselves so async option
+                            // refreshes can never erase what the user is typing.
+                            setSupplierInput(nextInput);
+                            setSupplierSearch(nextInput);
+
+                            if (reason === 'clear') {
+                              handleChange(field, '');
+                            } else if (field.requireSelection === true && !multiple) {
+                              const selectedValue = String(values?.[field.name] || '').trim();
+                              if (selectedValue && selectedValue.toLowerCase() !== String(nextInput || '').trim().toLowerCase()) {
+                                // Typing after a valid selection makes it pending again.
+                                // Save remains blocked until an option is selected.
+                                handleChange(field, '');
+                              }
+                            }
+                          }
+                          // Ignore MUI's `reset` event. onChange above decides what text
+                          // to display after a supplier is actually selected.
+                          return;
                         }
+
                         if (field.freeSolo === true && (reason === 'input' || reason === 'clear')) {
                           handleChange(field, nextInput);
+                        } else if (field.requireSelection === true && !multiple && reason === 'input') {
+                          handleChange(field, '');
                         }
                       }}
                       renderInput={(params) => (
@@ -531,7 +651,9 @@ export default function MasterDataFormDialog({
                       maxLength: field.maxLength,
                       min: field.min,
                       max: field.max,
-                      step: field.step
+                      step: field.step,
+                      inputMode: field.inputMode,
+                      pattern: field.pattern
                     }}
                     sx={{
                       '& .MuiOutlinedInput-root': { borderRadius: 1.25 },
@@ -540,8 +662,11 @@ export default function MasterDataFormDialog({
                   >
                     {field.type === 'select' && displayedOptions.map((option) => {
                       const valueKey = optionValue(field, option);
+                      const optionDisabled = typeof config.isOptionDisabled === 'function'
+                        ? Boolean(config.isOptionDisabled({ field, option, values, record, mode }))
+                        : Boolean(option?.disabled);
                       return (
-                        <MenuItem key={valueKey || String(option)} value={valueKey}>
+                        <MenuItem key={valueKey || String(option)} value={valueKey} disabled={optionDisabled}>
                           {optionLabel(field, option)}
                         </MenuItem>
                       );

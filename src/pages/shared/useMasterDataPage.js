@@ -62,6 +62,11 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
   const loadSequenceRef = useRef(0);
   const visibleLoadSequenceRef = useRef(0);
   const skipNextAutoLoadRef = useRef(false);
+  const silentNextAutoLoadRef = useRef(false);
+  const draftFiltersRef = useRef(emptyFilters);
+  const appliedFiltersRef = useRef(emptyFilters);
+  const liveFilterTimerRef = useRef(null);
+  const liveFilterMountedRef = useRef(false);
 
   const notify = useCallback((message, severity = 'success') => {
     setNotification({
@@ -132,8 +137,19 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
       skipNextAutoLoadRef.current = false;
       return;
     }
-    load();
+
+    const silent = silentNextAutoLoadRef.current;
+    silentNextAutoLoadRef.current = false;
+    load(silent ? { silent: true } : {});
   }, [load]);
+
+  useEffect(() => {
+    draftFiltersRef.current = draftFilters;
+  }, [draftFilters]);
+
+  useEffect(() => {
+    appliedFiltersRef.current = appliedFilters;
+  }, [appliedFilters]);
 
   // Realtime invalidation is a background refresh: never replace the table with
   // a Loading row just because another user changed data.
@@ -160,21 +176,83 @@ export default function useMasterDataPage(config = {}, scopeParams = {}) {
     });
   }, [loading, rows]);
 
-  const changeDraftFilter = useCallback((name, value) => {
-    setDraftFilters((current) => ({ ...current, [name]: value }));
+  const applyFilters = useCallback((nextFilters, { silent = false } = {}) => {
+    const cleaned = cleanFilters(nextFilters || {});
+    const current = cleanFilters(appliedFiltersRef.current || {});
+
+    // Do not issue another request if the effective filters did not change.
+    if (JSON.stringify(cleaned) === JSON.stringify(current)) return false;
+
+    appliedFiltersRef.current = cleaned;
+    if (silent) silentNextAutoLoadRef.current = true;
+    setAppliedFilters(cleaned);
+    setPage(0);
+    return true;
   }, []);
 
+  const changeDraftFilter = useCallback((name, value) => {
+    const nextDraftFilters = { ...draftFiltersRef.current, [name]: value };
+
+    // Search inputs are pure controlled input state. Never mutate applied filters
+    // from the key event itself; this prevents keystrokes from being lost when
+    // the table refreshes. Live filtering is handled by the debounce effect below.
+    draftFiltersRef.current = nextDraftFilters;
+    setDraftFilters(nextDraftFilters);
+  }, []);
+
+  // MAT Info can behave like a real filter: typing stays instant and stable, while
+  // the API request is delayed until the user pauses. The refresh is silent so the
+  // search controls never get disabled/focused out and the existing table does not
+  // flash between keystrokes. Clearing a field naturally reloads the unfiltered data.
+  useEffect(() => {
+    if (config.liveFilter !== true) return undefined;
+
+    // The normal load effect performs the initial page request. Do not schedule a
+    // duplicate live-filter request on mount.
+    if (!liveFilterMountedRef.current) {
+      liveFilterMountedRef.current = true;
+      return undefined;
+    }
+
+    if (liveFilterTimerRef.current) {
+      window.clearTimeout(liveFilterTimerRef.current);
+    }
+
+    const delay = Number.isFinite(Number(config.liveFilterDebounceMs))
+      ? Math.max(150, Number(config.liveFilterDebounceMs))
+      : 350;
+
+    liveFilterTimerRef.current = window.setTimeout(() => {
+      liveFilterTimerRef.current = null;
+      applyFilters(draftFiltersRef.current, { silent: true });
+    }, delay);
+
+    return () => {
+      if (liveFilterTimerRef.current) {
+        window.clearTimeout(liveFilterTimerRef.current);
+        liveFilterTimerRef.current = null;
+      }
+    };
+  }, [applyFilters, config.liveFilter, config.liveFilterDebounceMs, draftFilters]);
+
   const search = useCallback(() => {
-    setAppliedFilters(cleanFilters(draftFilters));
-    setPage(0);
-  }, [draftFilters]);
+    if (liveFilterTimerRef.current) {
+      window.clearTimeout(liveFilterTimerRef.current);
+      liveFilterTimerRef.current = null;
+    }
+    applyFilters(draftFiltersRef.current);
+  }, [applyFilters]);
 
   const reset = useCallback(() => {
+    if (liveFilterTimerRef.current) {
+      window.clearTimeout(liveFilterTimerRef.current);
+      liveFilterTimerRef.current = null;
+    }
     const cleared = createEmptyFilters(config.searchFields || []);
+    draftFiltersRef.current = cleared;
     setDraftFilters(cleared);
-    setAppliedFilters(cleared);
-    setPage(0);
-  }, [config.searchFields]);
+    applyFilters(cleared);
+  }, [applyFilters, config.searchFields]);
 
   const refreshRecordBeforeMutation = useCallback(async (record) => {
     if (!record?.id || !config.refreshBeforeMutation) return record || null;

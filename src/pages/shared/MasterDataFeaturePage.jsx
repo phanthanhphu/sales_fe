@@ -176,7 +176,7 @@ export default function MasterDataFeaturePage({
           showUpload={config.allowUpload !== false}
           showTemplate={Boolean(config.allowTemplate)}
           showEditWorkbook={Boolean(config.allowEditWorkbook)}
-          disabled={page.loading || downloadingEdit || downloadingTemplate || checkingCreatePrerequisite}
+          disabled={downloadingEdit || downloadingTemplate || checkingCreatePrerequisite}
           actionsDisabled={!canWrite}
         />
 

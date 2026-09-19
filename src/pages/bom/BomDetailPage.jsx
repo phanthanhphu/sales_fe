@@ -56,9 +56,11 @@ import {
   addBomLine,
   addBomProductColor,
   addPacking,
+  clearBomContent,
   deleteBomAttachment,
   deleteBomLine,
   deleteBomLineImage,
+  deleteBomLineImageById,
   deleteBomProductColor,
   deletePacking,
   downloadBomAttachment,
@@ -66,6 +68,7 @@ import {
   getApiError,
   getBomAttachmentObjectUrl,
   getBomLineImageObjectUrl,
+  getBomLineImageObjectUrlById,
   getBom,
   listBomLines,
   openBomAttachment,
@@ -77,7 +80,7 @@ import {
   updateBomProductColor,
   updatePacking,
   uploadBomAttachment,
-  uploadBomLineImage
+  uploadBomLineImages
 } from '../../services/orderBomMprService';
 import { canManageBom } from 'utils/accessControl';
 import { buyerPath, normalizeBuyerKey } from 'utils/buyerContext';
@@ -480,6 +483,15 @@ const lineMatchesFilters = (line = {}, filters = emptyLineFilters, productColors
   }
 
   return true;
+};
+
+const lineImages = (line = {}) => {
+  const images = Array.isArray(line?.images) ? line.images.filter(Boolean) : [];
+  const primary = line?.primaryImage || null;
+  if (primary && !images.some((image) => String(image?.id || '') === String(primary?.id || ''))) {
+    return [primary, ...images];
+  }
+  return images.length ? images : (primary ? [primary] : []);
 };
 
 const isImageAttachment = (attachment = {}) => {
@@ -1371,15 +1383,28 @@ function AttachmentCards({
   );
 }
 
-function WholeBomImageCard({ bomId, attachment, saving, actionsDisabled, onUpload, onDelete, onOpen, onDownload }) {
+function WholeBomImageCard({
+  bomId,
+  attachments = [],
+  saving,
+  actionsDisabled,
+  onUpload,
+  onDeleteAll,
+  onOpen,
+  onDownload,
+  onViewAll
+}) {
+  const attachment = attachments.length ? attachments[attachments.length - 1] : null;
+  const imageCount = attachments.length;
+
   return (
     <Paper elevation={0} sx={{ ...bomOverviewCardSx, p: 0.8 }}>
-      <OverviewCardTitle icon={<Image />} title="Whole BOM Image" />
+      <OverviewCardTitle icon={<Image />} title="Whole BOM Images" />
       <Stack direction="row" spacing={0.8} alignItems="center" justifyContent="space-between">
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Tooltip title={attachment?.originalFileName || 'Whole BOM image'}>
+          <Tooltip title={attachment?.originalFileName || 'Whole BOM images'}>
             <Typography noWrap sx={{ fontSize: '.63rem', color: attachment ? '#667b90' : '#7a8c9f', mb: 0.3 }}>
-              {attachment?.originalFileName || 'No image uploaded'}
+              {imageCount > 1 ? `${imageCount} images · ${attachment?.originalFileName || ''}` : (attachment?.originalFileName || 'No image uploaded')}
             </Typography>
           </Tooltip>
 
@@ -1387,18 +1412,19 @@ function WholeBomImageCard({ bomId, attachment, saving, actionsDisabled, onUploa
             <Tooltip title={actionsDisabled ? 'BOM permission is required.' : ''} disableHoverListener={!actionsDisabled}>
               <span>
                 <Button component="label" size="small" variant="text" disabled={actionsDisabled || saving}>
-                  {attachment ? 'Replace' : 'Upload'}
+                  {attachment ? 'Add' : 'Upload'}
                   <input hidden type="file" accept="image/*" onChange={onUpload} />
                 </Button>
               </span>
             </Tooltip>
             {attachment && (
               <>
+                {imageCount > 1 && <Button size="small" onClick={onViewAll}>View all ({imageCount})</Button>}
                 <Button size="small" onClick={() => onOpen?.(attachment)}>Open</Button>
                 <Button size="small" onClick={() => onDownload?.(attachment)}>Download</Button>
-                <Tooltip title={actionsDisabled ? 'BOM permission is required.' : 'Delete image'}>
+                <Tooltip title={actionsDisabled ? 'BOM permission is required.' : 'Delete all Whole BOM images'}>
                   <span>
-                    <IconButton size="small" color="error" disabled={actionsDisabled || saving} onClick={onDelete} sx={{ width: 22, height: 22 }}>
+                    <IconButton size="small" color="error" disabled={actionsDisabled || saving} onClick={onDeleteAll} sx={{ width: 22, height: 22 }}>
                       <Delete sx={{ fontSize: 13 }} />
                     </IconButton>
                   </span>
@@ -1408,13 +1434,31 @@ function WholeBomImageCard({ bomId, attachment, saving, actionsDisabled, onUploa
           </Stack>
         </Box>
 
-        <Box sx={{ width: 88, height: 58, flexShrink: 0, overflow: 'hidden', borderRadius: 1, border: '1px solid #e5eaf0', backgroundColor: '#f8fafc' }}>
+        <Box
+          onClick={() => imageCount > 1 ? onViewAll?.() : (attachment ? onOpen?.(attachment) : undefined)}
+          sx={{
+            width: 88,
+            height: 58,
+            flexShrink: 0,
+            overflow: 'hidden',
+            borderRadius: 1,
+            border: '1px solid #e5eaf0',
+            backgroundColor: '#f8fafc',
+            position: 'relative',
+            cursor: attachment ? 'zoom-in' : 'default'
+          }}
+        >
           {attachment ? (
-            <ProtectedAttachmentImage bomId={bomId} attachment={attachment} onOpen={onOpen} height={58} />
+            <ProtectedAttachmentImage bomId={bomId} attachment={attachment} onOpen={imageCount > 1 ? onViewAll : onOpen} height={58} />
           ) : (
             <Stack alignItems="center" justifyContent="center" sx={{ height: 58 }}>
               <Image color="action" sx={{ fontSize: 18 }} />
             </Stack>
+          )}
+          {imageCount > 1 && (
+            <Box sx={{ position: 'absolute', right: 3, bottom: 3, px: 0.55, minWidth: 24, height: 19, borderRadius: 10, bgcolor: '#103B5C', color: '#fff', display: 'grid', placeItems: 'center', fontSize: '.61rem', fontWeight: 800 }}>
+              +{imageCount - 1}
+            </Box>
           )}
         </Box>
       </Stack>
@@ -1422,10 +1466,101 @@ function WholeBomImageCard({ bomId, attachment, saving, actionsDisabled, onUploa
   );
 }
 
-function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
+function WholeBomImageGalleryDialog({ open, bomId, attachments = [], onClose, onDelete, onDownload, onOpen, actionsDisabled = false }) {
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
+      <DialogTitle sx={{ pr: 7, fontWeight: 750, color: '#103B5C' }}>
+        Whole BOM Images ({attachments.length})
+        <IconButton aria-label="Close Whole BOM image gallery" onClick={onClose} sx={{ position: 'absolute', right: 12, top: 8 }}>
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
+        <AttachmentCards
+          attachments={attachments}
+          bomId={bomId}
+          onDelete={onDelete}
+          onDownload={onDownload}
+          onOpen={onOpen}
+          emptyText="No Whole BOM images."
+          actionsDisabled={actionsDisabled}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BomLineGalleryThumbnail({ bomId, lineId, image, selected = false, onClick }) {
+  const [url, setUrl] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+    if (!bomId || !lineId || !image) return undefined;
+
+    const loader = image?.id
+      ? getBomLineImageObjectUrlById(bomId, lineId, image.id, 'thumbnail', image?.updatedAt || image?.id || '')
+      : getBomLineImageObjectUrl(bomId, lineId, 'thumbnail', image?.updatedAt || '');
+
+    loader.then((value) => {
+      objectUrl = value;
+      if (active) setUrl(value);
+      else URL.revokeObjectURL(value);
+    }).catch(() => {
+      if (active) setUrl('');
+    });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [bomId, lineId, image?.id, image?.updatedAt]);
+
+  return (
+    <Box
+      onClick={onClick}
+      sx={{
+        width: 68,
+        height: 68,
+        flex: '0 0 68px',
+        borderRadius: 1,
+        border: selected ? '2px solid #1976d2' : '1px solid #475569',
+        bgcolor: '#fff',
+        overflow: 'hidden',
+        cursor: 'pointer',
+        display: 'grid',
+        placeItems: 'center'
+      }}
+    >
+      {url ? (
+        <Box component="img" src={url} alt={image?.originalFileName || 'BOM image'} sx={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+      ) : (
+        <Image sx={{ color: '#94a3b8' }} />
+      )}
+    </Box>
+  );
+}
+
+function BomLineImagePreviewDialog({ open, bomId, line, onClose, onDelete, actionsDisabled = false }) {
+  const images = lineImages(line);
+  const [selectedId, setSelectedId] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setExpanded(false);
+      return;
+    }
+    const first = images[0];
+    setSelectedId((current) => images.some((image) => String(image?.id || '') === String(current || ''))
+      ? current
+      : String(first?.id || ''));
+  }, [open, line?.id, images.map((image) => image?.id || image?.updatedAt || '').join('|')]);
+
+  const selectedImage = images.find((image) => String(image?.id || '') === String(selectedId || '')) || images[0] || null;
 
   useEffect(() => {
     let active = true;
@@ -1434,18 +1569,28 @@ function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
     setPreviewUrl('');
     setLoadError(false);
 
-    if (!open || !bomId || !line?.id || !line?.primaryImage) {
+    if (!open || !bomId || !line?.id || !selectedImage) {
       setLoading(false);
       return undefined;
     }
 
     setLoading(true);
-    getBomLineImageObjectUrl(
-      bomId,
-      line.id,
-      'preview',
-      line?.primaryImage?.id || line?.primaryImage?.updatedAt || ''
-    )
+    const loader = selectedImage?.id
+      ? getBomLineImageObjectUrlById(
+        bomId,
+        line.id,
+        selectedImage.id,
+        'preview',
+        selectedImage?.id || selectedImage?.updatedAt || ''
+      )
+      : getBomLineImageObjectUrl(
+        bomId,
+        line.id,
+        'preview',
+        selectedImage?.updatedAt || ''
+      );
+
+    loader
       .then((url) => {
         objectUrl = url;
         if (!active) {
@@ -1466,9 +1611,9 @@ function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [open, bomId, line?.id, line?.primaryImage?.id, line?.primaryImage?.updatedAt]);
+  }, [open, bomId, line?.id, selectedImage?.id, selectedImage?.updatedAt]);
 
-  const title = line?.primaryImage?.originalFileName
+  const title = selectedImage?.originalFileName
     || [line?.materialType, line?.detailNo, line?.sapCode].filter(Boolean).join(' - ')
     || 'BOM Material Image';
 
@@ -1477,75 +1622,97 @@ function BomLineImagePreviewDialog({ open, bomId, line, onClose }) {
       open={open}
       onClose={onClose}
       fullWidth
-      maxWidth="lg"
+      maxWidth={false}
       PaperProps={{
         sx: {
-          width: 'min(1100px, calc(100vw - 32px))',
-          maxHeight: 'calc(100vh - 32px)',
-          borderRadius: 2
+          width: expanded ? 'min(1500px, calc(100vw - 16px))' : 'min(1100px, calc(100vw - 32px))',
+          maxWidth: 'none',
+          maxHeight: expanded ? 'calc(100vh - 16px)' : 'calc(100vh - 32px)',
+          borderRadius: 2,
+          transition: 'width 160ms ease, max-height 160ms ease'
         }
       }}
     >
       <DialogTitle sx={{ pr: 7, py: 1.5, fontWeight: 750, color: '#103B5C' }}>
         <Typography noWrap sx={{ pr: 1, fontWeight: 750, color: '#103B5C' }}>
-          {title}
+          {title} {images.length > 1 ? `(${images.length} images)` : ''}
         </Typography>
-        <IconButton
-          aria-label="Close image preview"
-          onClick={onClose}
-          sx={{ position: 'absolute', right: 12, top: 8 }}
-        >
+        <IconButton aria-label="Close image preview" onClick={onClose} sx={{ position: 'absolute', right: 12, top: 8 }}>
           <Close />
         </IconButton>
       </DialogTitle>
-      <DialogContent
-        dividers
-        sx={{
-          p: { xs: 1, sm: 2 },
-          minHeight: 260,
-          display: 'grid',
-          placeItems: 'center',
-          bgcolor: '#0f172a'
-        }}
-      >
-        {loading && (
-          <Typography sx={{ color: '#fff', fontWeight: 700 }}>
-            Loading image...
-          </Typography>
-        )}
+      <DialogContent dividers sx={{ p: { xs: 1, sm: 2 }, bgcolor: '#0f172a' }}>
+        <Box sx={{ minHeight: 260, display: 'grid', placeItems: 'center' }}>
+          {loading && <Typography sx={{ color: '#fff', fontWeight: 700 }}>Loading image...</Typography>}
 
-        {!loading && loadError && (
-          <Stack spacing={1} alignItems="center" sx={{ color: '#fff', textAlign: 'center' }}>
-            <Image sx={{ fontSize: 54, opacity: 0.8 }} />
-            <Typography sx={{ fontWeight: 700 }}>Image preview is unavailable.</Typography>
-            <Typography sx={{ fontSize: '0.78rem', opacity: 0.8 }}>
-              Check the image conversion service on the Backend server.
-            </Typography>
+          {!loading && loadError && (
+            <Stack spacing={1} alignItems="center" sx={{ color: '#fff', textAlign: 'center' }}>
+              <Image sx={{ fontSize: 54, opacity: 0.8 }} />
+              <Typography sx={{ fontWeight: 700 }}>Image preview is unavailable.</Typography>
+              <Typography sx={{ fontSize: '0.78rem', opacity: 0.8 }}>
+                Check LibreOffice / ImageMagick on the Backend server.
+              </Typography>
+            </Stack>
+          )}
+
+          {!loading && previewUrl && (
+            <Box
+              component="img"
+              src={previewUrl}
+              alt={title}
+              onClick={() => setExpanded(true)}
+              title={expanded ? 'Large preview' : 'Click to enlarge'}
+              sx={{
+                display: 'block',
+                maxWidth: '100%',
+                maxHeight: expanded ? 'calc(100vh - 185px)' : 'calc(100vh - 250px)',
+                width: 'auto',
+                height: 'auto',
+                objectFit: 'contain',
+                mx: 'auto',
+                cursor: expanded ? 'default' : 'zoom-in'
+              }}
+            />
+          )}
+        </Box>
+
+        {images.length > 1 && (
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5, overflowX: 'auto', pb: 0.5 }}>
+            {images.map((image, index) => (
+              <BomLineGalleryThumbnail
+                key={image?.id || `${line?.id}-image-${index}`}
+                bomId={bomId}
+                lineId={line?.id}
+                image={image}
+                selected={selectedImage === image}
+                onClick={() => {
+                  setSelectedId(String(image?.id || ''));
+                  setExpanded(true);
+                }}
+              />
+            ))}
           </Stack>
         )}
-
-        {!loading && previewUrl && (
-          <Box
-            component="img"
-            src={previewUrl}
-            alt={title}
-            sx={{
-              display: 'block',
-              maxWidth: '100%',
-              maxHeight: 'calc(100vh - 150px)',
-              width: 'auto',
-              height: 'auto',
-              objectFit: 'contain',
-              mx: 'auto'
-            }}
-          />
-        )}
       </DialogContent>
+      {selectedImage && onDelete && (
+        <DialogActions sx={{ px: 2, py: 1 }}>
+          <Button
+            color="error"
+            startIcon={<Delete />}
+            disabled={actionsDisabled}
+            onClick={() => onDelete(line, selectedImage)}
+          >
+            Delete Selected Image
+          </Button>
+        </DialogActions>
+      )}
     </Dialog>
   );
 }
 
 function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsDisabled = false, compact = false }) {
+  const images = lineImages(line);
+  const primaryImage = images[0] || null;
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [loadError, setLoadError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
@@ -1553,14 +1720,18 @@ function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsD
   useEffect(() => {
     let active = true;
     let objectUrl = '';
-    if (!line?.primaryImage) {
+    if (!primaryImage) {
       setThumbnailUrl('');
       setLoadError(false);
       return undefined;
     }
 
     setLoadError(false);
-    getBomLineImageObjectUrl(bomId, line.id, 'thumbnail', line?.primaryImage?.id || line?.primaryImage?.updatedAt || '')
+    const loader = primaryImage?.id
+      ? getBomLineImageObjectUrlById(bomId, line.id, primaryImage.id, 'thumbnail', primaryImage?.id || primaryImage?.updatedAt || '')
+      : getBomLineImageObjectUrl(bomId, line.id, 'thumbnail', primaryImage?.updatedAt || '');
+
+    loader
       .then((url) => {
         objectUrl = url;
         if (active) {
@@ -1579,59 +1750,86 @@ function BomLineImageCell({ bomId, line, onUpload, onDelete, onPreview, actionsD
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [bomId, line?.id, line?.primaryImage?.id, line?.primaryImage?.updatedAt, retryKey]);
+  }, [bomId, line?.id, primaryImage?.id, primaryImage?.updatedAt, retryKey]);
 
   return (
     <Stack direction="row" spacing={compact ? 0.35 : 0.5} alignItems="center" sx={{ minWidth: compact ? 76 : 118 }}>
-      {thumbnailUrl ? (
-        <Box
-          component="img"
-          loading="lazy"
-          src={thumbnailUrl}
-          alt={line?.primaryImage?.originalFileName || 'BOM material'}
-          onClick={() => onPreview?.(line)}
-          onError={() => {
-            setThumbnailUrl('');
-            setLoadError(true);
-          }}
-          sx={{ width: compact ? 38 : 54, height: compact ? 38 : 54, objectFit: 'contain', border: '1px solid #dbe3ec', borderRadius: 1, cursor: 'zoom-in', backgroundColor: '#fff' }}
-        />
-      ) : (
-        <Tooltip title={loadError ? 'Cannot create PNG preview. Check LibreOffice / LIBREOFFICE_PATH on the Backend server.' : ''}>
-          <Box sx={{ width: compact ? 38 : 54, height: compact ? 38 : 54, display: 'grid', placeItems: 'center', border: '1px dashed #cbd5e1', borderRadius: 1, color: loadError ? '#dc2626' : '#94a3b8' }}>
-            <Stack spacing={0} alignItems="center">
-              <Image fontSize="small" />
-              {loadError && <Typography sx={{ fontSize: '0.58rem', fontWeight: 700 }}>EMF</Typography>}
-            </Stack>
+      <Box sx={{ position: 'relative' }}>
+        {thumbnailUrl ? (
+          <Box
+            component="img"
+            loading="lazy"
+            src={thumbnailUrl}
+            alt={primaryImage?.originalFileName || 'BOM material'}
+            onClick={() => onPreview?.(line)}
+            onError={() => {
+              setThumbnailUrl('');
+              setLoadError(true);
+            }}
+            sx={{ width: compact ? 38 : 54, height: compact ? 38 : 54, objectFit: 'contain', border: '1px solid #dbe3ec', borderRadius: 1, cursor: 'zoom-in', backgroundColor: '#fff' }}
+          />
+        ) : (
+          <Tooltip title={loadError ? 'Cannot create image preview. Check LibreOffice / ImageMagick on the Backend server.' : ''}>
+            <Box sx={{ width: compact ? 38 : 54, height: compact ? 38 : 54, display: 'grid', placeItems: 'center', border: '1px dashed #cbd5e1', borderRadius: 1, color: loadError ? '#dc2626' : '#94a3b8' }}>
+              <Stack spacing={0} alignItems="center">
+                <Image fontSize="small" />
+                {loadError && <Typography sx={{ fontSize: '0.52rem', fontWeight: 700 }}>IMG</Typography>}
+              </Stack>
+            </Box>
+          </Tooltip>
+        )}
+        {images.length > 1 && (
+          <Box
+            onClick={() => onPreview?.(line)}
+            sx={{
+              position: 'absolute',
+              right: -6,
+              bottom: -6,
+              minWidth: 22,
+              height: 22,
+              px: 0.55,
+              borderRadius: 11,
+              display: 'grid',
+              placeItems: 'center',
+              bgcolor: '#103B5C',
+              color: '#fff',
+              fontSize: '0.67rem',
+              fontWeight: 800,
+              border: '2px solid #fff',
+              cursor: 'pointer'
+            }}
+          >
+            +{images.length - 1}
           </Box>
-        </Tooltip>
-      )}
+        )}
+      </Box>
       <Stack spacing={0.05} sx={{ '& .MuiIconButton-root': compact ? { width: 24, height: 24 } : undefined }}>
-        <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : (line?.primaryImage ? 'Replace Image' : 'Upload Image')}>
+        <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Add one or more images'}>
           <span>
             <IconButton component="label" size="small" disabled={actionsDisabled}>
               <FileUpload fontSize="inherit" />
               <input
                 hidden
+                multiple
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,.emf,.wmf"
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
+                  const files = Array.from(event.target.files || []);
                   event.target.value = '';
-                  if (file) onUpload?.(line, file);
+                  if (files.length) onUpload?.(line, files);
                 }}
               />
             </IconButton>
           </span>
         </Tooltip>
-        {line?.primaryImage && loadError && (
+        {primaryImage && loadError && (
           <Tooltip title="Retry Image Preview">
             <span><IconButton size="small" onClick={() => setRetryKey((value) => value + 1)}><RestartAlt fontSize="inherit" /></IconButton></span>
           </Tooltip>
         )}
-        {line?.primaryImage && (
-          <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : 'Delete Image'}>
-            <span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete?.(line)}><Delete fontSize="inherit" /></IconButton></span>
+        {primaryImage && (
+          <Tooltip title={actionsDisabled ? 'BOM permission is required to modify BOM data.' : (images.length > 1 ? 'Delete first image (open preview to select another)' : 'Delete Image')}>
+            <span><IconButton size="small" color="error" disabled={actionsDisabled} onClick={() => onDelete?.(line, primaryImage)}><Delete fontSize="inherit" /></IconButton></span>
           </Tooltip>
         )}
       </Stack>
@@ -1703,7 +1901,7 @@ function LineTable({ bomId, rows, productColors = [], onEdit, onDelete, onAttach
   const { sortedRows, sortKey, sortDirection, requestSort } = useTableSort(rows, {
     getValue: (line, key) => {
       if (key === 'Material') return line.materialType || line.materialName || '';
-      if (key === 'Image') return line.primaryImage?.fileName || line.primaryImage?.originalFileName || '';
+      if (key === 'Image') return lineImages(line).map((image) => image?.originalFileName || '').filter(Boolean).join(' ');
       const column = columns.find(([label]) => label === key);
       return column?.[1] ? column[1](line) : line?.[key];
     }
@@ -1834,8 +2032,11 @@ export default function BomDetailPage() {
   const [linePages, setLinePages] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
+  const [clearContentOpen, setClearContentOpen] = useState(false);
+  const [clearContentSaving, setClearContentSaving] = useState(false);
   const [imagePreviewLine, setImagePreviewLine] = useState(null);
   const [attachmentPreview, setAttachmentPreview] = useState(null);
+  const [wholeBomGalleryOpen, setWholeBomGalleryOpen] = useState(false);
   const [excelUploadProgress, setExcelUploadProgress] = useState(initialUploadProgress());
   const [duplicateExcelWarning, setDuplicateExcelWarning] = useState({
     open: false,
@@ -2315,14 +2516,17 @@ export default function BomDetailPage() {
     });
   };
 
-  const uploadLineImage = async (line, file) => {
+  const uploadLineImage = async (line, selectedFiles) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    const files = Array.isArray(selectedFiles) ? selectedFiles.filter(Boolean) : (selectedFiles ? [selectedFiles] : []);
+    if (!files.length) return;
     try {
       setSaving(true);
-      const updated = await uploadBomLineImage(bomId, line.id, file);
+      const updated = await uploadBomLineImages(bomId, line.id, files);
       replaceLineInState(updated);
-      setBom((current) => current ? ({ ...current, imageCount: (current.imageCount || 0) + (line.primaryImage ? 0 : 1) }) : current);
-      notify(line.primaryImage ? 'BOM Line Image Replaced.' : 'BOM Line Image Uploaded.');
+      if (imagePreviewLine?.id === line.id) setImagePreviewLine(updated);
+      setBom((current) => current ? ({ ...current, imageCount: (current.imageCount || 0) + files.length }) : current);
+      notify(`${files.length} BOM Line Image${files.length > 1 ? 's' : ''} Uploaded.`);
     } catch (error) {
       notify(getApiError(error, 'Unable to upload BOM line image.'), 'error');
     } finally {
@@ -2330,12 +2534,16 @@ export default function BomDetailPage() {
     }
   };
 
-  const removeLineImage = async (line) => {
+  const removeLineImage = async (line, image = null) => {
     if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
     try {
       setSaving(true);
-      const updated = await deleteBomLineImage(bomId, line.id);
+      const updated = image?.id
+        ? await deleteBomLineImageById(bomId, line.id, image.id)
+        : await deleteBomLineImage(bomId, line.id);
       replaceLineInState(updated);
+      const remaining = lineImages(updated);
+      if (imagePreviewLine?.id === line.id) setImagePreviewLine(remaining.length ? updated : null);
       setBom((current) => current ? ({ ...current, imageCount: Math.max(0, (current.imageCount || 0) - 1) }) : current);
       notify('BOM Line Image Deleted.');
     } catch (error) {
@@ -2396,10 +2604,10 @@ export default function BomDetailPage() {
       for (const attachment of wholeBomImages) {
         await deleteBomAttachment(bomId, attachment.id);
       }
-      notify('Whole BOM image deleted.');
+      notify('Whole BOM images deleted.');
       await reloadWithoutJump();
     } catch (error) {
-      notify(getApiError(error, 'Unable to delete Whole BOM image.'), 'error');
+      notify(getApiError(error, 'Unable to delete Whole BOM images.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -2474,6 +2682,28 @@ export default function BomDetailPage() {
       await downloadWithAuth(getBomExportUrl(bomId), bomDownloadName(false));
     } catch (error) {
       notify(getApiError(error, 'Unable to export BOM.'), 'error');
+    }
+  };
+
+  const clearContent = async () => {
+    if (!canWrite) { notify(writeBlockedMessage, 'warning'); return; }
+    if (bom?.usedInMpr) {
+      notify('This BOM is already used in MPR. Remove its MPR generation batch before clearing BOM content.', 'warning');
+      return;
+    }
+
+    setClearContentSaving(true);
+    try {
+      const updated = await clearBomContent(bomId);
+      setClearContentOpen(false);
+      setLineFilters(emptyLineFilters);
+      setBom((current) => current ? { ...current, ...updated, coreLines: [], packings: [] } : current);
+      notify('BOM content cleared. BOM No. and BOM Name were kept.');
+      await load({ keepScroll: false, showLoading: false });
+    } catch (error) {
+      notify(getApiError(error, 'Unable to clear BOM content.'), 'error');
+    } finally {
+      setClearContentSaving(false);
     }
   };
 
@@ -2610,6 +2840,25 @@ export default function BomDetailPage() {
             </Tooltip>
             <input ref={fileRef} type="file" accept=".xls,.xlsx" hidden onChange={uploadExcel} />
             <input ref={lineAttachmentInputRef} type="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" hidden onChange={uploadPendingLineAttachment} />
+            <Tooltip title={
+              !canWrite ? writeBlockedMessage
+                : bom.usedInMpr ? 'This BOM is used in MPR and cannot be cleared'
+                : 'Clear all BOM content while keeping BOM No. and BOM Name'
+            }>
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  startIcon={<RestartAlt />}
+                  onClick={() => setClearContentOpen(true)}
+                  disabled={saving || clearContentSaving || !canWrite || Boolean(bom.usedInMpr)}
+                  sx={{ bgcolor: '#fff' }}
+                >
+                  Clear Content
+                </Button>
+              </span>
+            </Tooltip>
             <Tooltip title={!canWrite ? writeBlockedMessage : 'Edit BOM information'}>
               <span>
                 <Button
@@ -2754,19 +3003,20 @@ export default function BomDetailPage() {
 
             <WholeBomImageCard
               bomId={bomId}
-              attachment={wholeBomImage}
+              attachments={wholeBomImages}
               saving={saving}
               actionsDisabled={!canWrite}
               onUpload={(event) => uploadAttachment(event, { scope: 'BOM', lineId: '' })}
               onOpen={openAttachment}
               onDownload={downloadAttachment}
-              onDelete={() => requestDelete({
+              onViewAll={() => setWholeBomGalleryOpen(true)}
+              onDeleteAll={() => requestDelete({
                 type: 'wholeBomImage',
                 id: wholeBomImage?.id,
-                itemName: 'Whole BOM Image',
-                label: wholeBomImage?.originalFileName || 'Whole BOM image',
-                message: <>Delete the Whole BOM image?</>,
-                warning: 'This removes the image displayed below Comments.'
+                itemName: 'Whole BOM Images',
+                label: `${wholeBomImages.length} Whole BOM image${wholeBomImages.length === 1 ? '' : 's'}`,
+                message: <>Delete all Whole BOM images?</>,
+                warning: 'This removes every Whole BOM image displayed below Comments.'
               })}
             />
           </Stack>
@@ -3154,6 +3404,23 @@ export default function BomDetailPage() {
         </DialogActions>
       </Dialog>
 
+      <WholeBomImageGalleryDialog
+        open={wholeBomGalleryOpen}
+        bomId={bomId}
+        attachments={wholeBomImages}
+        onClose={() => setWholeBomGalleryOpen(false)}
+        onOpen={openAttachment}
+        onDownload={downloadAttachment}
+        onDelete={(attachment) => requestDelete({
+          type: 'attachment',
+          id: attachment?.id,
+          itemName: 'Whole BOM Image',
+          label: attachment?.originalFileName || 'Whole BOM image',
+          message: <>Delete this Whole BOM image?</>
+        })}
+        actionsDisabled={!canWrite}
+      />
+
       <BomAttachmentImagePreviewDialog
         open={Boolean(attachmentPreview)}
         bomId={bomId}
@@ -3166,6 +3433,8 @@ export default function BomDetailPage() {
         bomId={bomId}
         line={imagePreviewLine}
         onClose={() => setImagePreviewLine(null)}
+        onDelete={removeLineImage}
+        actionsDisabled={!canWrite}
       />
 
       <Dialog open={canWrite && headerOpen} onClose={saving ? undefined : () => setHeaderOpen(false)} fullWidth maxWidth="md">
@@ -3244,6 +3513,50 @@ export default function BomDetailPage() {
         onSave={saveProductColor}
         onImageOpen={setAttachmentPreview}
       />
+
+      <Dialog
+        open={canWrite && clearContentOpen}
+        onClose={clearContentSaving ? undefined : () => setClearContentOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ fontWeight: 750, color: '#b42318' }}>Clear BOM Content?</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1.2}>
+            <Alert severity="warning">
+              This action removes the BOM content and cannot be undone.
+            </Alert>
+            <Typography variant="body2">
+              BOM <b>{bom?.bomNo || '-'}</b> — <b>{bom?.bomName || '-'}</b> will be kept, but the following content will be cleared:
+            </Typography>
+            <Box component="ul" sx={{ my: 0, pl: 3, color: 'text.secondary', fontSize: '.86rem' }}>
+              <li>BOM information/header imported from Excel</li>
+              <li>Product Colors and Child Colors</li>
+              <li>Core material lines and all Packing material lines</li>
+              <li>Packings</li>
+              <li>Attachments and images</li>
+              <li>Source Excel metadata</li>
+            </Box>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+              BOM No. and BOM Name will not be deleted. The BOM will return to DRAFT.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setClearContentOpen(false)} disabled={clearContentSaving} sx={{ textTransform: 'none' }}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={clearContent}
+            disabled={clearContentSaving}
+            sx={{ textTransform: 'none', fontWeight: 750 }}
+          >
+            {clearContentSaving ? 'Clearing...' : 'Clear BOM Content'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <ConfirmDeleteDialog
         open={canWrite && Boolean(deleteTarget)}

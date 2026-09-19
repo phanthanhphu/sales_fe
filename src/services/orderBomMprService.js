@@ -35,6 +35,7 @@ export const getBom = (id, buyerKey = '') => unwrap(apiRawClient.get(`/api/boms/
 export const createBom = (orderId, payload) => unwrap(apiRawClient.post(`/api/orders/${encodeURIComponent(orderId)}/boms`, payload, withAuth()));
 export const updateBom = (id, payload) => unwrap(apiRawClient.put(`/api/boms/${encodeURIComponent(id)}`, payload, withAuth()));
 export const deleteBom = (id) => unwrap(apiRawClient.delete(`/api/boms/${encodeURIComponent(id)}`, withAuth()));
+export const clearBomContent = (id) => unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(id)}/clear-content`, {}, withAuth()));
 export const submitBom = (id) => unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(id)}/submit`, {}, withAuth()));
 export const resubmitBom = (id) => unwrap(apiRawClient.post(`/api/boms/${encodeURIComponent(id)}/resubmit`, {}, withAuth()));
 
@@ -97,6 +98,23 @@ export const uploadBomLineImage = (bomId, lineId, file) => {
   ));
 };
 
+export const uploadBomLineImages = (bomId, lineId, files = []) => {
+  const formData = new FormData();
+  Array.from(files || []).forEach((file) => {
+    if (file) formData.append('files', file);
+  });
+  return unwrap(apiRawClient.post(
+    `/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}/images`,
+    formData,
+    withAuth()
+  ));
+};
+
+export const deleteBomLineImageById = (bomId, lineId, imageId) => unwrap(apiRawClient.delete(
+  `/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}/images/${encodeURIComponent(imageId)}`,
+  withAuth()
+));
+
 export const deleteBomLineImage = (bomId, lineId) => unwrap(apiRawClient.delete(
   `/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}/image`,
   withAuth()
@@ -115,6 +133,21 @@ export const getBomLineImageBlob = async (bomId, lineId, variant = 'thumbnail', 
 
 export const getBomLineImageObjectUrl = async (bomId, lineId, variant = 'thumbnail', version = '') => (
   URL.createObjectURL(await getBomLineImageBlob(bomId, lineId, variant, version))
+);
+
+export const getBomLineImageBlobById = async (bomId, lineId, imageId, variant = 'thumbnail', version = '') => {
+  const response = await apiRawClient.get(
+    `/api/boms/${encodeURIComponent(bomId)}/lines/${encodeURIComponent(lineId)}/images/${encodeURIComponent(imageId)}/${encodeURIComponent(variant)}`,
+    withAuth({ responseType: 'blob', params: version ? { v: version } : {} })
+  );
+  const contentType = response.headers?.['content-type'] || response.data?.type || 'application/octet-stream';
+  return response.data instanceof Blob && response.data.type
+    ? response.data
+    : new Blob([response.data], { type: contentType });
+};
+
+export const getBomLineImageObjectUrlById = async (bomId, lineId, imageId, variant = 'thumbnail', version = '') => (
+  URL.createObjectURL(await getBomLineImageBlobById(bomId, lineId, imageId, variant, version))
 );
 
 export const uploadBomAttachment = (bomId, file, options = {}) => {

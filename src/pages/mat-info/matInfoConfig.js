@@ -38,6 +38,10 @@ export const matInfoConfig = {
   // Keep the MAT_INFO dialog compact in both Add and Edit modes.
   hideFormSubtitle: true,
   refreshBeforeMutation: true,
+  // MAT Info search behaves as a live filter. Input updates immediately; the
+  // server request runs only after a short pause so typing never loses focus.
+  liveFilter: true,
+  liveFilterDebounceMs: 350,
 
   importHint:
     'System Key is auto-generated when creating/importing, starting from MI000001. Expected columns: Flex ID, Material Type, Mat Full Description, Mat Color, Mat Unit, Cur, Mat Price (W/O Tax), Short Name Supplier, Remark, Updated Date, Updated Pic and Style Desc. Blank rows are skipped. A row is treated as duplicate and skipped only when Flex ID, Material Type, Mat Full Description, Mat Color, Mat Unit, Cur, Mat Price (W/O Tax), and Short Name Supplier are all the same. A new Short Name Supplier is allowed and automatically creates a pending Vendor Code record. Edited files include Key, Row Version and Action (CREATE/UPDATE/DELETE).',
@@ -148,7 +152,8 @@ export const matInfoConfig = {
       label: 'Short Name Supplier',
       required: true,
       type: 'autocomplete',
-      freeSolo: true,
+      freeSolo: false,
+      requireSelection: true,
       optionSource: 'supplier',
       optionValue: 'shortNameSupplier',
       optionLabel: (item) => {
@@ -166,7 +171,7 @@ export const matInfoConfig = {
       },
       maxLength: 100,
       grid: 5,
-      placeholder: 'Select or enter a new supplier name'
+      placeholder: 'Select supplier from Vendor Code'
     },
     {
       name: 'updatedDate',
